@@ -1,0 +1,14 @@
+<nav class="nav">
+  <div class="container nav-inner">
+    <a routerLink="/" class="brand"><span class="logo">◈</span> AI Interview Assistant
+      @if (mode === 'live') { <span class="live-badge">LIVE AI</span> }
+      @else if (mode === 'demo') { <span class="demo-badge" title="Template answers — add an LLM key for live AI">DEMO</span> }
+      @else if (mode === 'offline') { <span class="off-badge" title="Backend unreachable">OFFLINE</span> }
+    </a>
+    <div class="links">
+      <a routerLink="/dashboard" routerLinkActive="active">Dashboard</a>
+      <a routerLink="/interview" routerLinkActive="active">Interview</a>
+      <a routerLink="/settings" routerLinkActive="active">Settings</a>
+    </div>
+  </div>
+</nav>

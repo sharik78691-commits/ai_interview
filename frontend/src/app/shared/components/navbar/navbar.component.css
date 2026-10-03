@@ -1,0 +1,12 @@
+.nav { position: sticky; top: 0; z-index: 50; backdrop-filter: blur(12px); background: rgba(11,15,23,.82); border-bottom: 1px solid var(--border); }
+.nav-inner { display: flex; align-items: center; justify-content: space-between; height: 62px; }
+.brand { font-weight: 800; font-size: 1rem; display: flex; align-items: center; gap: 8px; }
+.logo { background: var(--accent-grad); -webkit-background-clip: text; background-clip: text; color: transparent; font-size: 1.3rem; }
+.demo-badge { font-size: .65rem; font-weight: 800; letter-spacing: .08em; background: rgba(110,139,255,.15); border: 1px solid rgba(110,139,255,.4); color: #b9c6ff; padding: 2px 8px; border-radius: 999px; }
+.live-badge { font-size: .65rem; font-weight: 800; letter-spacing: .08em; background: rgba(52,211,153,.15); border: 1px solid rgba(52,211,153,.5); color: #6ee7b7; padding: 2px 8px; border-radius: 999px; }
+.off-badge { font-size: .65rem; font-weight: 800; letter-spacing: .08em; background: rgba(248,113,113,.12); border: 1px solid rgba(248,113,113,.5); color: #fca5a5; padding: 2px 8px; border-radius: 999px; }
+.links { display: flex; gap: 4px; }
+.links a { padding: 8px 14px; border-radius: 8px; font-size: .9rem; font-weight: 600; color: var(--muted); }
+.links a:hover { background: rgba(255,255,255,.06); color: var(--text); }
+.links a.active { background: rgba(110,139,255,.14); color: #c9d4ff; }
+@media (max-width: 560px) { .brand { font-size: .85rem; } .links a { padding: 8px 9px; font-size: .82rem; } }

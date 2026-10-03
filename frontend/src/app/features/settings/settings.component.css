@@ -1,0 +1,5 @@
+.page { padding: 36px 24px 60px; max-width: 720px; }
+.page h1 { font-size: 1.8rem; font-weight: 800; }
+.form { margin-top: 18px; }
+.row { display: flex; gap: 10px; align-items: center; margin-top: 20px; }
+.ok { color: var(--green); font-weight: 700; font-size: .9rem; }

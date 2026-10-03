@@ -1,0 +1,192 @@
+<div class="container page">
+  <div class="topbar">
+    <div class="left">
+      @if (live) { <span class="pill live"><span class="dot"></span>Live</span> }
+      @else { <span class="pill"><span class="dot"></span>Idle</span> }
+      <span class="timer">⏱ {{ elapsed | timeFormat }}</span>
+      <span class="pill" [class.live]="status==='listening'" [class.thinking]="status==='thinking'||status==='processing'" [class.error]="status==='error'">
+        <span class="dot"></span>{{ statusLabel }}
+      </span>
+    </div>
+    <div class="actions">
+      @if (!live) { <button class="btn-primary btn-sm" (click)="start()">● Start</button> }
+      @else { <button class="btn-ghost btn-sm" (click)="stop()">■ Stop</button> }
+      <button class="btn-ghost btn-sm" (click)="pause()">⏸ Pause/Resume</button>
+      <button class="btn-ghost btn-sm" (click)="clear()">Clear</button>
+      <button class="btn-ghost btn-sm demo" (click)="runDemo()">▶ Demo</button>
+    </div>
+  </div>
+
+  <app-error-banner [message]="error" (dismiss)="error=''"></app-error-banner>
+  @if (notice) {
+    <div class="banner warn" (click)="notice = ''">
+      @if (noticeScope === 'stt') {
+        <strong>Meeting audio problem</strong> — {{ notice }}
+      } @else {
+        <strong>AI service unavailable</strong> — {{ notice }} Showing template guidance instead.
+      }
+    </div>
+  }
+  @if (!micSupported) {
+    <div class="banner info">Speech recognition isn't supported in this browser — type questions below or use Demo mode. Chrome/Edge recommended.</div>
+  }
+
+  <div class="cols">
+    <div class="card">
+      <h3>Controls</h3>
+      <label class="lbl" for="len">Answer detail</label>
+      <select id="len" [ngModel]="responseLength" (ngModelChange)="onLengthChange($event)">
+        @for (opt of lengthOptions; track opt[0]) {
+          <option [value]="opt[0]">{{ opt[1] }}</option>
+        }
+      </select>
+      <p class="muted small hint-tight">{{ lengthHint }}</p>
+
+      <!-- ============ INTERVIEWER AUDIO (meeting / browser tab) ============ -->
+      <hr class="sep" />
+      <h4 class="block-title">Interviewer audio</h4>
+      <p class="muted small hint-tight">
+        Capture the meeting or browser tab so the AI hears the interviewer, not you.
+      </p>
+      @if (captureBlockReason) {
+        <p class="audio-status warn-reason">{{ captureBlockReason }}</p>
+      } @else if (!sttReady) {
+        <p class="audio-status warn-reason">
+          Meeting audio transcription is not configured on the server. Set STT_MODEL in
+          backend/.env, or paste the question manually.
+        </p>
+      }
+      @if (!capturingInterviewer) {
+        <button class="btn-primary btn-sm wide" (click)="startInterviewerAudio()">🎧 Select meeting audio</button>
+      } @else {
+        <button class="btn-ghost btn-sm wide" (click)="stopInterviewerAudio()">■ Stop interviewer audio</button>
+      }
+      @if (audioStatus) {
+        <p class="audio-status" [class.live]="capturingInterviewer">{{ audioStatus }}</p>
+      }
+      @if (lastInterviewerText) {
+        <p class="muted small heard">Heard: “{{ lastInterviewerText }}”</p>
+      }
+
+      <h4 class="block-title">Or paste the question</h4>
+      <textarea
+        id="manualq"
+        rows="3"
+        [(ngModel)]="manualQuestion"
+        placeholder="Paste or type the interviewer’s question here…"
+      ></textarea>
+      <div class="row wrap">
+        <button class="btn-primary btn-sm" (click)="generateAnswer()">Generate Answer</button>
+        <button class="btn-ghost btn-sm" (click)="clearManual()">Clear</button>
+        <button class="btn-ghost btn-sm" (click)="copyAnswer()" [disabled]="!guidance">
+          {{ copied ? '✓ Copied' : 'Copy Answer' }}
+        </button>
+      </div>
+
+      <h4 class="block-title">Open a meeting</h4>
+      <div class="row wrap">
+        @for (m of meetings; track m.url) {
+          <button class="btn-ghost btn-sm" (click)="openMeeting(m.url)">{{ m.name }}</button>
+        }
+      </div>
+
+      <hr class="sep" />
+      <h4 class="block-title">Your microphone</h4>
+      <label class="lbl" for="mic">Microphone</label>
+      <select id="mic" [(ngModel)]="selectedMic" (change)="onMicChange()">
+        <option value="">Default microphone</option>
+        @for (m of mics; track m.deviceId) { <option [value]="m.deviceId">{{ m.label || 'Microphone' }}</option> }
+      </select>
+      <!-- Interviewee's own mic: mute only, never used for interviewer questions -->
+      <button class="btn-ghost btn-sm wide" (click)="toggleMic()">
+        {{ micMuted ? '🔇 Unmute' : '🔊 Mute' }}
+      </button>
+      <p class="muted small hint-tight">{{ micStatusLabel }}</p>
+
+      <label class="lbl" for="manual">Ask manually (fallback)</label>
+      <div class="row">
+        <input id="manual" type="text" [(ngModel)]="manual" (keyup.enter)="sendManual()" placeholder="Type an interview question…">
+        <button class="btn-primary btn-sm" (click)="sendManual()">Send</button>
+      </div>
+      <button class="btn-ghost btn-sm wide" (click)="simulateLine()">Feed sample transcript</button>
+      <p class="muted small hint">Tip: questions ending in “?” or starting with what/how/why auto-trigger AI analysis after a short pause.</p>
+    </div>
+
+    <div class="card">
+      <h3>Transcript</h3>
+      <!-- Interviewer audio (meeting/tab) recognised by the backend STT -->
+      @if (capturingInterviewer || lastInterviewerText) {
+        <div class="entry iv" [class.q]="lastInterviewerText.includes('?')">
+          <span class="who">🎧 Interviewer (meeting audio)</span>
+          <p>{{ lastInterviewerText || 'Listening for the interviewer’s question…' }}</p>
+        </div>
+      }
+      <div class="transcript">
+        @for (e of entries; track $index) {
+          <div class="entry" [class.q]="e.isQuestion">
+            <span class="who">{{ e.isQuestion ? '❓ Interviewer' : 'Interviewer' }}</span>
+            <p>{{ e.text }}</p>
+          </div>
+        } @empty {
+          <p class="muted small">No transcript yet. Press Start + Demo, or type a question.</p>
+        }
+        @if (interim) { <div class="entry interim"><span class="who">Listening…</span><p>{{ interim }}</p></div> }
+      </div>
+    </div>
+
+    <div class="card guidance" [class.flash]="flash">
+      <h3>✨ AI Guidance</h3>
+      @if (thinking) {
+        <div class="thinking"><span class="spin"></span> AI is composing a {{ responseLength }} answer…</div>
+      }
+      @if (guidance) {
+        <div class="qcard">
+          <span class="tag">{{ guidance.questionType }}</span>
+          <span class="tag lvl">{{ guidance.responseLength || responseLength }}</span>
+          <p class="qtext">{{ guidance.question }}</p>
+        </div>
+        <h4>Answer points</h4>
+        <ul class="pts">@for (p of guidance.answerPoints; track $index) { <li>{{ p }}</li> } </ul>
+        @if (guidance.keyTakeaways?.length) {
+          <h4>Key takeaways</h4>
+          <ul class="pts takeaways">
+            @for (t of guidance.keyTakeaways; track $index) { <li>{{ t }}</li> }
+          </ul>
+        }
+        @if (guidance.example) {
+          <h4>Real-world example</h4>
+          <p class="example">{{ guidance.example }}</p>
+        }
+        @if (guidance.star) {
+          <h4>STAR story</h4>
+          @if (isStarObject()) {
+            <ul class="pts star-list">
+              @for (e of starEntries(); track $index) { <li><strong>{{ e[0] }}:</strong> {{ e[1] }}</li> }
+            </ul>
+          } @else {
+            <p class="star">{{ guidance.star }}</p>
+          }
+        }
+        @if (guidance.codeHint) {
+          <h4>Code hint</h4>
+          <pre class="code">{{ guidance.codeHint }}</pre>
+        }
+        @if (guidance.followUpQuestions.length) {
+          <h4> likely follow-ups</h4>
+          <ul class="follow">@for (f of guidance.followUpQuestions; track $index) { <li>{{ f }}</li> } </ul>
+        }
+      } @else {
+        <p class="muted small">Guidance appears here once a question is detected. Try the Demo button to see it in action.</p>
+      }
+      @if (pastHistory.length) {
+        <h4 class="hist-title">Earlier this session ({{ pastHistory.length }})</h4>
+        @for (h of pastHistory; track $index) {
+          <details class="hist">
+            <summary><span class="tag sm">{{ h.guidance.questionType }}</span> {{ h.question }}</summary>
+            <ul class="pts">@for (p of h.guidance.answerPoints; track $index) { <li>{{ p }}</li> } </ul>
+          </details>
+        }
+      }
+    </div>
+  </div>
+</div>

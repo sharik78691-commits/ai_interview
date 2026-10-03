@@ -1,0 +1,52 @@
+<section class="hero container">
+  <div class="hero-badge">Real-time interview copilot</div>
+  <h1>AI Interview Assistant<br><span class="grad">Your real-time AI companion</span></h1>
+  <p class="sub">Resume-aware guidance for technical, behavioral and coding questions — live transcription, STAR answers and code hints while you talk.</p>
+  <div class="cta">
+    <a routerLink="/dashboard" class="btn-primary">Get Started →</a>
+    <button class="btn-ghost" (click)="tryDemo()">▶ Try Demo</button>
+  </div>
+  <div class="hero-stats">
+    <div><strong>3</strong><span>easy steps</span></div>
+    <div><strong>6</strong><span>core features</span></div>
+    <div><strong>100%</strong><span>browser mic privacy</span></div>
+  </div>
+</section>
+
+<section class="container section">
+  <h2>How it works</h2>
+  <div class="grid3">
+    <div class="card"><div class="step">1</div><h3>Upload resume + role</h3><p class="muted">Add your resume (PDF/DOCX/TXT) and paste the job description on the dashboard.</p></div>
+    <div class="card"><div class="step">2</div><h3>Go live</h3><p class="muted">Grant mic access. The app transcribes the interviewer in real time and detects questions.</p></div>
+    <div class="card"><div class="step">3</div><h3>Get guidance</h3><p class="muted">Receive bullet answers, STAR stories, code hints and follow-ups tuned to your background.</p></div>
+  </div>
+</section>
+
+<section class="container section">
+  <h2>Key features</h2>
+  <div class="feat-grid">
+    <div class="card"><h3>⚙ Technical depth</h3><p class="muted">System design, DSA and tradeoff-first answers with follow-up anticipation.</p></div>
+    <div class="card"><h3>💬 Behavioral STAR</h3><p class="muted">Situation-Task-Action-Result scaffolds mapped to your real experience.</p></div>
+    <div class="card"><h3>📄 Resume-aware</h3><p class="muted">Every suggestion references your skills and the target role.</p></div>
+    <div class="card"><h3>⚡ Real-time</h3><p class="muted">WebSocket streaming: question in, guidance back in seconds.</p></div>
+    <div class="card"><h3>🔒 Privacy-first</h3><p class="muted">Transcripts stay local; only detected questions are sent to the backend.</p></div>
+    <div class="card"><h3>🎙 Browser mic</h3><p class="muted">No installs — uses the Web Speech API plus typed fallback. Chrome recommended.</p></div>
+  </div>
+</section>
+
+<section class="container section">
+  <div class="banner info">🔒 Privacy notice: microphone audio is transcribed locally in your browser. Only the text of detected questions (plus your resume and job description) is sent to the local backend at <code>http://localhost:8000</code> for guidance.</div>
+</section>
+
+<section class="container section">
+  <h2>FAQ</h2>
+  <details class="card faq"><summary>Do I need a microphone?</summary><p class="muted">No. You can type questions manually or run the one-click demo simulation.</p></details>
+  <details class="card faq"><summary>Which browsers work best?</summary><p class="muted">Chrome or Edge — they support the Web Speech recognition API. Other browsers fall back to typing.</p></details>
+  <details class="card faq"><summary>Where does my data go?</summary><p class="muted">Resume text and job description are stored in your browser's localStorage and sent to your own local backend only.</p></details>
+  <details class="card faq"><summary>Can I use it in a real interview?</summary><p class="muted">Check the interview rules first. It's designed as a practice and preparation companion.</p></details>
+  <details class="card faq"><summary>Does it write code for me?</summary><p class="muted">It gives hints, complexity notes and skeletons — you still own the final answer.</p></details>
+</section>
+
+<footer class="container foot2">
+  <a routerLink="/dashboard" class="btn-primary">Prepare for your next interview →</a>
+</footer>

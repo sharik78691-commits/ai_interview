@@ -1,0 +1,11 @@
+.page { padding: 36px 24px 60px; }
+.page h1 { font-size: 1.8rem; font-weight: 800; }
+.drop { margin-top: 14px; border: 1.5px dashed var(--border-strong); border-radius: 12px; padding: 28px 18px; text-align: center; color: var(--muted); transition: border .15s, background .15s; }
+.drop.over { border-color: var(--accent); background: rgba(110,139,255,.07); }
+.pick { cursor: pointer; margin-top: 10px; }
+.ok { color: var(--green); font-weight: 700; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.chip { font-size: .78rem; background: rgba(110,139,255,.12); border: 1px solid rgba(110,139,255,.3); color: #c3d0ff; padding: 4px 11px; border-radius: 999px; }
+.exp { margin: 12px 0 0 18px; }
+.wide { width: 100%; margin-top: 18px; }
+.banner { margin-top: 14px; }

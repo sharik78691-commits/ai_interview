@@ -1,0 +1,42 @@
+<div class="container page">
+  <h1>Prepare your interview</h1>
+  <p class="muted">Upload your resume and paste the job description. The AI tunes every answer to your background.</p>
+  <app-error-banner [message]="error" (dismiss)="error=''"></app-error-banner>
+  <div class="banner info">🎙 Browser mic note: live transcription uses the Web Speech API (best in Chrome/Edge). You can always type questions manually or use Demo mode.</div>
+
+  <div class="grid2" style="margin-top:18px">
+    <div class="card">
+      <h3>📄 Resume</h3>
+      <p class="muted small">PDF, DOCX or TXT</p>
+      <div class="drop" [class.over]="dragOver" (dragover)="$event.preventDefault(); dragOver=true" (dragleave)="dragOver=false" (drop)="onDrop($event)">
+        @if (uploading) {
+          <p>Uploading…</p>
+        } @else if (resumeData) {
+          <p class="ok">✓ Uploaded{{ resumeData.name ? ' — ' + resumeData.name : '' }}</p>
+        } @else {
+          <p>Drag &amp; drop your resume here, or</p>
+          <label class="btn-ghost btn-sm pick">Choose file<input type="file" hidden accept=".pdf,.docx,.txt" (change)="onFilePicked($event)"></label>
+        }
+      </div>
+      @if (resumeData?.skills?.length) {
+        <div class="chips">@for (s of resumeData!.skills.slice(0,12); track s) { <span class="chip">{{ s }}</span> } </div>
+      }
+      @if (resumeData?.experience?.length) {
+        <ul class="exp">@for (e of resumeData!.experience.slice(0,4); track e) { <li class="small muted">{{ e }}</li> } </ul>
+      }
+      <label class="lbl" for="resumeText">Resume text (editable)</label>
+      <textarea id="resumeText" [(ngModel)]="resumeText" rows="7" placeholder="Paste resume text here as an alternative to file upload…"></textarea>
+    </div>
+
+    <div class="card">
+      <h3>💼 Target role</h3>
+      <label class="lbl" for="position">Position</label>
+      <input id="position" type="text" [(ngModel)]="targetPosition" placeholder="e.g. Senior Backend Engineer">
+      <label class="lbl" for="jd">Job description ({{ jobDescription.length }} chars)</label>
+      <textarea id="jd" [(ngModel)]="jobDescription" rows="11" placeholder="Paste the full job description…"></textarea>
+      <button class="btn-primary wide" (click)="prepare()" [disabled]="preparing">
+        {{ preparing ? 'Preparing…' : 'Prepare Interview →' }}
+      </button>
+    </div>
+  </div>
+</div>

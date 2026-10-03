@@ -1,0 +1,20 @@
+.hero { text-align: center; padding: 72px 24px 40px; }
+.hero-badge { display: inline-block; font-size: .75rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: #b9c6ff; border: 1px solid rgba(110,139,255,.4); background: rgba(110,139,255,.1); padding: 6px 14px; border-radius: 999px; margin-bottom: 20px; }
+.hero h1 { font-size: clamp(2rem, 5vw, 3.4rem); font-weight: 800; line-height: 1.12; letter-spacing: -0.02em; }
+.grad { background: var(--accent-grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.sub { color: var(--muted); max-width: 640px; margin: 18px auto 0; font-size: 1.05rem; }
+.cta { display: flex; gap: 12px; justify-content: center; margin-top: 28px; flex-wrap: wrap; }
+.hero-stats { display: flex; gap: 36px; justify-content: center; margin-top: 36px; }
+.hero-stats div { display: flex; flex-direction: column; }
+.hero-stats strong { font-size: 1.5rem; }
+.hero-stats span { color: var(--muted); font-size: .85rem; }
+.section { padding: 36px 24px; }
+.section h2 { font-size: 1.5rem; font-weight: 800; margin-bottom: 18px; }
+.grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.feat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.step { width: 34px; height: 34px; border-radius: 10px; background: var(--accent-grad); display: flex; align-items: center; justify-content: center; font-weight: 800; margin-bottom: 12px; }
+.faq { margin-bottom: 10px; }
+.faq summary { cursor: pointer; font-weight: 700; }
+.faq p { margin-top: 8px; }
+.foot2 { text-align: center; padding: 30px 24px 70px; }
+@media (max-width: 860px) { .grid3, .feat-grid { grid-template-columns: 1fr; } }
