@@ -73,11 +73,15 @@ def csrf_tokens_match(cookie_value: str | None, header_value: str | None) -> boo
 
 def _cookie_kwargs(max_age: int) -> dict:
     settings = get_settings()
+    # SameSite=None is required for cross-origin WebSocket auth in production,
+    # where the frontend (www.oyeinterview.com) connects to the backend
+    # (ai-interview-1-309j.onrender.com). None requires Secure (HTTPS).
+    samesite = "none" if settings.cookie_secure else settings.cookie_samesite
     kwargs: dict = {
         "max_age": max_age,
         "httponly": True,
         "secure": settings.cookie_secure,
-        "samesite": settings.cookie_samesite,
+        "samesite": samesite,
         "path": "/",
     }
     if settings.cookie_domain:
