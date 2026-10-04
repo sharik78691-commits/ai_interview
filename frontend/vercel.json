@@ -4,6 +4,7 @@
   "outputDirectory": "dist/frontend/browser",
   "framework": null,
   "rewrites": [
+    { "source": "/api/(.*)", "destination": "https://ai-interview-1-309j.onrender.com/api/$1" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
