@@ -1,12 +1,12 @@
 <div class="container page">
   <h1>Prepare your interview</h1>
-  <p class="muted">Upload your resume and paste the job description. The AI tunes every answer to your background.</p>
+  <p class="muted">Optionally upload your resume and paste the job description — the AI tunes every answer to your background. You can also start directly without them.</p>
   <app-error-banner [message]="error" (dismiss)="error=''"></app-error-banner>
   <div class="banner info">🎙 Browser mic note: live transcription uses the Web Speech API (best in Chrome/Edge). You can always type questions manually or use Demo mode.</div>
 
   <div class="grid2" style="margin-top:18px">
     <div class="card">
-      <h3>📄 Resume</h3>
+      <h3>📄 Resume <span class="opt-tag">optional</span></h3>
       <p class="muted small">PDF, DOCX or TXT</p>
       <div class="drop" [class.over]="dragOver" (dragover)="$event.preventDefault(); dragOver=true" (dragleave)="dragOver=false" (drop)="onDrop($event)">
         @if (uploading) {
@@ -29,7 +29,7 @@
     </div>
 
     <div class="card">
-      <h3>💼 Target role</h3>
+      <h3>💼 Target role <span class="opt-tag">optional</span></h3>
       <label class="lbl" for="position">Position</label>
       <input id="position" type="text" [(ngModel)]="targetPosition" placeholder="e.g. Senior Backend Engineer">
       <label class="lbl" for="jd">Job description ({{ jobDescription.length }} chars)</label>
@@ -37,6 +37,7 @@
       <button class="btn-primary wide" (click)="prepare()" [disabled]="preparing">
         {{ preparing ? 'Preparing…' : 'Prepare Interview →' }}
       </button>
+      <p class="muted small" style="margin-top:8px">Resume and target role are optional — you can start the interview right away.</p>
     </div>
   </div>
 </div>

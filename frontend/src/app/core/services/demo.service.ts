@@ -57,7 +57,16 @@ export class DemoService {
         'Handle duplicates and return indices, not values.',
         'State complexity tradeoff and edge cases: no solution, negative numbers.',
       ],
-      codeHint: 'seen = {}\nfor i, x in enumerate(nums):\n    if target - x in seen:\n        return [seen[target - x], i]\n    seen[x] = i',
+      codeHint:
+        'def two_sum(nums, target):\n' +
+        '    """Return indices of the two numbers that add up to target."""\n' +
+        '    seen = {}  # value -> index\n' +
+        '    for i, x in enumerate(nums):\n' +
+        '        if target - x in seen:\n' +
+        '            return [seen[target - x], i]\n' +
+        '        seen[x] = i\n' +
+        '    return []  # no valid pair\n\n' +
+        '# Time: O(n)  Space: O(n)',
       followUpQuestions: ['What if the array is sorted?', 'How would you handle all-pairs variants?'],
     },
   ];

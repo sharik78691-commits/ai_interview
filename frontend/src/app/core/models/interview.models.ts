@@ -54,6 +54,8 @@ export interface AppSettings {
   responseLength: ResponseLength;
   theme: string;
   micId: string;
+  /** AI Guidance text size in px (user-adjustable, persisted). */
+  guidanceFontSize: number;
 }
 
 export const RESPONSE_LENGTH_LABELS: Record<ResponseLength, string> = {

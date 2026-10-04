@@ -1,0 +1,44 @@
+<section class="auth-wrap">
+  <div class="auth-card card">
+    <div class="auth-head">
+      <span class="logo">◈</span>
+      <h1>Create your account</h1>
+      <p class="muted">Start preparing for your next interview</p>
+    </div>
+
+    @if (error) { <div class="banner error">{{ error }}</div> }
+
+    <form (ngSubmit)="submit()" #f="ngForm">
+      <label class="field">
+        <span>Name</span>
+        <input type="text" name="name" [(ngModel)]="name" autocomplete="name" placeholder="Your name" />
+      </label>
+      <label class="field">
+        <span>Email</span>
+        <input type="email" name="email" [(ngModel)]="email" autocomplete="email" placeholder="you@example.com" required />
+      </label>
+      <label class="field">
+        <span>Password</span>
+        <input type="password" name="password" [(ngModel)]="password" autocomplete="new-password" placeholder="At least 8 characters" required />
+      </label>
+      <label class="field">
+        <span>Confirm Password</span>
+        <input type="password" name="confirm" [(ngModel)]="confirm" autocomplete="new-password" placeholder="Repeat password" required />
+      </label>
+
+      <button type="submit" class="btn-primary full" [disabled]="loading">
+        {{ loading ? 'Creating account…' : 'Create Account' }}
+      </button>
+    </form>
+
+    <p class="auth-foot muted">
+      Already have an account? <a routerLink="/login">Sign in</a>
+    </p>
+
+    <div class="divider"><span>OR</span></div>
+
+    <a class="btn-google" [href]="googleUrl">
+      <span class="g-icon" aria-hidden="true">G</span> Continue with Google
+    </a>
+  </div>
+</section>

@@ -6,9 +6,22 @@
       @else if (mode === 'offline') { <span class="off-badge" title="Backend unreachable">OFFLINE</span> }
     </a>
     <div class="links">
-      <a routerLink="/dashboard" routerLinkActive="active">Dashboard</a>
-      <a routerLink="/interview" routerLinkActive="active">Interview</a>
-      <a routerLink="/settings" routerLinkActive="active">Settings</a>
+      @if (user) {
+        <a routerLink="/dashboard" routerLinkActive="active">Dashboard</a>
+        <a routerLink="/interview" routerLinkActive="active">Interview</a>
+        <a routerLink="/settings" routerLinkActive="active">Settings</a>
+      }
+      <!-- Dark / white mode toggle. Persists in settings. -->
+      <button class="theme-btn" (click)="toggleTheme()" [title]="theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'" [attr.aria-label]="theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'">
+        @if (theme === 'light') { <span aria-hidden="true">🌙</span> }
+        @else { <span aria-hidden="true">☀️</span> }
+      </button>
+      @if (user) {
+        <span class="user-chip" [title]="user.email">{{ user.name || user.email }}</span>
+        <button class="logout-btn" (click)="logout()">Sign out</button>
+      } @else {
+        <a routerLink="/login" routerLinkActive="active" class="signin-link">Sign in</a>
+      }
     </div>
   </div>
 </nav>

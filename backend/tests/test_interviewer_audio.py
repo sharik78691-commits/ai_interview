@@ -16,6 +16,14 @@ from app.providers.stt.provider import (
 )
 
 
+def _auth(client) -> None:
+    """Register a user so the authenticated WebSocket accepts the connection."""
+    client.post(
+        "/api/auth/register",
+        json={"email": "ws-audio@example.com", "password": "Passw0rd123", "name": "WS"},
+    )
+
+
 def _fake_guidance() -> AIInterviewResponse:
     return AIInterviewResponse(
         question="Can you explain the Saga pattern?",
@@ -206,6 +214,7 @@ class TestAudioSniffing:
         _mocked_ai(ai_cls)
 
         with TestClient(app) as client:
+            _auth(client)
             with client.websocket_connect("/ws/interview") as ws:
                 ws.receive_json()
                 # Client claims webm, bytes are actually WAV.
@@ -234,6 +243,7 @@ class TestAudioSniffing:
         _mocked_ai(ai_cls)
 
         with TestClient(app) as client:
+            _auth(client)
             with client.websocket_connect("/ws/interview") as ws:
                 ws.receive_json()
                 ws.send_json({"type": "interviewer_audio_start"})
@@ -388,6 +398,7 @@ class TestInterviewerQuestionFlow:
         ai_cls.return_value.last_warning = None
 
         with patch("app.main.app"), TestClient(app) as client:
+            _auth(client)
             with client.websocket_connect("/ws/interview") as ws:
                 ws.receive_json()  # handshake status
                 ws.send_json({"type": "interviewer_audio_start", "mimeType": "audio/webm"})
@@ -424,6 +435,7 @@ class TestInterviewerQuestionFlow:
         _mocked_ai(ai_cls)
 
         with patch("app.main.app"), TestClient(app) as client:
+            _auth(client)
             with client.websocket_connect("/ws/interview") as ws:
                 ws.receive_json()
                 ws.send_json(
@@ -463,6 +475,7 @@ class TestInterviewerQuestionFlow:
         ai_cls.return_value.last_warning = None
 
         with patch("app.main.app"), TestClient(app) as client:
+            _auth(client)
             with client.websocket_connect("/ws/interview") as ws:
                 ws.receive_json()
                 ws.send_json({"type": "interviewer_audio_start"})

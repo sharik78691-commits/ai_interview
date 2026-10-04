@@ -1,0 +1,42 @@
+<section class="auth-wrap">
+  <div class="auth-card card">
+    <div class="auth-head">
+      <span class="logo">◈</span>
+      <h1>AI Interview Assistant</h1>
+      <p class="muted">Sign in to continue</p>
+    </div>
+
+    @if (info) { <div class="banner info">{{ info }}</div> }
+    @if (error) { <div class="banner error">{{ error }}</div> }
+
+    <a class="btn-google" [href]="googleUrl">
+      <span class="g-icon" aria-hidden="true">G</span> Continue with Google
+    </a>
+
+    <div class="divider"><span>OR</span></div>
+
+    <form (ngSubmit)="submit()" #f="ngForm">
+      <label class="field">
+        <span>Email</span>
+        <input type="email" name="email" [(ngModel)]="email" autocomplete="email" placeholder="you@example.com" required />
+      </label>
+      <label class="field">
+        <span>Password</span>
+        <input type="password" name="password" [(ngModel)]="password" autocomplete="current-password" placeholder="••••••••" required />
+      </label>
+
+      <button type="submit" class="btn-primary full" [disabled]="loading">
+        {{ loading ? 'Signing in…' : 'Sign In' }}
+      </button>
+    </form>
+
+    <div class="auth-links">
+      <a routerLink="/forgot-password">Forgot password?</a>
+    </div>
+
+    <p class="auth-foot muted">
+      Don't have an account?
+      <a routerLink="/register">Create account</a>
+    </p>
+  </div>
+</section>

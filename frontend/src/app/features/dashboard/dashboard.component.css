@@ -9,3 +9,10 @@
 .exp { margin: 12px 0 0 18px; }
 .wide { width: 100%; margin-top: 18px; }
 .banner { margin-top: 14px; }
+/* "optional" tag next to the Resume / Target role headings. */
+.opt-tag {
+  font-size: .62rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--muted2); background: rgba(110,139,255,.1);
+  border: 1px solid var(--border-strong); border-radius: 999px;
+  padding: 2px 8px; margin-left: 6px; vertical-align: middle;
+}

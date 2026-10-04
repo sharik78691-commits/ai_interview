@@ -16,10 +16,12 @@ BASE_SCHEMA = """{"question": str, "questionType": "technical|behavioral|coding|
 LENGTH_RULES: dict[str, str] = {
     "short": """- answerPoints: 3-4 SHORT bullets (max ~12 words each). Rapid-fire mode.
 - example: null. keyTakeaways: 1-2 items. followUpQuestions: 1-2 items.
-- The candidate needs a quick mental cue, not an essay.""",
+- The candidate needs a quick mental cue, not an essay.
+- For CODING questions, codeHint MUST still contain the COMPLETE, runnable solution (see CODE RULES).""",
     "medium": """- answerPoints: 5-7 bullets, each 1-2 sentences (15-35 words). Structure the answer clearly.
 - example: 1 short concrete example (2-3 sentences) grounded in the candidate's stack, or null.
-- keyTakeaways: 2-3 items. followUpQuestions: 2-3 items.""",
+- keyTakeaways: 2-3 items. followUpQuestions: 2-3 items.
+- For CODING questions, codeHint MUST contain the COMPLETE, runnable solution (see CODE RULES).""",
     "long": """You are acting as a SENIOR ENGINEER / SENIOR ANALYST mentoring the candidate. Be thorough and specific.
 - answerPoints: 8-12 bullets grouped in this logical order:
   1) Definition & core concept
@@ -30,15 +32,24 @@ LENGTH_RULES: dict[str, str] = {
 - Each bullet: 20-45 words with concrete technical substance (class names, patterns, protocols, metrics). No filler like "explain it clearly".
 - example: a DETAILED real-world scenario (4-6 sentences) referencing services, scale, and outcomes.
 - keyTakeaways: 3-5 crisp one-liners.
-- followUpQuestions: 3-5 sharp interviewer probes at increasing depth.""",
+- followUpQuestions: 3-5 sharp interviewer probes at increasing depth.
+- For CODING questions, codeHint MUST contain the COMPLETE, runnable solution (see CODE RULES).""",
 }
 
 COMMON_RULES = """RULES:
 - Respond with STRICT JSON only. No markdown fences, no preamble, no commentary.
 - Every bullet must be tailored to the candidate's ACTUAL resume experience and the target job description. Reference their real stack (languages, frameworks, cloud, domains) explicitly.
-- Include "star" only for behavioral questions. Include "codeHint" only for coding questions.
+- Include "star" only for behavioral questions. Include "codeHint" ONLY for coding questions — and for coding questions it must NEVER be null, at ANY depth level (short, medium, long).
 - Never invent facts about the candidate that are not in the resume; speak in guidance terms ("frame it around your X experience").
-- Set responseLength to the requested level."""
+- Set responseLength to the requested level.
+
+CODE RULES (apply whenever the question is a programming/coding question, at EVERY depth level):
+- codeHint MUST contain the COMPLETE, working solution to the exact problem asked — not pseudo-code, not a one-line sketch.
+- Write real, runnable code in the language that best fits the question (default to the candidate's primary language from the resume; otherwise Python).
+- Include: the full function/class signature, the algorithm body, and a short inline comment for the key step.
+- Add the time and space complexity as a trailing comment (e.g. "# Time: O(n), Space: O(1)").
+- Keep it self-contained and copy-paste ready. Use "\\n" for line breaks inside the JSON string.
+- Even for SHORT depth, the code must be complete and correct — only the surrounding prose is shortened."""
 
 
 def build_system_prompt(response_length: str = "medium") -> str:
@@ -187,9 +198,21 @@ class MockLLMProvider(LLMProvider):
                 "Mention how you would unit test this and what you'd assert.",
             ]
             example = None
+            # A complete, runnable solution — not pseudo-code. The exact problem
+            # varies, so this is a correct, self-contained template the candidate
+            # can adapt, with complexity noted.
             code_hint = (
-                "Pseudo: def solve(...):  # handle empty input, then iterate; "
-                "track best with hash map O(n)."
+                "def solve(nums):\n"
+                "    \"\"\"Return the answer for the given input.\"\"\"\n"
+                "    if not nums:\n"
+                "        return None  # handle the empty-input edge case\n"
+                "    seen = {}  # value -> index, for O(1) lookups\n"
+                "    for i, n in enumerate(nums):\n"
+                "        if n in seen:\n"
+                "            return [seen[n], i]\n"
+                "        seen[n] = i\n"
+                "    return None\n\n"
+                "# Time: O(n)  Space: O(n)"
             )
         elif qtype == "general":
             core = [

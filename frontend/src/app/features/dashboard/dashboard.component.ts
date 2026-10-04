@@ -54,23 +54,16 @@ export class DashboardComponent {
 
   prepare(): void {
     this.error = '';
-    if (!this.resumeText.trim() || !this.jobDescription.trim()) {
-      this.error = 'Please provide both resume text and a job description.';
-      return;
-    }
+    // Resume and target role are OPTIONAL — the user can start an interview
+    // directly without providing either.
     this.preparing = true;
     this.resumeService.prepareInterview(this.resumeText.trim(), this.jobDescription.trim()).subscribe({
       next: () => {
         this.preparing = false;
         this.router.navigate(['/interview']);
       },
-      error: (err) => {
+      error: () => {
         this.preparing = false;
-        // Validation error (e.g. text too short): stay here and tell the user.
-        if (err?.status === 422) {
-          this.error = 'Resume and job description must each be at least 50 characters. Paste more detail or upload your resume file.';
-          return;
-        }
         // Backend down: persist locally and still enter interview (HTTP fallback / demo guidance later).
         this.resumeService.saveResumeText(this.resumeText.trim());
         this.resumeService.saveJobDescription(this.jobDescription.trim());

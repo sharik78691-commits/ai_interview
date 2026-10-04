@@ -3,7 +3,10 @@ import { Injectable } from '@angular/core';
 import { Observable, map, tap } from 'rxjs';
 import { AIInterviewResponse, ResumeData } from '../models/interview.models';
 
-const BASE = 'http://localhost:8000';
+// Relative base: the dev-server proxy forwards /api to the backend, and in
+// production the API is same-origin. This keeps the session cookie same-origin
+// (no CORS credential juggling) and avoids hard-coded hosts.
+const BASE = '';
 
 /** Shape returned by GET /api/health. */
 export interface HealthInfo {
@@ -72,6 +75,17 @@ export class ResumeService {
 
   saveJobDescription(jd: string): void {
     localStorage.setItem('aia_jd', jd);
+  }
+
+  /**
+   * Remove all locally stored resume / job-description / demo data.
+   * Called on logout so the next user on this browser starts clean.
+   */
+  clearStoredData(): void {
+    localStorage.removeItem('aia_resumeText');
+    localStorage.removeItem('aia_jd');
+    localStorage.removeItem('aia_resumeData');
+    localStorage.removeItem('aia_demo');
   }
 
   prepareInterview(

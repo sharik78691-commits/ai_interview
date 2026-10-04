@@ -9,9 +9,10 @@ interfaces so persistence can be added later.
 ```
 ┌────────────────────── Angular 20 SPA (:4200) ──────────────────────┐
 │ landing → dashboard → interview (+ settings)                       │
-│ core/services: AudioService, TranscriptionService,                 │
-│   QuestionDetectorService, InterviewWsService, ResumeService,      │
-│   SettingsService, DemoService                                     │
+│ core/services: AudioService (candidate mic),                       │
+│   InterviewerAudioService (meeting/tab audio → WAV clips),         │
+│   TranscriptionService, QuestionDetectorService,                   │
+│   InterviewWsService, ResumeService, SettingsService, DemoService  │
 │ speech/: SpeechToTextProvider iface → WebSpeechProvider            │
 │   (swap for server-STT or desktop-audio later, UI untouched)       │
 └──────────────┬───────────────────────────────┬─────────────────────┘
@@ -19,12 +20,15 @@ interfaces so persistence can be added later.
 ┌──────────────▼───────────────────────────────▼─────────────────────┐
 │ FastAPI (uvicorn :8000), CORS → :4200                              │
 │ api/: health, resume (upload), interview (prepare/context/analyze),│
-│   websocket (accept → QuestionBuffer → AIService → ai_guidance)    │
+│   websocket (accept → QuestionBuffer → AIService → ai_guidance;    │
+│   binary audio → sniff_audio → STTProvider → QuestionBuffer)       │
 │ services/: ResumeService, QuestionService(QuestionBuffer),         │
-│   AIService (session ctx + LLM call), TranscriptionService (stub)   │
+│   AIService (session ctx + LLM call), TranscriptionService         │
+│   (per-connection transcript registry)                             │
 │ providers/llm: LLMProvider → MockLLMProvider |                     │
 │   OpenAICompatibleLLMProvider (strict-JSON, mock fallback)         │
-│ providers/stt: STTProvider → MockSTTProvider (browser does MVP)    │
+│ providers/stt: STTProvider → GroqWhisperSTTProvider (Whisper via   │
+│   OpenAI-compatible /audio/transcriptions) | MockSTTProvider       │
 │ models/: ResumeData, AIInterviewResponse (validated), interview ctx │
 │ core/: Settings (env), logging                                     │
 └────────────────────────────────────────────────────────────────────┘
@@ -48,17 +52,23 @@ on-device guidance so the UI stays demonstrable.
 
 **Question detection (both sides, same rules):** fragments accumulate until a
 flush: text ending in `?`, or >120 pending chars, or debounce expiry; `is_question`
-requires a `?` or leading wh-word/modal + ≥4 words. This avoids an LLM call per
-partial transcript.
+requires a `?` (≥3 words) or a leading wh-word/modal with >20 chars and ≥4 words.
+Interviewer-audio clips are already cut at pauses, so `push_complete()` treats any
+substantial utterance (≥4 words or ≥25 chars) as a finished prompt. This avoids an
+LLM call per partial transcript.
 
 ## Decisions
 
 - **No DB:** MVP session only. `InterviewRepository`-style seam = `_context` dict
   server-side + `history$` client-side; add Postgres later without touching WS schema.
-- **Browser STT for MVP:** avoids native audio entirely; `SpeechToTextProvider`
-  interface means desktop system-audio is a new provider, not a rewrite.
+- **Browser STT for the candidate mic, server STT for meeting audio:** the Web
+  Speech API only accepts microphone input, so the candidate's own voice is
+  transcribed in-browser via `SpeechToTextProvider`. Meeting/tab audio cannot be
+  transcribed locally, so it is streamed to the backend and transcribed by
+  `STTProvider` (Whisper). Both interfaces mean desktop system-audio is a new
+  provider, not a rewrite.
 - **Strict-JSON Pydantic validation:** every AI reply must parse as
-  `AIInterviewResponse{question, questionType, answerPoints[1..], star?, codeHint?, followUpQuestions[]}`; OpenAI path strips code fences and falls back to mock.
+  `AIInterviewResponse{question, questionType, answerPoints[1..], star?, codeHint?, example?, keyTakeaways[], followUpQuestions[], responseLength}`; OpenAI path strips code fences and falls back to mock.
 - **Demo-first:** mock LLM + scripted `DemoService` sequences keep the whole UI
   testable with zero keys; `demo_mode = !LLM_API_KEY` unless overridden.
 

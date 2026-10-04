@@ -9,7 +9,7 @@ import {
   ResponseLength,
   TranscriptEntry,
 } from '../../core/models/interview.models';
-import { AudioService } from '../../core/services/audio.service';
+import { FONT_SIZE_OPTIONS, MAX_FONT_SIZE, MIN_FONT_SIZE } from '../../core/services/settings.service';
 import { DemoService } from '../../core/services/demo.service';
 import { InterviewerAudioService } from '../../core/services/interviewer-audio.service';
 import { InterviewWsService } from '../../core/services/interview-ws.service';
@@ -36,7 +36,6 @@ export class InterviewComponent implements OnInit, OnDestroy {
   sttReady = false;
   private demo = inject(DemoService);
   private settings = inject(SettingsService);
-  audio = inject(AudioService);
 
   entries: TranscriptEntry[] = [];
   interim = '';
@@ -46,10 +45,7 @@ export class InterviewComponent implements OnInit, OnDestroy {
   notice = '';
   flash = false;
   error = '';
-  manual = '';
   micSupported = true;
-  mics: MediaDeviceInfo[] = [];
-  selectedMic = '';
   /** Answer depth the user picked for the next question. */
   responseLength: ResponseLength = 'medium';
   readonly lengthOptions = Object.entries(RESPONSE_LENGTH_LABELS) as Array<[
@@ -58,6 +54,13 @@ export class InterviewComponent implements OnInit, OnDestroy {
   ]>;
   /** Loading indicator while the AI composes a long answer. */
   thinking = false;
+
+  // ------------------------------------------------------- guidance text size
+  /** AI Guidance body text size in px (user-adjustable, persisted). */
+  guidanceFontSize = 15;
+  readonly fontSizeOptions = FONT_SIZE_OPTIONS;
+  readonly minFontSize = MIN_FONT_SIZE;
+  readonly maxFontSize = MAX_FONT_SIZE;
 
   // ---------------------------------------------------------------- interviewer audio
   interviewerAudio = inject(InterviewerAudioService);
@@ -69,6 +72,8 @@ export class InterviewComponent implements OnInit, OnDestroy {
   manualQuestion = '';
   /** Copy the generated answer to the clipboard. */
   copied = false;
+  /** Copy the interviewer transcript to the clipboard. */
+  copiedTranscript = false;
   /** Last interviewer question recognised from meeting/tab audio. */
   lastInterviewerText = '';
   /** Scope of the current notice: AI fallback vs. speech-to-text problem. */
@@ -76,13 +81,6 @@ export class InterviewComponent implements OnInit, OnDestroy {
   /** One transcription request is in flight; extra clips wait their turn. */
   audioBusy = false;
   private clipQueue: { data: ArrayBuffer; mimeType: string }[] = [];
-
-  /** Meeting services, opened in a new tab so the app is not navigated away. */
-  readonly meetings = [
-    { name: 'Microsoft Teams', url: 'https://teams.microsoft.com' },
-    { name: 'Google Meet', url: 'https://meet.google.com' },
-    { name: 'Cisco Webex', url: 'https://www.webex.com' },
-  ];
 
   /** Answer text used by the "Copy Answer" button. */
   get answerText(): string {
@@ -113,12 +111,11 @@ export class InterviewComponent implements OnInit, OnDestroy {
   private subs: Subscription[] = [];
 
   ngOnInit(): void {
-    this.selectedMic = this.settings.value.micId;
     this.responseLength = this.settings.value.responseLength;
+    this.guidanceFontSize = this.settings.value.guidanceFontSize;
     this.ws.connect();
     this.transcription.connect();
     this.micSupported = this.transcription.isSupported();
-    this.audio.listMics().then((m) => (this.mics = m));
     // Meeting audio needs server-side transcription; show the state up front.
     this.resumeService.checkHealth().subscribe({
       next: (h) => (this.sttReady = h.stt_configured !== false),
@@ -152,7 +149,12 @@ export class InterviewComponent implements OnInit, OnDestroy {
       }),
 
       // --- Interviewer (meeting/tab) audio: clips -> backend STT -> existing AI flow ---
-      this.interviewerAudio.status$.subscribe((s) => (this.audioStatus = s)),
+      // "Audio permission was denied" already appears in the top error banner
+      // (set by startInterviewerAudio), so it is not repeated inside this block.
+      this.interviewerAudio.status$.subscribe((s) => {
+        if (s === 'Audio permission was denied') return;
+        this.audioStatus = s;
+      }),
       this.interviewerAudio.state$.subscribe((s) => {
         this.capturingInterviewer = s === 'capturing';
         if (s === 'idle') {
@@ -233,6 +235,11 @@ export class InterviewComponent implements OnInit, OnDestroy {
     return this.history.slice(0, -1).reverse();
   }
 
+  /** Only the latest two transcript entries are shown in the Transcript panel. */
+  get recentEntries(): TranscriptEntry[] {
+    return this.entries.slice(-2);
+  }
+
   ngOnDestroy(): void {
     this.subs.forEach((s) => s.unsubscribe());
     this.stopTimer();
@@ -263,47 +270,6 @@ export class InterviewComponent implements OnInit, OnDestroy {
     }
   }
 
-  async start(): Promise<void> {
-    this.error = '';
-    try {
-      await this.audio.requestMic(this.selectedMic || undefined);
-    } catch {
-      this.error = 'Microphone blocked — you can still type questions manually or press Demo.';
-    }
-    this.live = true;
-    this.ws.setStatus('listening');
-    if (this.micSupported) this.transcription.start();
-    this.startTimer();
-  }
-
-  stop(): void {
-    this.live = false;
-    this.transcription.stop();
-    this.ws.setStatus('idle');
-    this.stopTimer();
-  }
-
-  pause(): void {
-    if (this.status === 'paused') {
-      this.ws.setStatus(this.live ? 'listening' : 'idle');
-      this.startTimer();
-    } else {
-      this.ws.setStatus('paused');
-      this.stopTimer(true);
-    }
-  }
-
-  clear(): void {
-    this.entries = [];
-    this.ws.sendReset();
-  }
-
-  sendManual(): void {
-    if (!this.manual.trim()) return;
-    this.onTranscript(this.manual.trim(), true);
-    this.manual = '';
-  }
-
   runDemo(): void {
     this.error = '';
     this.live = true;
@@ -312,38 +278,11 @@ export class InterviewComponent implements OnInit, OnDestroy {
     this.demo.runDemoSequence({
       onTranscript: (t) => this.onTranscript(t, true),
       onGuidance: (g) => this.ws.pushLocalGuidance(g),
-      onDone: () => this.ws.setStatus('ready'),
+      onDone: () => {
+        this.ws.setStatus('ready');
+        this.live = false;
+      },
     });
-  }
-
-  simulateLine(): void {
-    this.transcription.simulateDemo();
-  }
-
-  onMicChange(): void {
-    this.settings.save({ micId: this.selectedMic });
-  }
-
-  // --------------------------------------------------- interviewee mic controls
-
-  /**
-   * Mute / unmute the candidate's microphone.
-   * Separate from interviewer audio capture so the mic is never used for
-   * question detection while muted.
-   */
-  toggleMic(): void {
-    const muted = this.audio.toggleMute();
-    // Stop the mic speech recognition while muted so nothing is captured.
-    if (muted && this.live) this.transcription.stop();
-    else if (!muted && this.live && this.micSupported) this.transcription.start();
-  }
-
-  get micMuted(): boolean {
-    return this.audio.muted;
-  }
-
-  get micStatusLabel(): string {
-    return this.audio.muted ? 'Microphone is muted' : 'Microphone is unmuted';
   }
 
   // ------------------------------------------------ interviewer audio controls
@@ -403,6 +342,19 @@ export class InterviewComponent implements OnInit, OnDestroy {
     }
   }
 
+  /**
+   * Submit the manual question on Enter, but allow Shift+Enter to insert a
+   * newline so the two-line box can hold multi-line questions.
+   */
+  onManualEnter(event: Event): void {
+    const ke = event as KeyboardEvent;
+    if (ke.shiftKey) {
+      return;
+    }
+    ke.preventDefault();
+    this.generateAnswer();
+  }
+
   /** Clear the manual question box. */
   clearManual(): void {
     this.manualQuestion = '';
@@ -422,9 +374,17 @@ export class InterviewComponent implements OnInit, OnDestroy {
     }
   }
 
-  /** Open a meeting service in a new tab. */
-  openMeeting(url: string): void {
-    window.open(url, '_blank', 'noopener');
+  /** Copy the interviewer transcript (meeting audio) to the clipboard. */
+  async copyTranscript(): Promise<void> {
+    const text = this.lastInterviewerText.trim();
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      this.copiedTranscript = true;
+      setTimeout(() => (this.copiedTranscript = false), 2000);
+    } catch {
+      this.copiedTranscript = false;
+    }
   }
 
   /** Changing depth persists it and refreshes the current answer immediately. */
@@ -436,6 +396,30 @@ export class InterviewComponent implements OnInit, OnDestroy {
       // Re-ask the current question at the new depth so the user sees a diff.
       this.onQuestion(this.guidance.question);
     }
+  }
+
+  // ------------------------------------------------------- guidance text size
+
+  /** Apply and persist a new AI Guidance text size (px). */
+  onFontSizeChange(size: number): void {
+    const next = Math.min(this.maxFontSize, Math.max(this.minFontSize, Math.round(Number(size) || 15)));
+    this.guidanceFontSize = next;
+    this.settings.save({ guidanceFontSize: next });
+  }
+
+  /** Step the text size down by 1px (clamped). */
+  decreaseFont(): void {
+    this.onFontSizeChange(this.guidanceFontSize - 1);
+  }
+
+  /** Step the text size up by 1px (clamped). */
+  increaseFont(): void {
+    this.onFontSizeChange(this.guidanceFontSize + 1);
+  }
+
+  /** Back to the default reading size. */
+  resetFont(): void {
+    this.onFontSizeChange(15);
   }
 
   isStarObject(): boolean {

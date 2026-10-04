@@ -33,6 +33,19 @@ async def test_mock_coding_has_hint() -> None:
     assert resp.codeHint
 
 
+async def test_coding_hint_present_at_every_length() -> None:
+    """A coding question must always carry a code hint, at every depth level."""
+    provider = MockLLMProvider()
+    q = "Write a function to solve two-sum with optimal complexity?"
+    for level in ("short", "medium", "long"):
+        resp = await provider.analyze_question("Python resume", "Python role", q, level)
+        assert resp.questionType == "coding", level
+        assert resp.codeHint, f"codeHint missing at level={level}"
+        # Real code, not a one-line pseudo sketch.
+        assert "\n" in resp.codeHint, f"codeHint not multi-line at level={level}"
+        assert "def " in resp.codeHint, f"codeHint has no function at level={level}"
+
+
 def test_json_schema_roundtrip() -> None:
     resp = AIInterviewResponse(
         question="What is a closure?",

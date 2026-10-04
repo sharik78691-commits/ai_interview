@@ -1,12 +1,42 @@
-.nav { position: sticky; top: 0; z-index: 50; backdrop-filter: blur(12px); background: rgba(11,15,23,.82); border-bottom: 1px solid var(--border); }
+.nav { position: sticky; top: 0; z-index: 50; -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); background: rgba(11,15,23,.82); border-bottom: 1px solid var(--border); }
 .nav-inner { display: flex; align-items: center; justify-content: space-between; height: 62px; }
 .brand { font-weight: 800; font-size: 1rem; display: flex; align-items: center; gap: 8px; }
 .logo { background: var(--accent-grad); -webkit-background-clip: text; background-clip: text; color: transparent; font-size: 1.3rem; }
 .demo-badge { font-size: .65rem; font-weight: 800; letter-spacing: .08em; background: rgba(110,139,255,.15); border: 1px solid rgba(110,139,255,.4); color: #b9c6ff; padding: 2px 8px; border-radius: 999px; }
 .live-badge { font-size: .65rem; font-weight: 800; letter-spacing: .08em; background: rgba(52,211,153,.15); border: 1px solid rgba(52,211,153,.5); color: #6ee7b7; padding: 2px 8px; border-radius: 999px; }
 .off-badge { font-size: .65rem; font-weight: 800; letter-spacing: .08em; background: rgba(248,113,113,.12); border: 1px solid rgba(248,113,113,.5); color: #fca5a5; padding: 2px 8px; border-radius: 999px; }
-.links { display: flex; gap: 4px; }
-.links a { padding: 8px 14px; border-radius: 8px; font-size: .9rem; font-weight: 600; color: var(--muted); }
+.links { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }.links a { padding: 8px 14px; border-radius: 8px; font-size: .9rem; font-weight: 600; color: var(--muted); }
 .links a:hover { background: rgba(255,255,255,.06); color: var(--text); }
 .links a.active { background: rgba(110,139,255,.14); color: #c9d4ff; }
-@media (max-width: 560px) { .brand { font-size: .85rem; } .links a { padding: 8px 9px; font-size: .82rem; } }
+/* Dark / white mode toggle. Uses theme vars so it adapts to both modes. */
+.theme-btn {
+  margin-left: 6px;
+  width: 36px; height: 36px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 1.05rem; line-height: 1;
+  background: transparent;
+  border: 1px solid var(--border-strong); border-radius: 999px;
+  cursor: pointer; transition: background .15s, transform .15s;
+}
+.theme-btn:hover { background: rgba(110,139,255,.14); transform: translateY(-1px); }
+/* Authenticated user chip + sign-out / sign-in controls. */
+.user-chip {
+  max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: .8rem; font-weight: 600; color: var(--muted);
+  padding: 6px 10px; border-radius: 999px; background: rgba(110,139,255,.1);
+}
+.logout-btn {
+  margin-left: 4px; padding: 8px 14px; border-radius: 8px;
+  font-size: .85rem; font-weight: 600; cursor: pointer;
+  background: transparent; color: var(--muted);
+  border: 1px solid var(--border-strong);
+  transition: background .15s, color .15s;
+}
+.logout-btn:hover { background: rgba(248,113,113,.12); color: var(--red); }
+.signin-link { padding: 8px 14px; border-radius: 8px; font-size: .9rem; font-weight: 600; color: var(--accent); }
+@media (max-width: 560px) {
+  .brand { font-size: .85rem; }
+  .links a { padding: 8px 7px; font-size: .78rem; }
+  .theme-btn { width: 32px; height: 32px; margin-left: 2px; font-size: .95rem; }
+  .nav-inner { flex-wrap: wrap; height: auto; min-height: 62px; padding-top: 8px; padding-bottom: 8px; row-gap: 4px; }
+}

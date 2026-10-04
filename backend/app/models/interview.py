@@ -7,8 +7,10 @@ from app.models.ai_response import AIInterviewResponse
 
 
 class PrepareRequest(BaseModel):
-    resumeText: str
-    jobDescription: str
+    # Resume and job description are OPTIONAL: a user can start an interview
+    # directly without providing either.
+    resumeText: Optional[str] = ""
+    jobDescription: Optional[str] = ""
     responseLength: Optional[str] = "medium"
 
 

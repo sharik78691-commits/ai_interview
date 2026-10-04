@@ -18,7 +18,10 @@ import logging
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from app.api.interview import VALID_LENGTHS, _context, _normalize_length
+from app.api.interview import VALID_LENGTHS, _normalize_length, get_context
+from app.auth import security
+from app.auth.service import get_user_by_id
+from app.db.session import SessionLocal
 from app.providers.stt.provider import (
     STTRequestError,
     STTUnavailableError,
@@ -73,16 +76,48 @@ MIME_BY_FORMAT = {
 }
 
 
+def _authenticate_ws(websocket: WebSocket) -> int | None:
+    """Resolve the authenticated user id from the session cookie.
+
+    Uses the SAME server-managed session as the REST API — no separate
+    WebSocket auth system. Returns None when the session is missing/invalid.
+    """
+    token = websocket.cookies.get(security.SESSION_COOKIE)
+    if not token:
+        return None
+    user_id = security.read_session_token(token)
+    if user_id is None:
+        return None
+    db = SessionLocal()
+    try:
+        user = get_user_by_id(db, user_id)
+        if user is None or not user.is_active:
+            return None
+        return user.id
+    finally:
+        db.close()
+
+
 @router.websocket("/ws/interview")
 async def ws_interview(websocket: WebSocket) -> None:
+    # Authentication is checked BEFORE accepting the connection. An
+    # unauthenticated client is rejected with 1008 (policy violation).
+    user_id = _authenticate_ws(websocket)
+    if user_id is None:
+        await websocket.close(code=1008)
+        return
+
     await websocket.accept()
+
+    # Per-user interview context (never another user's resume/JD).
+    context = get_context(user_id)
 
     # Existing question/AI pipeline (unchanged behaviour).
     buffer = QuestionBuffer()
     service = AIService(
-        resume_text=_context.get("resume", ""),
-        job_description=_context.get("job", ""),
-        response_length=_context.get("length", "medium"),
+        resume_text=context.get("resume", ""),
+        job_description=context.get("job", ""),
+        response_length=context.get("length", "medium"),
     )
 
     # Interviewer audio capture (tab / meeting audio) -> server-side STT.
@@ -350,8 +385,8 @@ async def ws_interview(websocket: WebSocket) -> None:
                     await _handle_detected_question(question)
 
             elif mtype == "transcript":
-                service.resume_text = _context.get("resume", service.resume_text)
-                service.job_description = _context.get("job", service.job_description)
+                service.resume_text = context.get("resume", service.resume_text)
+                service.job_description = context.get("job", service.job_description)
                 _apply_length(msg.get("responseLength"))
                 text = (msg.get("text") or "").strip()
                 if not text:

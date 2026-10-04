@@ -1,8 +1,10 @@
-"""Resume upload endpoint."""
-from fastapi import APIRouter, File, HTTPException, UploadFile
+"""Resume upload endpoint (authenticated)."""
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
+from app.auth.dependencies import require_user
 from app.core.config import get_settings
 from app.models.resume import ResumeUploadResponse
+from app.models.user import User
 from app.services.resume_service import ResumeService
 
 router = APIRouter()
@@ -10,7 +12,12 @@ _service = ResumeService()
 
 
 @router.post("/resume/upload", response_model=ResumeUploadResponse)
-async def upload_resume(file: UploadFile = File(...)) -> ResumeUploadResponse:
+async def upload_resume(
+    file: UploadFile = File(...),
+    user: User = Depends(require_user),
+) -> ResumeUploadResponse:
+    # Identity comes from the session; the uploaded resume is never shared
+    # across users (it is returned only to the caller and kept client-side).
     try:
         content = await file.read()
         settings = get_settings()

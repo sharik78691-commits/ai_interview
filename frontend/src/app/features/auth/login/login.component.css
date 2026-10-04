@@ -1,0 +1,95 @@
+.auth-wrap {
+  min-height: calc(100vh - 64px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+}
+.auth-card {
+  width: 100%;
+  max-width: 420px;
+  padding: 32px;
+}
+.auth-head { text-align: center; margin-bottom: 22px; }
+.auth-head .logo {
+  font-size: 2rem;
+  background: var(--accent-grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.auth-head h1 { font-size: 1.35rem; font-weight: 700; margin: 8px 0 4px; }
+.auth-head p { font-size: .85rem; }
+
+.btn-google {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border-strong);
+  background: var(--panel);
+  color: var(--text);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .15s ease;
+}
+.btn-google:hover { background: var(--panel2); }
+.g-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px; height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  color: #4285f4;
+  font-weight: 800;
+  font-size: .8rem;
+}
+
+.divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 20px 0;
+  color: var(--muted2);
+  font-size: .72rem;
+  letter-spacing: .08em;
+}
+.divider::before, .divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.field { display: block; margin-bottom: 14px; }
+.field span { display: block; font-size: .78rem; color: var(--muted); margin-bottom: 6px; }
+.field input {
+  width: 100%;
+  padding: 11px 13px;
+  border-radius: 10px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg2);
+  color: var(--text);
+  font-size: .9rem;
+}
+.field input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.full { width: 100%; margin-top: 6px; }
+
+.auth-links { text-align: right; margin-top: 12px; font-size: .8rem; }
+.auth-links a { color: var(--accent); }
+.auth-foot { text-align: center; margin-top: 20px; font-size: .82rem; }
+.auth-foot a { color: var(--accent); font-weight: 600; }
+
+.banner {
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: .82rem;
+  margin-bottom: 16px;
+}
+.banner.error { background: rgba(248,113,113,.12); color: var(--red); }
+.banner.info { background: rgba(110,139,255,.12); color: var(--accent); }

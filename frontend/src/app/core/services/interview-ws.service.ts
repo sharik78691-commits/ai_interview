@@ -20,11 +20,22 @@ export class InterviewWsService {
   notice$ = new Subject<{ message: string; scope: 'ai' | 'stt' }>();
   private ws: WebSocket | null = null;
   private retries = 0;
-  private url = 'ws://localhost:8000/ws/interview';
+  private url = this.defaultUrl();
   private wantOpen = false;
 
-  connect(url = 'ws://localhost:8000/ws/interview'): void {
-    this.url = url;
+  /**
+   * Same-origin WebSocket URL so the browser sends the HttpOnly session cookie
+   * automatically. In dev the Angular proxy forwards /ws to the backend; in
+   * production the app and API share an origin (or a reverse proxy).
+   */
+  private defaultUrl(): string {
+    if (typeof window === 'undefined') return '/ws/interview';
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${proto}//${window.location.host}/ws/interview`;
+  }
+
+  connect(url?: string): void {
+    this.url = url ?? this.defaultUrl();
     this.wantOpen = true;
     this.open();
   }
