@@ -10,6 +10,10 @@
 .hero-stats span { color: var(--muted); font-size: .85rem; }
 .section { padding: 36px 24px; }
 .section h2 { font-size: 1.5rem; font-weight: 800; margin-bottom: 18px; }
+.lead { max-width: 820px; line-height: 1.7; font-size: 1.02rem; }
+.lead strong { color: var(--text, #e8ecff); }
+.section ul.lead { padding-left: 20px; display: grid; gap: 10px; }
+.section ul.lead li { line-height: 1.6; }
 .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
 .feat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
 .step { width: 34px; height: 34px; border-radius: 10px; background: var(--accent-grad); display: flex; align-items: center; justify-content: center; font-weight: 800; margin-bottom: 12px; }

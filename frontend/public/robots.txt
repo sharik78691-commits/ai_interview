@@ -1,0 +1,22 @@
+# robots.txt for OyeInterview — https://www.oyeinterview.com
+# Allow search engines to crawl the public marketing pages while keeping
+# authenticated app areas out of the index (they require a login anyway).
+
+User-agent: *
+Allow: /
+Allow: /login
+Allow: /register
+
+# Private / authenticated areas — no SEO value, avoid crawl budget waste.
+Disallow: /dashboard
+Disallow: /interview
+Disallow: /settings
+Disallow: /forgot-password
+Disallow: /reset-password
+
+# Never index API or WebSocket endpoints.
+Disallow: /api/
+Disallow: /ws/
+
+# Sitemap location (absolute URL is required by the spec).
+Sitemap: https://www.oyeinterview.com/sitemap.xml

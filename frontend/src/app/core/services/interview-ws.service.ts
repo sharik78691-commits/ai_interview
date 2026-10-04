@@ -2,6 +2,21 @@ import { Injectable } from '@angular/core';
 import { BehaviorSubject, Subject } from 'rxjs';
 import { AIInterviewResponse, HistoryItem, InterviewStatus } from '../models/interview.models';
 
+/**
+ * Backend origin for the live-interview WebSocket, read from the runtime config
+ * (`public/runtime-config.js` sets `window.WS_BASE_URL` before the app boots).
+ *
+ * Static hosts (Vercel) cannot proxy a WebSocket upgrade to an external origin,
+ * so in production this MUST point at the backend host (e.g.
+ * `wss://ai-interview-1-309j.onrender.com`). When empty, the socket falls back
+ * to the same-origin `/ws/interview` path, which the Angular dev-server proxy
+ * forwards to the backend during local development.
+ */
+const WS_BASE_URL: string =
+  (typeof window !== 'undefined' &&
+    (window as unknown as { WS_BASE_URL?: string }).WS_BASE_URL) ||
+  '';
+
 interface WsMsg {
   type: string;
   [k: string]: unknown;
@@ -24,12 +39,29 @@ export class InterviewWsService {
   private wantOpen = false;
 
   /**
-   * Same-origin WebSocket URL so the browser sends the HttpOnly session cookie
-   * automatically. In dev the Angular proxy forwards /ws to the backend; in
-   * production the app and API share an origin (or a reverse proxy).
+   * WebSocket URL for the live-interview socket.
+   *
+   * The browser must reach the backend directly for the socket upgrade: static
+   * hosts (Vercel) cannot proxy a WebSocket to an external origin, so a
+   * same-origin `/ws` path only works behind the Angular dev-server proxy.
+   *
+   * Resolution order:
+   *   1. `WS_BASE_URL` build-time env (e.g. `wss://api.example.com`) — used in
+   *      production so the socket targets the backend host directly.
+   *   2. Same-origin `/ws/interview` — used in local dev, where the Angular
+   *      proxy forwards `/ws` to the backend and keeps the session cookie
+   *      same-origin.
    */
   private defaultUrl(): string {
     if (typeof window === 'undefined') return '/ws/interview';
+    const configured = (WS_BASE_URL || '').trim().replace(/\/+$/, '');
+    if (configured) {
+      // Accept either a full ws(s):// URL or an http(s):// one and normalise it.
+      const base = configured
+        .replace(/^https:\/\//i, 'wss://')
+        .replace(/^http:\/\//i, 'ws://');
+      return `${base}/ws/interview`;
+    }
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     return `${proto}//${window.location.host}/ws/interview`;
   }
@@ -50,6 +82,9 @@ export class InterviewWsService {
     }
     this.ws.onopen = () => {
       this.retries = 0;
+      // A successful (re)connect clears a previous "Connection issue" pill so
+      // the UI recovers automatically instead of staying stuck on error.
+      if (this.status$.value === 'error') this.status$.next('idle');
     };
     this.ws.onmessage = (ev) => {
       try {
@@ -102,9 +137,12 @@ export class InterviewWsService {
   }
 
   private scheduleReconnect(): void {
-    if (!this.wantOpen || this.retries >= 5) return;
+    if (!this.wantOpen) return;
+    // Keep retrying with a capped backoff. A free-tier backend (Render) can
+    // cold-start for 30s+, so giving up after a few tries left the UI stuck on
+    // "Connection issue" even though the server was about to come back.
     this.retries++;
-    const backoff = Math.min(1000 * 2 ** this.retries, 10000);
+    const backoff = Math.min(1000 * 2 ** Math.min(this.retries, 5), 15000);
     setTimeout(() => this.open(), backoff);
   }
 

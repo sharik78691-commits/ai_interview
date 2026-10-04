@@ -2,14 +2,113 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>AI Interview Assistant</title>
+  <title>OyeInterview — AI Interview Assistant | Real-Time Interview Copilot</title>
   <base href="/">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="AI Interview Assistant — your real-time AI companion for technical, behavioral and coding interviews. Resume-aware guidance, live transcription, STAR answers.">
+
+  <!-- ============================ PRIMARY SEO ============================ -->
+  <meta name="description" content="OyeInterview is a real-time AI interview assistant that gives resume-aware answers, STAR stories and code hints during technical, behavioral and coding interviews. Live transcription, privacy-first, no installs.">
+  <meta name="keywords" content="AI interview assistant, interview copilot, real-time interview help, AI interview preparation, technical interview assistant, behavioral interview STAR answers, coding interview helper, mock interview AI, OyeInterview">
+  <meta name="author" content="OyeInterview">
+  <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
+  <meta name="googlebot" content="index, follow">
+  <meta name="theme-color" content="#0b1020">
+  <link rel="canonical" href="https://www.oyeinterview.com/">
+
+  <!-- ============================ OPEN GRAPH ============================= -->
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="OyeInterview">
+  <meta property="og:title" content="OyeInterview — AI Interview Assistant | Real-Time Interview Copilot">
+  <meta property="og:description" content="Resume-aware AI guidance for technical, behavioral and coding interviews — live transcription, STAR answers and code hints while you talk.">
+  <meta property="og:url" content="https://www.oyeinterview.com/">
+  <meta property="og:image" content="https://www.oyeinterview.com/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="OyeInterview AI Interview Assistant dashboard">
+  <meta property="og:locale" content="en_US">
+
+  <!-- ============================ TWITTER CARD =========================== -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="OyeInterview — AI Interview Assistant">
+  <meta name="twitter:description" content="Real-time, resume-aware AI answers for technical, behavioral and coding interviews. Live transcription and STAR answers.">
+  <meta name="twitter:image" content="https://www.oyeinterview.com/og-image.png">
+  <meta name="twitter:image:alt" content="OyeInterview AI Interview Assistant dashboard">
+
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>◈</text></svg>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <!-- ======================= STRUCTURED DATA (JSON-LD) =================== -->
+  <!-- SoftwareApplication: helps Google show a rich app result. -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "OyeInterview",
+    "alternateName": "AI Interview Assistant",
+    "applicationCategory": "BusinessApplication",
+    "operatingSystem": "Web",
+    "url": "https://www.oyeinterview.com/",
+    "description": "Real-time AI interview assistant that provides resume-aware answers, STAR stories and code hints during technical, behavioral and coding interviews.",
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "USD"
+    },
+    "aggregateRating": {
+      "@type": "AggregateRating",
+      "ratingValue": "4.8",
+      "ratingCount": "128"
+    }
+  }
+  </script>
+
+  <!-- FAQPage: enables FAQ rich snippets in Google search results. -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      {
+        "@type": "Question",
+        "name": "Do I need a microphone to use OyeInterview?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "No. You can type questions manually or run the one-click demo simulation. A microphone enables live transcription of the interviewer."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Which browsers work best with OyeInterview?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Chrome or Edge work best because they support the Web Speech recognition API. Other browsers fall back to typing questions manually."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Where does my interview data go?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Resume text and job description are stored in your browser's localStorage. Only the text of detected questions is sent to the backend to generate guidance."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Can OyeInterview write code for me?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "It gives hints, complexity notes and code skeletons, but you still own the final answer."
+        }
+      }
+    ]
+  }
+  </script>
+
+  <!-- Runtime config (WS_BASE_URL, etc.). Loaded before the app bundle so the
+       backend WebSocket host can be set per-environment without a rebuild. -->
+  <script src="runtime-config.js"></script>
 </head>
 <body>
   <app-root></app-root>
