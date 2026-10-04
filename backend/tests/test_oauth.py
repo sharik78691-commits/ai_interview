@@ -6,6 +6,7 @@ from app.auth.service import get_user_by_email, upsert_google_user
 from app.db.session import SessionLocal
 
 
+
 def test_google_login_unconfigured_returns_503(client):
     # Force Google off regardless of the developer's real backend/.env.
     from app.core.config import get_settings

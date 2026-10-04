@@ -1,15 +1,33 @@
+# =============================================================================
+# AI Interview Assistant — backend dependencies
+# Install:  pip install -r backend/requirements.txt
+# =============================================================================
+
+# --- Web framework / server ---
 fastapi>=0.115
+# ASGI server. [standard] pulls in uvloop/httptools/websockets for production.
 uvicorn[standard]>=0.30
+# Starlette is imported directly (middleware, WebSocketDisconnect). It ships
+# with FastAPI, but pinning it explicitly protects against a transitive bump
+# that changes the middleware/websocket APIs we rely on.
+starlette>=0.40
+
+# --- Request parsing / validation ---
+# Multipart form parsing for UploadFile / File (resume upload).
 python-multipart>=0.0.9
 pydantic>=2.7
 # EmailStr validation for auth schemas.
 email-validator>=2.1
+
+# --- Configuration ---
 python-dotenv>=1.0
+
+# --- Resume parsing ---
 pypdf>=4.0
 python-docx>=1.1
+
+# --- HTTP client (LLM + STT + Google OAuth calls) ---
 httpx>=0.27
-pytest>=8.0
-pytest-asyncio>=0.23
 
 # --- Authentication / persistence ---
 # SQLAlchemy 2.x ORM. SQLite for local dev, PostgreSQL in production.
@@ -20,3 +38,13 @@ argon2-cffi>=23.1
 itsdangerous>=2.1
 # Google OAuth 2.0 / OpenID Connect (authorization-code flow + id_token).
 authlib>=1.3
+
+# --- Production database driver (optional) ---
+# Only needed when DATABASE_URL points at PostgreSQL
+# (postgresql+psycopg://user:pass@host:5432/db). SQLite needs no driver.
+# psycopg[binary]>=3.1
+
+# --- Dev / test ---
+pytest>=8.0
+# Required by pytest.ini (asyncio_mode = auto) for async test support.
+pytest-asyncio>=0.23
