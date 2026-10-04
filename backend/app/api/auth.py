@@ -135,15 +135,24 @@ async def google_login(request: Request) -> RedirectResponse:
     url = oauth.build_authorize_url(state)
     redirect = RedirectResponse(url, status_code=status.HTTP_302_FOUND)
     # State is stored in a short-lived HttpOnly cookie and verified on callback.
-    redirect.set_cookie(
-        security.OAUTH_STATE_COOKIE,
-        state,
-        max_age=600,
-        httponly=True,
-        secure=settings.cookie_secure,
-        samesite="lax",
-        path="/",
-    )
+    #
+    # SameSite: the callback arrives as a CROSS-SITE top-level navigation from
+    # accounts.google.com. A "Lax" cookie is NOT sent on that navigation, so the
+    # state check would always fail with "google_state". "None" is required for
+    # the cookie to survive the Google redirect — and "None" mandates Secure,
+    # which is only valid over HTTPS (production). In local dev (http) we keep
+    # "Lax" because the whole flow is same-origin on localhost.
+    state_samesite = "none" if settings.cookie_secure else "lax"
+    state_kwargs: dict = {
+        "max_age": 600,
+        "httponly": True,
+        "secure": settings.cookie_secure,
+        "samesite": state_samesite,
+        "path": "/",
+    }
+    if settings.cookie_domain:
+        state_kwargs["domain"] = settings.cookie_domain
+    redirect.set_cookie(security.OAUTH_STATE_COOKIE, state, **state_kwargs)
     return redirect
 
 
@@ -171,7 +180,15 @@ async def google_callback(
     # CSRF/state protection: the cookie must match the returned state.
     cookie_state = request.cookies.get(security.OAUTH_STATE_COOKIE)
     if not cookie_state or cookie_state != state:
-        logger.warning("OAuth state mismatch")
+        # A missing cookie almost always means the login start and the
+        # callback ran on DIFFERENT origins (the state cookie is scoped to the
+        # origin that set it). Log the host so this is diagnosable in prod.
+        logger.warning(
+            "OAuth state mismatch (cookie_present=%s, callback_host=%s). "
+            "Ensure GOOGLE_REDIRECT_URI uses the same origin as the login start.",
+            bool(cookie_state),
+            request.url.hostname,
+        )
         return _fail("google_state")
 
     try:

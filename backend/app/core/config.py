@@ -83,6 +83,20 @@ class Settings:
         self.frontend_url: str = os.getenv("FRONTEND_URL", "http://localhost:4200")
         self.backend_url: str = os.getenv("BACKEND_URL", "http://localhost:8000")
 
+        # Guard against the classic production misconfiguration where
+        # FRONTEND_URL is left unset: the OAuth callback then redirects users
+        # to http://localhost:4200 (which only exists on the developer's
+        # machine). Surface it loudly at startup instead of silently failing.
+        if self._is_production() and "localhost" in self.frontend_url:
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "FRONTEND_URL is still '%s' while ENVIRONMENT=production. "
+                "OAuth callbacks and password-reset links will point at "
+                "localhost. Set FRONTEND_URL to your public frontend origin.",
+                self.frontend_url,
+            )
+
         # --------------------------------------------------------------- Google
         self.google_client_id: str = os.getenv("GOOGLE_CLIENT_ID", "")
         self.google_client_secret: str = os.getenv("GOOGLE_CLIENT_SECRET", "")
