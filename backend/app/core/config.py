@@ -74,16 +74,25 @@ class Settings:
         except ValueError:
             self.reset_token_max_age = 3600
 
+        # ---------------------------------------------------------------- URLs
+        # Resolved BEFORE Google so the redirect URI can default to the backend
+        # origin. This matters in production: the OAuth callback is served by
+        # the backend, so the redirect URI must be the backend's PUBLIC URL —
+        # not localhost. Google rejects any redirect_uri that is not registered
+        # verbatim in the OAuth client ("Error 400: redirect_uri_mismatch").
+        self.frontend_url: str = os.getenv("FRONTEND_URL", "http://localhost:4200")
+        self.backend_url: str = os.getenv("BACKEND_URL", "http://localhost:8000")
+
         # --------------------------------------------------------------- Google
         self.google_client_id: str = os.getenv("GOOGLE_CLIENT_ID", "")
         self.google_client_secret: str = os.getenv("GOOGLE_CLIENT_SECRET", "")
+        # Default the redirect URI to the backend origin so a deployed backend
+        # never falls back to localhost. Override with GOOGLE_REDIRECT_URI when
+        # the callback is fronted by a different host (e.g. a reverse proxy).
         self.google_redirect_uri: str = os.getenv(
-            "GOOGLE_REDIRECT_URI", "http://localhost:8000/api/auth/google/callback"
+            "GOOGLE_REDIRECT_URI",
+            f"{self.backend_url.rstrip('/')}/api/auth/google/callback",
         )
-
-        # ---------------------------------------------------------------- URLs
-        self.frontend_url: str = os.getenv("FRONTEND_URL", "http://localhost:4200")
-        self.backend_url: str = os.getenv("BACKEND_URL", "http://localhost:8000")
 
         # --------------------------------------------------------------- cookies
         # Secure cookies are forced on in production (HTTPS). Local dev over

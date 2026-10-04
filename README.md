@@ -252,11 +252,34 @@ the session on every request.
 
 1. In [Google Cloud Console](https://console.cloud.google.com/apis/credentials)
    create an **OAuth 2.0 Client ID** (Web application).
-2. Add an **Authorized redirect URI**:
+2. Add an **Authorized redirect URI** for **every** environment that serves the
+   callback. The value must match `GOOGLE_REDIRECT_URI` **verbatim** — scheme,
+   host, port and path:
    - Local: `http://localhost:8000/api/auth/google/callback`
-   - Production: `https://api.yourdomain.com/api/auth/google/callback`
+   - Production: `https://<your-backend-host>/api/auth/google/callback`
 3. Set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and `GOOGLE_REDIRECT_URI` in
-   `backend/.env`. The redirect URI must match exactly.
+   `backend/.env`. If `GOOGLE_REDIRECT_URI` is left empty it defaults to
+   `{BACKEND_URL}/api/auth/google/callback`, so a deployed backend never falls
+   back to `localhost`.
+
+> **Important — the callback is served by the backend, not the frontend.**
+> The frontend only links to `/api/auth/google/login`; the dev-server proxy
+> (`frontend/proxy.conf.json`) and the Vercel rewrites (`vercel.json`) forward
+> `/api` to the deployed backend. The redirect URI Google sees is therefore the
+> **backend's** public URL. Register that URL in Google Console.
+
+#### Troubleshooting: `Error 400: redirect_uri_mismatch`
+
+Google returns this **before** the callback runs, which means the
+`redirect_uri` sent by the backend is not registered on the OAuth client. Check:
+
+- The value of `GOOGLE_REDIRECT_URI` on the **deployed** backend (Render env
+  vars), not just your local `backend/.env`.
+- That the registered URI matches exactly — `http` vs `https`, a trailing
+  slash, `www`, or a different port all cause a mismatch.
+- That you edited the **same** OAuth client whose `GOOGLE_CLIENT_ID` the backend
+  uses.
+- That changes were saved and given a minute to propagate in Google Console.
 
 ### Database
 
