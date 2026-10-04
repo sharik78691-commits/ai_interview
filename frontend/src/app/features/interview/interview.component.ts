@@ -169,6 +169,17 @@ export class InterviewComponent implements OnInit, OnDestroy {
       // detection decide when to call the AI (no extra AI call here).
       this.ws.interviewerTranscript$.subscribe(({ text }) => {
         this.lastInterviewerText = text;
+        // Also record it in the Transcript panel so the meeting audio shows up
+        // alongside microphone speech (previously only "Heard:" updated).
+        const clean = text.trim();
+        if (clean) {
+          this.entries.push({
+            speaker: 'interviewer',
+            text: clean,
+            timestamp: new Date(),
+            isQuestion: QuestionDetectorService.detect(clean),
+          });
+        }
         this.releaseClipSlot();
       }),
       this.ws.messages$.subscribe((m) => {

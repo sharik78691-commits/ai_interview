@@ -176,6 +176,8 @@ export class InterviewerAudioService {
 
   /** Stop capture and flush whatever was recorded. */
   async stop(): Promise<void> {
+    // Already idle (or never started): make sure the UI is not left showing
+    // "Stop interviewer audio" and tear down any lingering resources.
     if (!this.recorder || this.state$.value !== 'capturing') {
       this.state$.next('idle');
       this._cleanup();
@@ -187,27 +189,33 @@ export class InterviewerAudioService {
     this.stopPromise = new Promise<void>((resolve) => {
       const recorder = this.recorder;
       if (!recorder) {
-        resolve();
-        return;
-      }
-      recorder.addEventListener(
-        'stop',
-        () => {
-          this.status$.next('Interviewer audio capture stopped.');
-          this.state$.next('idle');
-          this._cleanup();
-          this.stopPromise = null;
-          resolve();
-        },
-        { once: true },
-      );
-      try {
-        if (recorder.state !== 'inactive') recorder.stop();
-      } catch {
         this.state$.next('idle');
         this._cleanup();
         this.stopPromise = null;
         resolve();
+        return;
+      }
+
+      const finish = () => {
+        this.status$.next('Interviewer audio capture stopped.');
+        this.state$.next('idle');
+        this._cleanup();
+        this.stopPromise = null;
+        resolve();
+      };
+
+      // If the recorder is already inactive the 'stop' event will never fire,
+      // so finish immediately instead of leaving the UI stuck on "stopping".
+      if (recorder.state === 'inactive') {
+        finish();
+        return;
+      }
+
+      recorder.addEventListener('stop', finish, { once: true });
+      try {
+        recorder.stop();
+      } catch {
+        finish();
       }
     });
     return this.stopPromise;
