@@ -255,8 +255,8 @@ the session on every request.
 2. Add an **Authorized redirect URI** for **every** environment that serves the
    callback. The value must match `GOOGLE_REDIRECT_URI` **verbatim** — scheme,
    host, port and path:
-   - Local: `http://localhost:8000/api/auth/google/callback`
-   - Production: `https://<your-backend-host>/api/auth/google/callback`
+   - Production: `https://ai-interview-1-309j.onrender.com/api/auth/google/callback`
+   - Local dev (optional): `http://localhost:8000/api/auth/google/callback`
 3. Set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and `GOOGLE_REDIRECT_URI` in
    `backend/.env`. If `GOOGLE_REDIRECT_URI` is left empty it defaults to
    `{BACKEND_URL}/api/auth/google/callback`, so a deployed backend never falls
