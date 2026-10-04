@@ -1,4 +1,15 @@
 {
-  "/api": { "target": "https://ai-interview-1-309j.onrender.com", "secure": false },
-  "/ws": { "target": "https://ai-interview-1-309j.onrender.com", "secure": false, "ws": true }
+  "/api": {
+    "target": "https://ai-interview-1-309j.onrender.com",
+    "secure": true,
+    "changeOrigin": true,
+    "logLevel": "debug"
+  },
+  "/ws": {
+    "target": "https://ai-interview-1-309j.onrender.com",
+    "secure": true,
+    "changeOrigin": true,
+    "ws": true,
+    "logLevel": "debug"
+  }
 }
