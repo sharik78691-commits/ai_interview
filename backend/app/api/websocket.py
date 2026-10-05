@@ -82,16 +82,62 @@ def _authenticate_ws(websocket: WebSocket) -> int | None:
     Uses the SAME server-managed session as the REST API — no separate
     WebSocket auth system. Returns None when the session is missing/invalid.
     """
+    # The live-interview socket is opened directly against the backend host,
+    # because a static host (Vercel) cannot proxy a WebSocket upgrade. That makes
+    # it a CROSS-ORIGIN request, and browsers do not attach cookies to
+    # cross-origin WebSocket handshakes — so cookie auth alone cannot work in
+    # production. A short-lived ticket in the query string is the primary
+    # credential, with the cookie kept as a fallback for same-origin/local dev.
+    
+    # 1) Preferred: short-lived, single-purpose ticket in the query string.
+    ticket = websocket.query_params.get("ticket")
+    if ticket:
+        user_id = security.read_ws_ticket(ticket)
+        if user_id is None:
+            logger.warning("WebSocket ticket supplied but invalid or expired")
+            return None
+        logger.info("WebSocket authenticated via ticket (user_id=%s)", user_id)
+        return _ws_user_is_active(user_id)
+
+    # 2) Fallback: the server-managed session cookie. Works when the SPA is
+    # same-origin with the API (local dev via the Angular proxy, or a deployment
+    # that serves the frontend and backend from one host).
+    cookie_names = list(websocket.cookies.keys())
+    logger.info(
+        "No ticket supplied; falling back to the session cookie. Cookies received: %s",
+        cookie_names or "none",
+    )
     token = websocket.cookies.get(security.SESSION_COOKIE)
     if not token:
+        logger.warning(
+            "Session cookie %r absent from the WebSocket handshake (received: %s). "
+            "Expected for a cross-origin socket — the client must request a ticket "
+            "from /api/auth/ws-ticket and pass it as ?ticket=.",
+            security.SESSION_COOKIE,
+            cookie_names or "none",
+        )
         return None
     user_id = security.read_session_token(token)
     if user_id is None:
         return None
+    logger.info("WebSocket authenticated via session cookie (user_id=%s)", user_id)
+    return _ws_user_is_active(user_id)
+
+
+def _ws_user_is_active(user_id: int) -> int | None:
+    """Re-validate the user against the database.
+
+    Sessions are server-managed, so a deactivated user must be rejected even
+    with a cryptographically valid ticket or cookie.
+    """
     db = SessionLocal()
     try:
         user = get_user_by_id(db, user_id)
-        if user is None or not user.is_active:
+        if user is None:
+            logger.warning("WebSocket auth failed: user %s no longer exists", user_id)
+            return None
+        if not user.is_active:
+            logger.warning("WebSocket auth failed: user %s is deactivated", user_id)
             return None
         return user.id
     finally:
@@ -102,10 +148,32 @@ def _authenticate_ws(websocket: WebSocket) -> int | None:
 async def ws_interview(websocket: WebSocket) -> None:
     # Authentication is checked BEFORE accepting the connection. An
     # unauthenticated client is rejected with 1008 (policy violation).
+    client_host = websocket.client.host if websocket.client else "unknown"
+    origin = websocket.headers.get("origin")
+    ticket = websocket.query_params.get("ticket")
+    logger.info(
+        "WebSocket connection attempt: client=%s origin=%s host=%s ticket=%s",
+        client_host,
+        origin or "-",
+        websocket.headers.get("host", "-"),
+        "yes" if ticket else "no",
+    )
+    
     user_id = _authenticate_ws(websocket)
     if user_id is None:
-        await websocket.close(code=1008)
+        # 1008 = policy violation; the browser reports this as an opaque 403 on
+        # the handshake, so log the cause and the remediation here.
+        logger.warning(
+            "WebSocket authentication failed (client=%s origin=%s ticket=%s). "
+            "Expected ?ticket=<from POST /api/auth/ws-ticket> or a session cookie.",
+            client_host,
+            origin or "-",
+            "yes" if ticket else "no",
+        )
+        await websocket.close(code=1008, reason="unauthenticated")
         return
+    
+    logger.info(f"WebSocket authenticated successfully for user_id={user_id}")
 
     await websocket.accept()
 
@@ -282,6 +350,7 @@ async def ws_interview(websocket: WebSocket) -> None:
             )
 
     # Initial handshake keeps the existing client contract intact.
+    logger.info("[ws user=%s] accepted; sending handshake", user_id)
     await websocket.send_json(
         {
             "type": "status",
@@ -295,8 +364,10 @@ async def ws_interview(websocket: WebSocket) -> None:
             try:
                 message = await websocket.receive()
             except WebSocketDisconnect:
+                logger.info("[ws user=%s] client disconnected", user_id)
                 break
             except Exception:
+                logger.exception("[ws user=%s] receive() failed", user_id)
                 await websocket.send_json(
                     {"type": "error", "message": "Expected JSON message."}
                 )
@@ -323,6 +394,9 @@ async def ws_interview(websocket: WebSocket) -> None:
                 continue
 
             mtype = (msg.get("type") or "").lower() if isinstance(msg, dict) else ""
+            # Skip the high-frequency keepalive so real traffic stays readable.
+            if mtype and mtype != "ping":
+                logger.info("[ws user=%s] recv type=%s", user_id, mtype)
 
             if mtype == "ping":
                 await websocket.send_json({"type": "pong"})
@@ -417,11 +491,11 @@ async def ws_interview(websocket: WebSocket) -> None:
                     {"type": "error", "message": f"unknown message type: {mtype}"}
                 )
     except WebSocketDisconnect:
-        pass
+        logger.info("[ws user=%s] disconnected", user_id)
     except Exception as exc:
-        logger.exception("websocket error")
+        logger.exception("[ws user=%s] unhandled websocket error", user_id)
         try:
             await websocket.send_json({"type": "error", "message": str(exc)})
             await websocket.close()
         except Exception:
-            pass
+            logger.debug("[ws user=%s] client already gone; could not send error", user_id)

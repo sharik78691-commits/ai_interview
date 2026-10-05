@@ -41,6 +41,7 @@ from app.schemas.auth import (
     RegisterRequest,
     ResetPasswordRequest,
     UserPublic,
+    WsTicketResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -72,15 +73,20 @@ async def register(
     db: Session = Depends(get_db),
 ) -> AuthStatus:
     rate_limit(request, "register")
+    logger.info("Register attempt (origin=%s)", request.headers.get("origin", "-"))
     try:
         user = register_user(db, req.email, req.password, req.name)
     except ValueError:
         # Enumeration-resistant: same shape as a validation failure.
+        # The email itself is deliberately NOT logged (PII, and it is the very
+        # thing this response refuses to confirm).
+        logger.info("Register rejected: email already exists")
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="An account with this email already exists.",
         )
     security.set_session_cookies(response, user.id)
+    logger.info("Register succeeded (user_id=%s)", user.id)
     return AuthStatus(authenticated=True, user=_public(user))
 
 
@@ -92,13 +98,29 @@ async def login(
     db: Session = Depends(get_db),
 ) -> AuthStatus:
     rate_limit(request, "login")
+    logger.info(
+        "Login attempt (origin=%s, host=%s)",
+        request.headers.get("origin", "-"),
+        request.headers.get("host", "-"),
+    )
     user = authenticate_local(db, req.email, req.password)
     if user is None:
+        logger.warning("Login failed: invalid credentials")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail=_GENERIC_LOGIN_ERROR
         )
     # Fresh session token on login prevents session fixation.
     security.set_session_cookies(response, user.id)
+    settings = get_settings()
+    logger.info(
+        "Login succeeded (user_id=%s). Cookie set with secure=%s samesite=%s domain=%r — "
+        "if the browser does not store it, verify the scheme is HTTPS and that "
+        "COOKIE_DOMAIN (if set) covers the serving host.",
+        user.id,
+        settings.cookie_secure,
+        "none" if settings.cookie_secure else settings.cookie_samesite,
+        settings.cookie_domain or "",
+    )
     return AuthStatus(authenticated=True, user=_public(user))
 
 
@@ -114,9 +136,21 @@ async def logout(
 
 
 @router.get("/me", response_model=AuthStatus)
-async def me(user: User | None = Depends(get_current_user)) -> AuthStatus:
+async def me(
+    request: Request,
+    user: User | None = Depends(get_current_user),
+) -> AuthStatus:
+    # A 200 with authenticated=false here is the single most useful signal when
+    # debugging "logged out on production only": it means the request reached
+    # the backend but carried no usable session cookie.
     if user is None:
+        logger.info(
+            "Session check: not authenticated (cookies=%s, origin=%s)",
+            list(request.cookies.keys()) or "none",
+            request.headers.get("origin", "-"),
+        )
         return AuthStatus(authenticated=False, user=None)
+    logger.debug("Session check: authenticated (user_id=%s)", user.id)
     return AuthStatus(authenticated=True, user=_public(user))
 
 
@@ -265,3 +299,40 @@ async def csrf_bootstrap(response: Response, user: User = Depends(require_user))
         path="/",
     )
     return MessageResponse(message="ok")
+
+
+# ------------------------------------------------------- WebSocket ticket
+
+
+@router.post("/ws-ticket", response_model=WsTicketResponse)
+async def ws_ticket(user: User = Depends(require_user)) -> WsTicketResponse:
+    """Mint a short-lived ticket for the live-interview WebSocket.
+
+    Why this exists
+    ---------------
+    The socket is opened directly against the backend host, because a static
+    host (Vercel) cannot proxy a WebSocket upgrade to an external origin. That
+    makes the handshake cross-origin, and browsers deliberately do NOT attach
+    cookies to cross-origin WebSocket requests — so the session cookie that
+    authenticates every REST call is absent on the socket, and the server closes
+    it with 403/1008. This endpoint is called same-origin (where the cookie IS
+    sent) and hands back a ticket for the socket URL.
+
+    Security notes
+    --------------
+    * Requires an authenticated session — a ticket does not bypass auth.
+    * Very short lifetime (``WS_TICKET_MAX_AGE``, default 60s) because it appears
+      in a URL, which proxies and browser history may record.
+    * Signed with a dedicated salt, so a session cookie cannot be replayed as a
+      ticket or vice versa.
+    * The socket re-validates the user against the database, so a deactivated
+      account cannot keep using a ticket minted moments earlier.
+    """
+    settings = get_settings()
+    ticket = security.create_ws_ticket(user.id)
+    logger.info(
+        "Issued WebSocket ticket (user_id=%s, ttl=%ss)",
+        user.id,
+        settings.ws_ticket_max_age,
+    )
+    return WsTicketResponse(ticket=ticket, expires_in=settings.ws_ticket_max_age)

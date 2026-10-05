@@ -31,14 +31,24 @@ CSRF_COOKIE = "aia_csrf"
 CSRF_HEADER = "x-csrf-token"
 OAUTH_STATE_COOKIE = "aia_oauth_state"
 
+# Salt for the short-lived WebSocket ticket. A different salt means a session
+# token can never be replayed as a ticket (or vice versa), even though both are
+# signed with the same secret.
+_WS_TICKET_SALT = "aia-ws-ticket"
+
 # Methods that mutate state and therefore require a CSRF token.
 UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 
-def _serializer() -> URLSafeTimedSerializer:
+def _secret() -> str:
     settings = get_settings()
-    secret = settings.session_secret or "dev-insecure-session-secret-change-me"
-    return URLSafeTimedSerializer(secret_key=secret, salt="aia-session")
+    # The fallback keeps local development working, but it is shared by every
+    # install, so production MUST set SESSION_SECRET (warned at startup).
+    return settings.session_secret or "dev-insecure-session-secret-change-me"
+
+
+def _serializer() -> URLSafeTimedSerializer:
+    return URLSafeTimedSerializer(secret_key=_secret(), salt="aia-session")
 
 
 def create_session_token(user_id: int) -> str:
@@ -52,10 +62,58 @@ def read_session_token(token: str) -> int | None:
     try:
         data = _serializer().loads(token, max_age=settings.session_max_age)
     except SignatureExpired:
+        logger.info("Session token rejected: expired")
         return None
     except BadSignature:
+        logger.warning(
+            "Session token rejected: bad signature. This usually means "
+            "SESSION_SECRET changed (all existing sessions are invalidated)."
+        )
         return None
     except Exception:  # pragma: no cover - defensive
+        logger.exception("Session token rejected: unexpected error")
+        return None
+    uid = data.get("uid") if isinstance(data, dict) else None
+    return int(uid) if isinstance(uid, int) else None
+
+
+# --------------------------------------------------------------- WebSocket auth
+
+
+def create_ws_ticket(user_id: int) -> str:
+    """Mint a very short-lived ticket for the cross-origin WebSocket.
+
+    The live-interview socket is opened directly against the backend host, so
+    the browser treats it as a different origin and does NOT attach the session
+    cookie. The ticket travels in the query string instead.
+
+    It is deliberately short-lived and single-purpose: URLs leak into proxy and
+    browser logs far more readily than headers.
+    """
+    return URLSafeTimedSerializer(secret_key=_secret(), salt=_WS_TICKET_SALT).dumps(
+        {"uid": user_id, "iat": int(datetime.now(timezone.utc).timestamp())}
+    )
+
+
+def read_ws_ticket(token: str) -> int | None:
+    """Validate a WebSocket ticket and return its user id (else None)."""
+    settings = get_settings()
+    try:
+        data = URLSafeTimedSerializer(secret_key=_secret(), salt=_WS_TICKET_SALT).loads(
+            token, max_age=settings.ws_ticket_max_age
+        )
+    except SignatureExpired:
+        logger.warning(
+            "WebSocket ticket rejected: expired (max_age=%ss). The client should "
+            "request a fresh ticket immediately before opening the socket.",
+            settings.ws_ticket_max_age,
+        )
+        return None
+    except BadSignature:
+        logger.warning("WebSocket ticket rejected: bad signature")
+        return None
+    except Exception:  # pragma: no cover - defensive
+        logger.exception("WebSocket ticket rejected: unexpected error")
         return None
     uid = data.get("uid") if isinstance(data, dict) else None
     return int(uid) if isinstance(uid, int) else None
@@ -86,6 +144,8 @@ def _cookie_kwargs(max_age: int) -> dict:
     }
     if settings.cookie_domain:
         kwargs["domain"] = settings.cookie_domain
+    
+    logger.debug(f"Setting cookie with: secure={kwargs['secure']}, samesite={kwargs['samesite']}, domain={kwargs.get('domain', 'None')}")
     return kwargs
 
 

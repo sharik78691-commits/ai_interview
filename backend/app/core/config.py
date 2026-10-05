@@ -1,15 +1,27 @@
 """Application settings (no pydantic-settings dependency)."""
+import logging
 import os
 from pathlib import Path
 
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 # Load backend/.env explicitly. Without an explicit path, python-dotenv only
 # searches from the CURRENT WORKING DIRECTORY upwards, so starting the server
 # from the project root (instead of backend/) silently missed every variable —
 # which looks like "AI/STT not configured".
 _BACKEND_DIR = Path(__file__).resolve().parents[2]
-load_dotenv(_BACKEND_DIR / ".env")
+env_file = _BACKEND_DIR / ".env"
+if env_file.exists():
+    logger.info("Loading environment from %s", env_file)
+    load_dotenv(env_file)
+else:
+    # Not fatal: on Render (and any container host) configuration comes from
+    # real environment variables, and no .env file is shipped.
+    logger.info(
+        "No .env file at %s; relying on process environment variables", env_file
+    )
 load_dotenv()
 
 
@@ -27,6 +39,7 @@ def _as_list(value: str | None, default: list[str]) -> list[str]:
 
 class Settings:
     def __init__(self) -> None:
+        logger.info("Initializing application settings...")
         self.app_name: str = os.getenv("APP_NAME", "AI Interview Assistant")
         self.llm_api_key: str = os.getenv("LLM_API_KEY", "")
         self.llm_model: str = os.getenv("LLM_MODEL", "gpt-4o-mini")
@@ -117,7 +130,24 @@ class Settings:
         # SameSite: "lax" works for the OAuth redirect back to the app while
         # still blocking cross-site POSTs (CSRF). "none" requires Secure.
         self.cookie_samesite: str = os.getenv("COOKIE_SAMESITE", "lax").lower()
+        # NOTE: leave empty for the normal topology (SPA on oyeinterview.com,
+        # API proxied on the same origin). A browser REJECTS a cookie whose
+        # Domain attribute does not cover the host that served the response, so
+        # setting this to the Render host from an oyeinterview.com response
+        # would silently drop the session cookie.
         self.cookie_domain: str = os.getenv("COOKIE_DOMAIN", "")
+
+        # ------------------------------------------------------------ websocket
+        # Lifetime of the short-lived ticket used to authenticate the live
+        # interview socket. The socket is opened directly against the backend
+        # host (static hosts cannot proxy a WS upgrade), which is a different
+        # origin than the site that holds the session cookie — so the cookie is
+        # never sent and cookie auth cannot work there. A ticket in the URL
+        # replaces it. Kept very short because URLs are logged by proxies.
+        try:
+            self.ws_ticket_max_age: int = int(os.getenv("WS_TICKET_MAX_AGE", "60"))
+        except ValueError:
+            self.ws_ticket_max_age = 60
 
         # --------------------------------------------------------- rate limiting
         try:
@@ -127,9 +157,78 @@ class Settings:
         except ValueError:
             self.rate_limit_per_minute = 10
 
+        self._log_summary()
+
     def _is_production(self) -> bool:
         env = os.getenv("ENVIRONMENT", os.getenv("APP_ENV", "development")).lower()
         return env in ("production", "prod")
+
+    def _log_summary(self) -> None:
+        """Emit the resolved configuration once, at startup.
+
+        Misconfiguration is the most common cause of production-only failures
+        (the app works on localhost because the defaults are all localhost
+        values). Logging the resolved values — not the raw env — makes the
+        difference between "should work" and "does work" immediately visible.
+        """
+        logger.info("Resolved configuration:")
+        logger.info("  environment      = %s", self._is_production() and "production" or "development")
+        logger.info("  cors_origins     = %s", self.cors_origins)
+        logger.info("  frontend_url     = %s", self.frontend_url)
+        logger.info("  backend_url      = %s", self.backend_url)
+        logger.info("  database_url     = %s", self._redact_dsn(self.database_url))
+        logger.info(
+            "  cookies          = secure=%s samesite=%s domain=%r",
+            self.cookie_secure,
+            self.cookie_samesite,
+            self.cookie_domain or "",
+        )
+        logger.info("  llm_configured   = %s", self.llm_configured)
+        logger.info("  stt_configured   = %s", self.stt_configured)
+        logger.info("  demo_mode        = %s", self.demo_mode)
+        logger.info("  google_oauth     = %s", self.google_configured)
+        logger.info("  ws_ticket_max_age= %ss", self.ws_ticket_max_age)
+
+        if not self.session_secret:
+            logger.warning(
+                "SESSION_SECRET is not set. Sessions are signed with an insecure "
+                "built-in default, so every restart invalidates all logins. Set "
+                "SESSION_SECRET in production."
+            )
+        if not self.cors_origins:
+            logger.error(
+                "CORS_ORIGINS is empty. No browser origin will be allowed to "
+                "call the API; the SPA will fail with opaque CORS errors."
+            )
+        if self.cookie_domain and self._is_production():
+            logger.warning(
+                "COOKIE_DOMAIN=%r in production. A browser rejects a cookie whose "
+                "Domain does not cover the host that served the response, which "
+                "silently drops the session cookie. Leave COOKIE_DOMAIN empty "
+                "unless the SPA and API genuinely share a parent domain.",
+                self.cookie_domain,
+            )
+        if self._is_production() and "localhost" in self.frontend_url:
+            # Already warned in __init__; kept here so the summary is complete.
+            logger.warning("FRONTEND_URL still points at localhost in production.")
+
+    @staticmethod
+    def _redact_dsn(dsn: str) -> str:
+        """Hide the password in a DSN before logging it."""
+        if "://" not in dsn:
+            return dsn
+        scheme, rest = dsn.split("://", 1)
+        if "@" not in rest:
+            return dsn
+        creds, host = rest.rsplit("@", 1)
+        user = creds.split(":", 1)[0]
+        return f"{scheme}://{user}:***@{host}"
+
+    def cors_allows(self, origin: str | None) -> bool:
+        """True when the given browser origin is allowed by CORS."""
+        if not origin:
+            return False
+        return origin in self.cors_origins
 
     @property
     def llm_configured(self) -> bool:

@@ -17,6 +17,17 @@ const WS_BASE_URL: string =
     (window as unknown as { WS_BASE_URL?: string }).WS_BASE_URL) ||
   '';
 
+/**
+ * Same-origin endpoint that mints a short-lived WebSocket ticket.
+ *
+ * This is deliberately a RELATIVE path: the SPA is served from
+ * `oyeinterview.com` and `/api` is proxied to the backend (Vercel rewrite),
+ * so the request is same-origin and therefore DOES carry the session cookie.
+ * The socket itself is cross-origin and does not, which is exactly why the
+ * ticket exists.
+ */
+const TICKET_PATH = '/api/auth/ws-ticket';
+
 interface WsMsg {
   type: string;
   [k: string]: unknown;
@@ -37,6 +48,8 @@ export class InterviewWsService {
   private retries = 0;
   private url = this.defaultUrl();
   private wantOpen = false;
+  /** Guards against overlapping reconnect attempts while a ticket is fetched. */
+  private opening = false;
 
   /**
    * WebSocket URL for the live-interview socket.
@@ -66,20 +79,91 @@ export class InterviewWsService {
     return `${proto}//${window.location.host}/ws/interview`;
   }
 
+  /**
+   * Fetch a short-lived ticket so the cross-origin socket can authenticate.
+   *
+   * Browsers do not send cookies on cross-origin WebSocket handshakes, so the
+   * session cookie that authenticates every REST call is absent on the socket
+   * (the server then rejects the handshake with 403/1008). This request is
+   * same-origin, so it DOES carry the cookie.
+   *
+   * @returns the ticket, or null when the session is missing/expired or the
+   *          endpoint is unreachable. Callers fall back to cookie auth, which
+   *          still works same-origin (local dev via the Angular proxy).
+   */
+  private async fetchTicket(): Promise<string | null> {
+    try {
+      const res = await fetch(TICKET_PATH, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!res.ok) {
+        // 401 => not signed in (or the session cookie was not sent). Log the
+        // status because the socket failure alone is an opaque 403.
+        console.warn(
+          `[ws] ticket request failed: HTTP ${res.status}. ` +
+            'Ensure you are signed in; the socket will fall back to cookie auth.',
+        );
+        return null;
+      }
+      const body = (await res.json()) as { ticket?: string };
+      if (!body?.ticket) {
+        console.warn('[ws] ticket request returned no ticket field');
+        return null;
+      }
+      return body.ticket;
+    } catch (err) {
+      console.warn('[ws] ticket request errored; falling back to cookie auth', err);
+      return null;
+    }
+  }
+
   connect(url?: string): void {
     this.url = url ?? this.defaultUrl();
     this.wantOpen = true;
-    this.open();
+    void this.open();
   }
 
-  private open(): void {
+  private async open(): Promise<void> {
     if (!this.wantOpen) return;
+    // A ticket fetch is async, so a slow response plus a pending backoff timer
+    // could otherwise start two sockets.
+    if (this.opening) return;
+    this.opening = true;
+
     try {
-      this.ws = new WebSocket(this.url);
-    } catch {
-      this.scheduleReconnect();
-      return;
+      const target = await this.buildSocketUrl();
+      if (!this.wantOpen) return;
+      try {
+        this.ws = new WebSocket(target);
+      } catch (err) {
+        console.warn('[ws] could not construct WebSocket', err);
+        this.scheduleReconnect();
+        return;
+      }
+      this.attachHandlers();
+    } finally {
+      this.opening = false;
     }
+  }
+
+  /**
+   * Append a fresh ticket to the socket URL.
+   *
+   * The ticket is minted per connection attempt rather than reused, because it
+   * expires quickly (default 60s) and a Render cold start can easily outlast
+   * that. Query strings are visible to proxies, so it is never persisted.
+   */
+  private async buildSocketUrl(): Promise<string> {
+    const ticket = await this.fetchTicket();
+    if (!ticket) return this.url;
+    const sep = this.url.includes('?') ? '&' : '?';
+    return `${this.url}${sep}ticket=${encodeURIComponent(ticket)}`;
+  }
+
+  private attachHandlers(): void {
+    if (!this.ws) return;
     this.ws.onopen = () => {
       this.retries = 0;
       // A successful (re)connect clears a previous "Connection issue" pill so

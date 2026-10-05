@@ -28,6 +28,13 @@ class AuthStatus(BaseModel):
     user: Optional[UserPublic] = None
 
 
+class WsTicketResponse(BaseModel):
+    """Short-lived credential for the cross-origin live-interview socket."""
+
+    ticket: str
+    expires_in: int
+
+
 class RegisterRequest(BaseModel):
     name: str = Field(default="", max_length=200)
     email: EmailStr
