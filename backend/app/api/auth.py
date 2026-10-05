@@ -165,6 +165,13 @@ async def google_login(request: Request) -> RedirectResponse:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Google sign-in is not configured.",
         )
+    # Log the exact redirect_uri sent to Google — the #1 thing to check when a
+    # callback arrives on the wrong host (the "OAuth state mismatch" failure).
+    logger.info(
+        "Starting Google login: redirect_uri=%s (frontend=%s)",
+        settings.google_redirect_uri,
+        settings.frontend_url,
+    )
     state = oauth.new_state()
     url = oauth.build_authorize_url(state)
     redirect = RedirectResponse(url, status_code=status.HTTP_302_FOUND)

@@ -195,17 +195,44 @@ class Settings:
                 "built-in default, so every restart invalidates all logins. Set "
                 "SESSION_SECRET in production."
             )
+        if self.google_configured:
+            # The OAuth callback MUST be served from the SAME origin as the login
+            # start, otherwise the one-time state cookie (scoped to the login
+            # origin) is never sent back and every sign-in fails with
+            # "google_state" / "OAuth state mismatch (cookie_present=False)".
+            redirect_host = self._host_of(self.google_redirect_uri)
+            frontend_host = self._host_of(self.frontend_url)
+            if redirect_host and frontend_host and redirect_host != frontend_host:
+                logger.warning(
+                    "GOOGLE_REDIRECT_URI host (%s) differs from FRONTEND_URL host "
+                    "(%s). The callback must be served from the SAME origin as the "
+                    "login start (the frontend proxies /api to the backend), "
+                    "otherwise the aia_oauth_state cookie is dropped and sign-in "
+                    "fails with 'google_state'. Point GOOGLE_REDIRECT_URI at "
+                    "%s/api/auth/google/callback.",
+                    redirect_host,
+                    frontend_host,
+                    self.frontend_url.rstrip("/"),
+                )
         if not self.cors_origins:
             logger.error(
                 "CORS_ORIGINS is empty. No browser origin will be allowed to "
                 "call the API; the SPA will fail with opaque CORS errors."
             )
-        if self.cookie_domain and self._is_production():
+        if self.cookie_domain:
+            # Fires regardless of ENVIRONMENT: a cross-host cookie Domain is
+            # harmful in the proxy topology (SPA on one host, /api proxied to the
+            # backend) whether or not "production" is set. A browser REJECTS a
+            # cookie whose Domain does not cover the host that served it, which
+            # silently drops the session + OAuth-state cookies and surfaces as
+            # "logged out on production" / "OAuth state mismatch".
             logger.warning(
-                "COOKIE_DOMAIN=%r in production. A browser rejects a cookie whose "
-                "Domain does not cover the host that served the response, which "
-                "silently drops the session cookie. Leave COOKIE_DOMAIN empty "
-                "unless the SPA and API genuinely share a parent domain.",
+                "COOKIE_DOMAIN=%r is set. A browser rejects a cookie whose Domain "
+                "does not cover the host that served the response, which silently "
+                "drops the session cookie. Leave COOKIE_DOMAIN empty when the SPA "
+                "is served on one host and /api is proxied to the backend (the "
+                "normal Vercel->Render topology). Only set it when the SPA and API "
+                "genuinely share a parent domain.",
                 self.cookie_domain,
             )
         if self._is_production() and "localhost" in self.frontend_url:
@@ -223,6 +250,20 @@ class Settings:
         creds, host = rest.rsplit("@", 1)
         user = creds.split(":", 1)[0]
         return f"{scheme}://{user}:***@{host}"
+
+    @staticmethod
+    def _host_of(url: str) -> str:
+        """Lowercased hostname of a URL (empty when unparseable).
+
+        Used to cross-check that the OAuth redirect URI and the frontend URL
+        share an origin — the single most common production OAuth failure.
+        """
+        try:
+            from urllib.parse import urlsplit
+
+            return (urlsplit(url).hostname or "").lower()
+        except ValueError:
+            return ""
 
     def cors_allows(self, origin: str | None) -> bool:
         """True when the given browser origin is allowed by CORS."""
