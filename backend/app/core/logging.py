@@ -18,6 +18,17 @@ import json
 import logging
 import os
 import sys
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
+
+# backend/ directory — logs are written here, independent of the CWD the server
+# was started from (same reasoning as .env loading in config.py).
+_BACKEND_DIR = Path(__file__).resolve().parents[2]
+_LOG_DIR = _BACKEND_DIR / "logs"
+
+# Rotating file size + how many backups to keep before the oldest is deleted.
+_MAX_LOG_BYTES = 5 * 1024 * 1024
+_BACKUP_COUNT = 3
 
 
 class JsonFormatter(logging.Formatter):
@@ -73,6 +84,48 @@ def setup_logging(level: int | None = None) -> logging.Logger:
                 )
             )
         root.addHandler(handler)
+
+        # File sinks: errors always persist to disk (survives restarts and is
+        # searchable even after the console scrolls past them). The full
+        # per-request log is optional via LOG_TO_FILE.
+        try:
+            _LOG_DIR.mkdir(parents=True, exist_ok=True)
+            error_handler = RotatingFileHandler(
+                _LOG_DIR / "error.log",
+                maxBytes=_MAX_LOG_BYTES,
+                backupCount=_BACKUP_COUNT,
+                encoding="utf-8",
+            )
+            error_handler.setLevel(logging.ERROR)
+            error_handler.setFormatter(
+                logging.Formatter(
+                    "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+                    datefmt="%Y-%m-%d %H:%M:%S",
+                )
+            )
+            root.addHandler(error_handler)
+
+            if os.getenv("LOG_TO_FILE", "").strip().lower() in ("1", "true", "yes", "on"):
+                app_handler = RotatingFileHandler(
+                    _LOG_DIR / "app.log",
+                    maxBytes=_MAX_LOG_BYTES,
+                    backupCount=_BACKUP_COUNT,
+                    encoding="utf-8",
+                )
+                app_handler.setLevel(level)
+                app_handler.setFormatter(
+                    logging.Formatter(
+                        "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+                        datefmt="%Y-%m-%d %H:%M:%S",
+                    )
+                )
+                root.addHandler(app_handler)
+        except OSError as exc:
+            # Logging must never crash the app, even if the log dir is unwritable
+            # (read-only filesystem, permissions, containerised /app mount...).
+            logging.getLogger(__name__).warning(
+                "Could not configure file logging in %s: %s", _LOG_DIR, exc
+            )
 
     root.setLevel(level)
     for name, noisy_level in _NOISY_LOGGERS.items():

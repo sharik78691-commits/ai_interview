@@ -208,14 +208,26 @@ export class InterviewWsService {
             scope,
           });
         } else if (msg.type === 'error') {
+          // Server-side failure relayed over the socket (AI/STT unavailable...).
+          console.error(
+            `[ws] server error: ${String(msg['message'] ?? 'unknown')}`,
+          );
           this.status$.next('error');
         }
-      } catch {
-        /* ignore malformed */
+      } catch (err) {
+        // A malformed frame is a client/server contract bug, not ignorable noise.
+        console.warn('[ws] could not parse message:', (err as Error)?.message, String(ev.data).slice(0, 200));
       }
     };
-    this.ws.onclose = () => this.scheduleReconnect();
-    this.ws.onerror = () => {
+    this.ws.onclose = (ev: CloseEvent) => {
+      // Close codes explain WHY the socket died (1008 = auth, 1000 = normal).
+      console.warn(
+        `[ws] closed code=${ev.code} reason=${ev.reason || '-'} clean=${ev.wasClean}; retrying`,
+      );
+      this.scheduleReconnect();
+    };
+    this.ws.onerror = (ev: Event) => {
+      console.error('[ws] socket error', ev);
       this.status$.next('error');
     };
   }

@@ -57,6 +57,28 @@ Interviewer-audio clips are already cut at pauses, so `push_complete()` treats a
 substantial utterance (≥4 words or ≥25 chars) as a finished prompt. This avoids an
 LLM call per partial transcript.
 
+## Logging & error tracking
+
+Errors are logged on both sides so a production failure is diagnosable without
+reproducing it locally.
+
+**Backend** (`app/core/logging.py`):
+- One line per request (method, path, status, duration, `origin`, request id) via
+  `RequestLoggingMiddleware`; 4xx → WARNING, 5xx → ERROR, unhandled → traceback.
+- `error.log` in `backend/logs/` **always** captures ERROR+ (rotating 5MB × 3),
+  so errors survive restarts. `LOG_TO_FILE=1` additionally writes every line to
+  `app.log`. `LOG_LEVEL`/`LOG_FORMAT` (text|json) control verbosity/shape.
+- Endpoints log decision inputs (resume upload size/type, analyze question length,
+  OAuth state host, cookie presence) so "works locally, fails in prod" issues are
+  visible. Config is logged once at startup, redacting DB passwords.
+
+**Frontend**:
+- `errorLoggingInterceptor` logs every failed HTTP call (`[http] 502 POST /api/…`)
+  so it pairs with the backend request-id line.
+- `GlobalErrorHandler` (`ErrorHandler`) captures uncaught Angular errors.
+- `InterviewWsService` logs socket close codes/reasons, server `error` frames and
+  malformed messages.
+
 ## Decisions
 
 - **No DB:** MVP session only. `InterviewRepository`-style seam = `_context` dict

@@ -9,6 +9,12 @@ __pycache__/
 .venv/
 venv/
 
+# Runtime artifacts (logs, local database)
+backend/logs/
+backend/*.log
+backend/app.db
+backend/*.db
+
 # Node
 node_modules/
 dist/

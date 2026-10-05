@@ -1,4 +1,5 @@
 """Interview prepare/context/analyze endpoints (authenticated, per-user)."""
+import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -9,6 +10,8 @@ from app.models.ai_response import AIInterviewResponse
 from app.models.interview import PrepareRequest, PrepareResponse
 from app.models.user import User
 from app.services.ai_service import AIService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -61,6 +64,10 @@ async def prepare(
     ctx["resume"] = resume
     ctx["job"] = job
     ctx["length"] = length
+    logger.info(
+        "Interview prepared: user=%s resume_chars=%d job_chars=%d length=%s",
+        user.id, len(resume), len(job), length,
+    )
     return PrepareResponse(
         status="ready",
         message="Interview context stored. Ready for live guidance.",
@@ -106,4 +113,14 @@ async def analyze(
         job_description=job,
         response_length=length,
     )
-    return await service.analyze(question)
+    logger.info(
+        "Analyze question: user=%s question_chars=%d length=%s",
+        user.id, len(question), length,
+    )
+    try:
+        return await service.analyze(question)
+    except Exception:
+        logger.exception("Analyze failed: user=%s question=%r", user.id, question[:200])
+        raise HTTPException(
+            status_code=502, detail="AI response unavailable. Please try again."
+        )
