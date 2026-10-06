@@ -66,7 +66,7 @@ settings; the health endpoint stays public.
 
 ## Real AI mode
 
-1. Copy `.env.example` to `backend/.env`, set `LLM_API_KEY` (+ optional `LLM_MODEL`, `LLM_BASE_URL`).
+1. Copy `backend/.env.example` to `backend/.env`, set `LLM_API_KEY` (+ optional `LLM_MODEL`, `LLM_BASE_URL`).
 2. Restart uvicorn. `demo_mode` becomes `false`; `/api/interview/analyze` and the
    WebSocket path call the configured OpenAI-compatible `chat/completions` endpoint
    with a strict-JSON system prompt, falling back to the mock provider on failure.

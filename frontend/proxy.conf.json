@@ -1,15 +1,15 @@
 {
   "/api": {
-    "target": "https://ai-interview-1-309j.onrender.com",
-    "secure": true,
+    "target": "http://localhost:8000",
+    "secure": false,
     "changeOrigin": true,
-    "logLevel": "debug"
+    "logLevel": "info"
   },
   "/ws": {
-    "target": "https://ai-interview-1-309j.onrender.com",
-    "secure": true,
+    "target": "http://localhost:8000",
+    "secure": false,
     "changeOrigin": true,
     "ws": true,
-    "logLevel": "debug"
+    "logLevel": "info"
   }
 }

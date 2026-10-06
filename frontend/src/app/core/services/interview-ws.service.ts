@@ -1,20 +1,24 @@
 import { Injectable } from '@angular/core';
 import { BehaviorSubject, Subject } from 'rxjs';
 import { AIInterviewResponse, HistoryItem, InterviewStatus } from '../models/interview.models';
+import { environment } from '../../../environments/environment';
 
 /**
- * Backend origin for the live-interview WebSocket, read from the runtime config
- * (`public/runtime-config.js` sets `window.WS_BASE_URL` before the app boots).
+ * Backend origin for the live-interview WebSocket.
  *
- * Static hosts (Vercel) cannot proxy a WebSocket upgrade to an external origin,
- * so in production this MUST point at the backend host (e.g.
- * `wss://ai-interview-1-309j.onrender.com`). When empty, the socket falls back
- * to the same-origin `/ws/interview` path, which the Angular dev-server proxy
- * forwards to the backend during local development.
+ * Resolution order:
+ *   1. `window.WS_BASE_URL` — optional runtime override (rarely used; kept so a
+ *      host can retarget the socket without rebuilding).
+ *   2. `environment.wsBaseUrl` — build-time value, swapped automatically:
+ *      - local  : '' (same-origin `/ws/interview`, forwarded by the Angular
+ *        dev-server proxy to http://localhost:8000)
+ *      - prod   : 'wss://ai-interview-1-309j.onrender.com' (direct connection,
+ *        because static hosts cannot reliably proxy a WebSocket upgrade).
  */
 const WS_BASE_URL: string =
   (typeof window !== 'undefined' &&
     (window as unknown as { WS_BASE_URL?: string }).WS_BASE_URL) ||
+  environment.wsBaseUrl ||
   '';
 
 /**
@@ -59,8 +63,8 @@ export class InterviewWsService {
    * same-origin `/ws` path only works behind the Angular dev-server proxy.
    *
    * Resolution order:
-   *   1. `WS_BASE_URL` build-time env (e.g. `wss://api.example.com`) — used in
-   *      production so the socket targets the backend host directly.
+   *   1. `environment.wsBaseUrl` build-time value (production build) — the socket
+   *      targets the backend host directly, e.g. `wss://api.example.com`.
    *   2. Same-origin `/ws/interview` — used in local dev, where the Angular
    *      proxy forwards `/ws` to the backend and keeps the session cookie
    *      same-origin.
