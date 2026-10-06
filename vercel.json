@@ -1,8 +1,8 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "cd frontend && npm ci && npm run build",
-  "outputDirectory": "frontend/dist/frontend/browser",
-  "installCommand": "cd frontend && npm ci",
+  "installCommand": "npm ci",
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist/frontend/browser",
   "framework": null,
   "rewrites": [
     { "source": "/api/(.*)", "destination": "https://ai-interview-1-309j.onrender.com/api/$1" },
