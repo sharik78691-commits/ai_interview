@@ -1,0 +1,12 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "installCommand": "npm ci",
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist/frontend/browser",
+  "framework": null,
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "https://ai-interview-1-309j.onrender.com/api/$1" },
+    { "source": "/ws/(.*)", "destination": "https://ai-interview-1-309j.onrender.com/ws/$1" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}
