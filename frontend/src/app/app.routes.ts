@@ -9,6 +9,7 @@ import { ForgotPasswordComponent } from './features/auth/forgot-password/forgot-
 import { LoginComponent } from './features/auth/login/login.component';
 import { RegisterComponent } from './features/auth/register/register.component';
 import { ResetPasswordComponent } from './features/auth/reset-password/reset-password.component';
+import { TermsComponent } from './features/legal/terms/terms.component';
 
 export const routes: Routes = [
   {
@@ -113,6 +114,19 @@ export const routes: Routes = [
         description: 'Manage your OyeInterview settings.',
         path: '/settings',
         noindex: true,
+      },
+    },
+  },
+  // Public legal page — indexed for SEO.
+  {
+    path: 'terms-and-conditions',
+    component: TermsComponent,
+    data: {
+      seo: {
+        title: 'Terms and Conditions — OyeInterview',
+        description:
+          'The terms and conditions for OyeInterview, the real-time AI interview assistant: account eligibility, licence, responsible use, and liability.',
+        path: '/terms-and-conditions',
       },
     },
   },

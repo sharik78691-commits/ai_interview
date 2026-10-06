@@ -1,5 +1,5 @@
 import { Component, OnDestroy, OnInit, inject } from '@angular/core';
-import { NavigationEnd, Router, RouterOutlet } from '@angular/router';
+import { NavigationEnd, Router, RouterLink, RouterOutlet } from '@angular/router';
 import { Subscription, filter } from 'rxjs';
 import { AuthService } from './core/auth/auth.service';
 import { SeoConfig, SeoService } from './core/services/seo.service';
@@ -8,7 +8,7 @@ import { NavbarComponent } from './shared/components/navbar/navbar.component';
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [RouterOutlet, NavbarComponent],
+  imports: [RouterOutlet, RouterLink, NavbarComponent],
   templateUrl: './app.html',
   styleUrl: './app.css',
 })
