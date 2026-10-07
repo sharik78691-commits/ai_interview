@@ -89,6 +89,65 @@ def test_logout_requires_csrf(client):
     register(client, EMAIL, PASSWORD)
     r = client.post("/api/auth/logout")  # no CSRF header
     assert r.status_code == 403
+    assert client.get("/api/auth/me").json()["authenticated"] is True
+
+
+def test_logout_revokes_copied_session_cookie(client):
+    register(client, EMAIL, PASSWORD)
+    stolen = client.cookies.get("aia_session")
+    assert client.post("/api/auth/logout", headers=csrf_headers(client)).status_code == 200
+
+    client.cookies.set("aia_session", stolen)
+    assert client.get("/api/auth/me").json()["authenticated"] is False
+    assert client.post("/api/auth/ws-ticket").status_code == 401
+
+
+def test_logout_clears_interview_context(client):
+    from app.api.interview import _contexts
+
+    register(client, EMAIL, PASSWORD)
+    prepared = client.post(
+        "/api/interview/prepare",
+        json={"resumeText": "private resume", "jobDescription": "private job"},
+        headers=csrf_headers(client),
+    )
+    assert prepared.status_code == 200
+    user_id = int(client.get("/api/auth/me").json()["user"]["id"])
+    assert user_id in _contexts
+
+    client.post("/api/auth/logout", headers=csrf_headers(client))
+    assert user_id not in _contexts
+
+
+def test_logout_cookie_deletion_matches_cookie_attributes(client):
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    original = settings.cookie_secure
+    settings.cookie_secure = True
+    try:
+        register(client, EMAIL, PASSWORD)
+        csrf = client.cookies.get("aia_csrf")
+        r = client.post(
+            "/api/auth/logout",
+            headers={"X-CSRF-Token": csrf},
+            cookies={"aia_session": client.cookies.get("aia_session"), "aia_csrf": csrf},
+        )
+    finally:
+        settings.cookie_secure = original
+    deletions = r.headers.get_list("set-cookie")
+    assert len(deletions) == 2
+    for header in deletions:
+        lowered = header.lower()
+        assert "samesite=none" in lowered
+        assert "secure" in lowered
+        assert "path=/" in lowered
+    assert r.headers["cache-control"] == "no-store"
+
+
+def test_logout_without_session_succeeds(client):
+    r = client.post("/api/auth/logout")
+    assert r.status_code == 200
 
 
 def test_password_is_hashed_not_plaintext(client):

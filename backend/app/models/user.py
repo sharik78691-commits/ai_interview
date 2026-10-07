@@ -85,5 +85,19 @@ class PasswordResetToken(Base):
         return self.used_at is None and expires > now
 
 
+class RevokedSession(Base):
+    """Session cookie invalidated by logout.
+
+    Session tokens are signed and stateless, so without this list a copied
+    cookie would stay valid until it expires. Only a SHA-256 hash is stored.
+    """
+
+    __tablename__ = "revoked_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True, nullable=False)
+
+
 # Re-exported for convenience in tests / services.
-__all__ = ["User", "PasswordResetToken", "Text"]
+__all__ = ["User", "PasswordResetToken", "RevokedSession", "Text"]

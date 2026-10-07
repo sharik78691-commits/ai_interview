@@ -20,7 +20,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.api.interview import VALID_LENGTHS, _normalize_length, get_context
 from app.auth import security
-from app.auth.service import get_user_by_id
+from app.auth.service import get_user_by_id, is_session_token_revoked
 from app.db.session import SessionLocal
 from app.providers.stt.provider import (
     STTRequestError,
@@ -120,6 +120,13 @@ def _authenticate_ws(websocket: WebSocket) -> int | None:
     user_id = security.read_session_token(token)
     if user_id is None:
         return None
+    db = SessionLocal()
+    try:
+        if is_session_token_revoked(db, token):
+            logger.warning("WebSocket auth failed: session cookie was logged out")
+            return None
+    finally:
+        db.close()
     logger.info("WebSocket authenticated via session cookie (user_id=%s)", user_id)
     return _ws_user_is_active(user_id)
 

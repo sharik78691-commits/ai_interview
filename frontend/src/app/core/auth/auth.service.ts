@@ -1,6 +1,17 @@
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
-import { Injectable, inject } from '@angular/core';
-import { BehaviorSubject, Observable, catchError, map, of, tap, throwError } from 'rxjs';
+import { Injectable, NgZone, OnDestroy, inject } from '@angular/core';
+import {
+  BehaviorSubject,
+  Observable,
+  Subject,
+  catchError,
+  finalize,
+  map,
+  of,
+  share,
+  tap,
+  throwError,
+} from 'rxjs';
 import { AuthStatus, AuthUser, LoginPayload, RegisterPayload } from '../models/auth.models';
 
 /**
@@ -13,6 +24,9 @@ import { AuthStatus, AuthUser, LoginPayload, RegisterPayload } from '../models/a
  */
 const BASE = '';
 
+/** Lets every open tab of the app learn that the user signed out. */
+const LOGOUT_CHANNEL = 'aia-auth';
+
 /**
  * Authentication service.
  *
@@ -21,8 +35,9 @@ const BASE = '';
  * current user projection in memory for the UI.
  */
 @Injectable({ providedIn: 'root' })
-export class AuthService {
+export class AuthService implements OnDestroy {
   private http = inject(HttpClient);
+  private zone = inject(NgZone);
 
   private userSubject = new BehaviorSubject<AuthUser | null>(null);
   /** Current authenticated user (null when signed out). */
@@ -31,6 +46,26 @@ export class AuthService {
   /** True once the initial session check has completed. */
   private readySubject = new BehaviorSubject<boolean>(false);
   ready$ = this.readySubject.asObservable();
+
+  /** Emits after a sign-out in this tab or another tab, so app state can be cleared. */
+  private loggedOutSubject = new Subject<void>();
+  loggedOut$ = this.loggedOutSubject.asObservable();
+
+  private logoutRequest: Observable<void> | null = null;
+  private channel: BroadcastChannel | null =
+    typeof BroadcastChannel === 'undefined' ? null : new BroadcastChannel(LOGOUT_CHANNEL);
+
+  constructor() {
+    if (this.channel) {
+      this.channel.onmessage = (ev: MessageEvent) => {
+        if (ev.data === 'logout') this.zone.run(() => this.endLocalSession());
+      };
+    }
+  }
+
+  ngOnDestroy(): void {
+    this.channel?.close();
+  }
 
   get currentUser(): AuthUser | null {
     return this.userSubject.value;
@@ -83,18 +118,36 @@ export class AuthService {
     );
   }
 
+  /**
+   * Sign out on the server, then clear local state in every open tab.
+   * Repeated clicks share the request already in flight.
+   */
   logout(): Observable<void> {
-    return this.http
+    if (this.logoutRequest) return this.logoutRequest;
+    this.logoutRequest = this.http
       .post<{ message: string }>(`${BASE}/api/auth/logout`, {}, { headers: this.csrfHeaders() })
       .pipe(
         map(() => void 0),
-        tap(() => this.userSubject.next(null)),
+        tap(() => this.finishLogout()),
         catchError((err) => {
-          // Even if the call fails, drop local state.
-          this.userSubject.next(null);
+          // Even if the call fails, do not leave the previous user's data on screen.
+          this.finishLogout();
           return throwError(() => err);
         }),
+        finalize(() => (this.logoutRequest = null)),
+        share(),
       );
+    return this.logoutRequest;
+  }
+
+  private finishLogout(): void {
+    this.channel?.postMessage('logout');
+    this.endLocalSession();
+  }
+
+  private endLocalSession(): void {
+    this.userSubject.next(null);
+    this.loggedOutSubject.next();
   }
 
   forgotPassword(email: string): Observable<{ message: string }> {

@@ -307,6 +307,15 @@ export class InterviewWsService {
     this.status$.next('idle');
   }
 
+  /** Close the socket and forget the session's answers (used on sign-out). */
+  clearSession(): void {
+    this.disconnect();
+    this.retries = 0;
+    this.guidance$.next(null);
+    this.history$.next([]);
+    this.status$.next('idle');
+  }
+
   pushLocalGuidance(g: AIInterviewResponse): void {
     this.guidance$.next(g);
     this.history$.next([...this.history$.value, { question: g.question, guidance: g, timestamp: new Date() }]);

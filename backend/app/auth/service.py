@@ -8,12 +8,13 @@ import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.auth.password import dummy_verify, hash_password, needs_rehash, verify_password
 from app.core.config import get_settings
-from app.models.user import PasswordResetToken, User
+from app.models.user import PasswordResetToken, RevokedSession, User
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,38 @@ def get_user_by_email(db: Session, email: str) -> User | None:
 
 def get_user_by_id(db: Session, user_id: int) -> User | None:
     return db.get(User, user_id)
+
+
+def _hash_session_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def revoke_session_token(db: Session, token: str) -> None:
+    """Deny-list a session token until it would have expired anyway."""
+    now = _utcnow()
+    db.execute(delete(RevokedSession).where(RevokedSession.expires_at < now))
+    db.add(
+        RevokedSession(
+            token_hash=_hash_session_token(token),
+            expires_at=now + timedelta(seconds=get_settings().session_max_age),
+        )
+    )
+    try:
+        db.commit()
+    except IntegrityError:
+        # Already revoked (e.g. logout clicked twice).
+        db.rollback()
+
+
+def is_session_token_revoked(db: Session, token: str) -> bool:
+    return (
+        db.scalar(
+            select(RevokedSession.id).where(
+                RevokedSession.token_hash == _hash_session_token(token)
+            )
+        )
+        is not None
+    )
 
 
 def get_user_by_google_subject(db: Session, subject: str) -> User | None:
@@ -193,3 +226,4 @@ def consume_reset_token(db: Session, raw_token: str, new_password: str) -> bool:
     row.used_at = _utcnow()
     db.commit()
     return True
+
