@@ -1,5 +1,9 @@
 """Authentication REST endpoints.
 
+
+
+
+
 Endpoints
 ---------
 POST /api/auth/register
