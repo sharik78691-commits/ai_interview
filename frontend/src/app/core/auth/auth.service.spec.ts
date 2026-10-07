@@ -76,6 +76,24 @@ describe('AuthService', () => {
     expect(service.isAuthenticated).toBeFalse();
   });
 
+  it('logout notifies the app and shares repeated clicks', () => {
+    let notified = 0;
+    service.loggedOut$.subscribe(() => notified++);
+    service.logout().subscribe();
+    service.logout().subscribe();
+    httpMock.expectOne('/api/auth/logout').flush({ message: 'Signed out.' });
+    expect(notified).toBe(1);
+  });
+
+  it('logout clears local state even when the server call fails', () => {
+    let notified = 0;
+    service.loggedOut$.subscribe(() => notified++);
+    service.logout().subscribe({ error: () => undefined });
+    httpMock.expectOne('/api/auth/logout').flush(null, { status: 0, statusText: 'Network error' });
+    expect(service.isAuthenticated).toBeFalse();
+    expect(notified).toBe(1);
+  });
+
   it('maps errors to friendly messages', () => {
     expect(AuthService.friendlyError({ status: 401, error: { detail: 'Invalid email or password.' } })).toBe(
       'Invalid email or password.',

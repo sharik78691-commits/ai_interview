@@ -168,15 +168,13 @@ def set_session_cookies(response: Response, user_id: int) -> str:
 
 
 def clear_session_cookies(response: Response) -> None:
-    settings = get_settings()
-    for name in (SESSION_COOKIE, CSRF_COOKIE):
-        response.delete_cookie(
-            name,
-            path="/",
-            domain=settings.cookie_domain or None,
-            secure=settings.cookie_secure,
-            samesite=settings.cookie_samesite,
-        )
+    # Deletion must repeat the attributes used when setting the cookie;
+    # otherwise browsers can ignore it (notably SameSite=None in production).
+    for name, httponly in ((SESSION_COOKIE, True), (CSRF_COOKIE, False)):
+        kwargs = _cookie_kwargs(0)
+        kwargs.pop("max_age")
+        kwargs["httponly"] = httponly
+        response.delete_cookie(name, **kwargs)
 
 
 def get_session_user_id(request: Request) -> int | None:

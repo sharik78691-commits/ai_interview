@@ -10,7 +10,7 @@ from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.auth import security
-from app.auth.service import get_user_by_id
+from app.auth.service import get_user_by_id, is_session_token_revoked
 from app.db.session import get_db
 from app.models.user import User
 
@@ -24,6 +24,8 @@ def get_current_user(
     """Return the authenticated user or None (does not raise)."""
     user_id = security.get_session_user_id(request)
     if user_id is None:
+        return None
+    if is_session_token_revoked(db, request.cookies[security.SESSION_COOKIE]):
         return None
     user = get_user_by_id(db, user_id)
     if user is None or not user.is_active:

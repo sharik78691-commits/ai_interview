@@ -109,6 +109,10 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         settings = get_settings()
 
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        # Auth responses describe who is signed in; never let a browser or
+        # proxy reuse them after logout.
+        if request.url.path.startswith("/api/auth/"):
+            response.headers["Cache-Control"] = "no-store"
         response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
         response.headers.setdefault("X-Frame-Options", "DENY")
 

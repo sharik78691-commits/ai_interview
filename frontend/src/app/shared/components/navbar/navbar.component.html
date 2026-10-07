@@ -18,7 +18,7 @@
       </button>
       @if (user) {
         <span class="user-chip" [title]="user.email">{{ user.name || user.email }}</span>
-        <button class="logout-btn" (click)="logout()">Sign out</button>
+        <button class="logout-btn" (click)="logout()" [disabled]="signingOut">{{ signingOut ? 'Signing out…' : 'Sign out' }}</button>
       } @else {
         <a routerLink="/login" routerLinkActive="active" class="signin-link">Sign in</a>
       }

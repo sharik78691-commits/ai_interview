@@ -19,14 +19,16 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
+from app.api.interview import clear_context
 from app.auth import oauth, security
-from app.auth.dependencies import get_current_user, require_csrf, require_user
+from app.auth.dependencies import get_current_user, require_user
 from app.auth.service import (
     authenticate_local,
     consume_reset_token,
     create_reset_token,
     get_user_by_email,
     register_user,
+    revoke_session_token,
     upsert_google_user,
 )
 from app.core.config import get_settings
@@ -128,9 +130,22 @@ async def login(
 async def logout(
     request: Request,
     response: Response,
-    _: None = Depends(require_csrf),
+    db: Session = Depends(get_db),
 ) -> MessageResponse:
-    # Logout invalidates the session by clearing the signed cookie.
+    token = request.cookies.get(security.SESSION_COOKIE)
+    # Without a session there is nothing to forge, so a stale tab can always
+    # finish signing out; with one, CSRF protection still applies.
+    if token:
+        if not security.csrf_ok(request):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Invalid or missing CSRF token.",
+            )
+        user_id = security.read_session_token(token)
+        if user_id is not None:
+            revoke_session_token(db, token)
+            clear_context(user_id)
+            logger.info("Logout succeeded (user_id=%s)", user_id)
     security.clear_session_cookies(response)
     return MessageResponse(message="Signed out.")
 

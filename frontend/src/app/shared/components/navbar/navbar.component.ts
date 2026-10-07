@@ -1,5 +1,5 @@
 import { Component, OnDestroy, OnInit, inject } from '@angular/core';
-import { Router, RouterLink, RouterLinkActive } from '@angular/router';
+import { RouterLink, RouterLinkActive } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { AuthService } from '../../../core/auth/auth.service';
 import { AuthUser } from '../../../core/models/auth.models';
@@ -17,12 +17,12 @@ export class NavbarComponent implements OnInit, OnDestroy {
   private resumeService = inject(ResumeService);
   private settings = inject(SettingsService);
   private auth = inject(AuthService);
-  private router = inject(Router);
   mode: 'demo' | 'live' | 'offline' | 'checking' = 'checking';
   /** Current theme, kept in sync with SettingsService. */
   theme: ThemeName = 'dark';
   /** Current authenticated user (null when signed out). */
   user: AuthUser | null = null;
+  signingOut = false;
   private sub: Subscription | null = null;
   private userSub: Subscription | null = null;
 
@@ -49,12 +49,12 @@ export class NavbarComponent implements OnInit, OnDestroy {
   }
 
   logout(): void {
-    // Clear locally stored resume / job description / demo data so the next
-    // user on this browser starts with an empty dashboard.
-    this.resumeService.clearStoredData();
+    if (this.signingOut) return;
+    this.signingOut = true;
+    // AuthService.loggedOut$ clears local data and redirects (see App).
     this.auth.logout().subscribe({
-      next: () => this.router.navigate(['/login']),
-      error: () => this.router.navigate(['/login']),
+      next: () => (this.signingOut = false),
+      error: () => (this.signingOut = false),
     });
   }
 }
