@@ -226,3 +226,4 @@ def consume_reset_token(db: Session, raw_token: str, new_password: str) -> bool:
     row.used_at = _utcnow()
     db.commit()
     return True
+
