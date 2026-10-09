@@ -1,4 +1,48 @@
 <div class="container page">
+  <!-- ======================= DESKTOP APP DOWNLOAD ======================= -->
+  <div class="card desktop-card">
+    <div class="desktop-head">
+      <h3>🖥️ Desktop app <span class="opt-tag">recommended for interviews</span></h3>
+      @if (desktopApp.version) {
+        <span class="ver">v{{ desktopApp.version }}</span>
+      }
+    </div>
+    <p class="muted small">
+      Take the interview in the desktop app — it stays
+      <strong>invisible on screen share</strong>: Zoom, Google Meet, and Microsoft Teams are
+      not able to see the screen while screen sharing is in progress. The AI assists you
+      and hears the meeting automatically.
+    </p>
+    <ul class="dl-points">
+      <li>🫥 Invisible during screen share — your copilot never leaks to interviewers</li>
+      <li>⚡ Auto meeting audio — no tab to pick, works even on headphones</li>
+      <li>✨ Same AI guidance as the website, in a floating helper window</li>
+    </ul>
+    <div class="dl-row">
+      @if (desktopApp.windowsUrl) {
+        <a class="btn-primary btn-sm" [href]="desktopApp.windowsUrl" download>
+          ⬇ Download for Windows
+        </a>
+      } @else {
+        <button class="btn-primary btn-sm" type="button" disabled title="The Windows installer link is not published yet">
+          ⬇ Download for Windows
+        </button>
+      }
+      @if (desktopApp.macUrl) {
+        <a class="btn-ghost btn-sm" [href]="desktopApp.macUrl" download>
+          ⬇ Download for macOS
+        </a>
+      } @else {
+        <button class="btn-ghost btn-sm" type="button" disabled title="macOS build coming soon">
+          ⬇ macOS — coming soon
+        </button>
+      }
+    </div>
+    @if (!desktopApp.windowsUrl && !desktopApp.macUrl) {
+      <p class="muted small dl-note">Download links appear here as soon as the desktop build is published.</p>
+    }
+  </div>
+
   <h1>Prepare your interview</h1>
   <p class="muted">Optionally upload your resume and paste the job description — the AI tunes every answer to your background. You can also start directly without them.</p>
   <app-error-banner [message]="error" (dismiss)="error=''"></app-error-banner>
@@ -40,4 +84,5 @@
       <p class="muted small" style="margin-top:8px">Resume and target role are optional — you can start the interview right away.</p>
     </div>
   </div>
+
 </div>

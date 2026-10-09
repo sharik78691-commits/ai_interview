@@ -22,4 +22,13 @@ export const environment = {
   apiBaseUrl: 'https://www.oyeinterview.com',
   /** Absolute WebSocket origin for the live-interview socket. */
   wsBaseUrl: 'wss://ai-interview-1-309j.onrender.com',
+  /**
+   * Same shape as the web environments so shared components compile in the
+   * desktop build. Not used by the desktop app itself (it IS the download).
+   */
+  desktopApp: {
+    version: '1.0.0',
+    windowsUrl: '',
+    macUrl: '',
+  },
 };

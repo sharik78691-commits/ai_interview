@@ -19,4 +19,14 @@ export const environment = {
    * authenticates with a short-lived ticket (see /api/auth/ws-ticket).
    */
   wsBaseUrl: 'wss://ai-interview-1-309j.onrender.com',
+  /**
+   * Desktop-app installers offered on the dashboard download card.
+   * Paste the hosted file links when a build is published (GitHub Release,
+   * Drive, or CDN). Empty = button shows "coming soon" instead of a dead link.
+   */
+  desktopApp: {
+    version: '1.0.0',
+    windowsUrl: '',
+    macUrl: '',
+  },
 };

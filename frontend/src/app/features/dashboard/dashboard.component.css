@@ -9,6 +9,53 @@
 .exp { margin: 12px 0 0 18px; }
 .wide { width: 100%; margin-top: 18px; }
 .banner { margin-top: 14px; }
+/* ------------------------- Desktop download card ------------------------ */
+.desktop-card {
+  margin: 0 0 20px;
+  border-color: rgba(110, 139, 255, 0.35);
+  background:
+    linear-gradient(180deg, rgba(110, 139, 255, 0.07), rgba(110, 139, 255, 0.02));
+}
+.desktop-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.desktop-head h3 { margin-bottom: 0; }
+.ver {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #c3d0ff;
+  background: rgba(110, 139, 255, 0.12);
+  border: 1px solid rgba(110, 139, 255, 0.3);
+  border-radius: 999px;
+  padding: 3px 10px;
+  white-space: nowrap;
+}
+.dl-points {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.8rem;
+  color: var(--text);
+}
+.dl-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+.dl-row a {
+  text-decoration: none;
+}
+.dl-note {
+  margin-top: 10px;
+}
 /* "optional" tag next to the Resume / Target role headings. */
 .opt-tag {
   font-size: .62rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;

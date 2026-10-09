@@ -20,4 +20,14 @@ export const environment = {
    * forwards to http://localhost:8000 (see proxy.conf.json).
    */
   wsBaseUrl: '',
+  /**
+   * Desktop-app installers offered on the dashboard download card.
+   * Paste the hosted file links when a build is published (GitHub Release,
+   * Drive, or CDN). Empty = button shows "coming soon" instead of a dead link.
+   */
+  desktopApp: {
+    version: '1.0.0',
+    windowsUrl: '',
+    macUrl: '',
+  },
 };
