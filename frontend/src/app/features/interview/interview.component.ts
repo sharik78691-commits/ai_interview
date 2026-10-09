@@ -122,6 +122,14 @@ export class InterviewComponent implements OnInit, OnDestroy {
   }
   elapsed = 0;
   live = false;
+  /**
+   * True while an interview session is in progress — demo running or meeting
+   * audio being captured. Single source of truth for the topbar status pill
+   * and session clock (previously the bar could show "Idle 00:00" mid-interview).
+   */
+  get sessionActive(): boolean {
+    return this.live || this.capturingInterviewer;
+  }
   private timer: ReturnType<typeof setInterval> | null = null;
   private subs: Subscription[] = [];
 
@@ -293,7 +301,7 @@ export class InterviewComponent implements OnInit, OnDestroy {
       case 'ready': return 'Ready';
       case 'paused': return 'Paused';
       case 'error': return 'Connection issue';
-      default: return this.live ? 'Live' : 'Idle';
+      default: return this.sessionActive ? 'Live' : 'Idle';
     }
   }
 
@@ -372,6 +380,8 @@ export class InterviewComponent implements OnInit, OnDestroy {
     try {
       await this.interviewerAudio.start();
       this.ws.sendInterviewerAudioStart('audio/wav');
+      // A live session starts here too: the clock runs and the pill leaves Idle.
+      this.startTimer();
     } catch {
       // Status + user-facing error already set by the service.
       this.error = this.interviewerAudio.status$.value;
@@ -410,7 +420,11 @@ export class InterviewComponent implements OnInit, OnDestroy {
       const started = await this.interviewerAudio.startSystemAudio();
       // `started === false` means no loopback device exists yet; the service
       // has already flagged setup and the inline helper takes over.
-      if (started) this.ws.sendInterviewerAudioStart('audio/wav');
+      if (started) {
+        this.ws.sendInterviewerAudioStart('audio/wav');
+        // A live session starts here too: the clock runs and the pill leaves Idle.
+        this.startTimer();
+      }
     } catch {
       // The service already put a specific reason in status$.
       this.error = this.interviewerAudio.status$.value;
@@ -440,6 +454,12 @@ export class InterviewComponent implements OnInit, OnDestroy {
   async stopInterviewerAudio(): Promise<void> {
     await this.interviewerAudio.stop();
     this.ws.sendInterviewerAudioStop();
+    // Meeting session ended: the session clock goes back to 00:00.
+    // (Left running when a demo is playing so the demo clock is not disturbed.)
+    if (!this.live) {
+      this.stopTimer();
+      this.elapsed = 0;
+    }
   }
 
   // ------------------------------------------------------- manual fallback

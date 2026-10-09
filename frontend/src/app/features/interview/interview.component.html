@@ -2,20 +2,19 @@
   <!-- ============================ STICKY ACTION BAR ============================ -->
   <header class="topbar">
     <div class="status-group">
-      @if (live) {
-        <span class="pill live"><span class="dot"></span>Live</span>
-      } @else {
+      @if (!sessionActive) {
         <span class="pill"><span class="dot"></span>Idle</span>
+      } @else {
+        <span
+          class="pill"
+          [class.live]="status === 'listening' || statusLabel === 'Live'"
+          [class.thinking]="status === 'thinking' || status === 'processing' || thinking"
+          [class.error]="status === 'error'"
+        >
+          <span class="dot"></span>{{ statusLabel }}
+        </span>
       }
       <span class="timer" title="Session time">⏱ {{ elapsed | timeFormat }}</span>
-      <span
-        class="pill"
-        [class.live]="status === 'listening'"
-        [class.thinking]="status === 'thinking' || status === 'processing'"
-        [class.error]="status === 'error'"
-      >
-        <span class="dot"></span>{{ statusLabel }}
-      </span>
     </div>
     <div class="actions">
       @if (isDesktop) {
@@ -34,7 +33,9 @@
           {{ invisibleModeActive ? '🛑 Stop invisible mode' : '🫥 Invisible mode in screen share' }}
         </button>
       }
-      <button class="btn-ghost btn-sm demo" (click)="runDemo()">▶ Demo</button>
+      @if (!sessionActive) {
+        <button class="btn-ghost btn-sm demo" (click)="runDemo()">▶ Demo</button>
+      }
     </div>
   </header>
 
