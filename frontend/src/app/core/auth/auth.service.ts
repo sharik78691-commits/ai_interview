@@ -13,6 +13,7 @@ import {
   throwError,
 } from 'rxjs';
 import { AuthStatus, AuthUser, LoginPayload, RegisterPayload } from '../models/auth.models';
+import { environment } from '../../../environments/environment';
 
 /**
  * Base URL for the API.
@@ -20,9 +21,10 @@ import { AuthStatus, AuthUser, LoginPayload, RegisterPayload } from '../models/a
  * In development the Angular dev-server proxies `/api` to the backend, so a
  * relative base keeps the session cookie same-origin. In production the app is
  * served from the same origin as the API (or a reverse proxy), so relative
- * paths keep working without hard-coded hosts.
+ * paths keep working without hard-coded hosts. In the Electron build it is an
+ * absolute URL (no proxy exists under `file://`).
  */
-const BASE = '';
+const BASE = environment.apiBaseUrl;
 
 /** Lets every open tab of the app learn that the user signed out. */
 const LOGOUT_CHANNEL = 'aia-auth';

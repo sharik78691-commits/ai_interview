@@ -1,6 +1,8 @@
 import { Component, OnDestroy, OnInit, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { ActivatedRoute } from '@angular/router';
 import { Subscription } from 'rxjs';
+import { environment } from '../../../environments/environment';
 import {
   AIInterviewResponse,
   HistoryItem,
@@ -19,6 +21,7 @@ import { SettingsService } from '../../core/services/settings.service';
 import { TranscriptionService } from '../../core/services/transcription.service';
 import { ErrorBannerComponent } from '../../shared/components/error-banner/error-banner.component';
 import { TimeFormatPipe } from '../../shared/pipes/time-format.pipe';
+import type { CopilotPayload } from '../../core/services/electron-bridge';
 
 @Component({
   selector: 'app-interview',
@@ -36,6 +39,9 @@ export class InterviewComponent implements OnInit, OnDestroy {
   sttReady = false;
   private demo = inject(DemoService);
   private settings = inject(SettingsService);
+  private route = inject(ActivatedRoute);
+  /** True in the packaged desktop build (Auto Select + Invisible mode). */
+  readonly isDesktop = environment.electron;
 
   entries: TranscriptEntry[] = [];
   interim = '';
@@ -81,6 +87,15 @@ export class InterviewComponent implements OnInit, OnDestroy {
   /** One transcription request is in flight; extra clips wait their turn. */
   audioBusy = false;
   private clipQueue: { data: ArrayBuffer; mimeType: string }[] = [];
+  /**
+   * Audio-input labels the browser can see, set when "Auto Select" needs the
+   * user to enable a system-audio device. `null` means no setup is required.
+   */
+  systemAudioDevices: string[] | null = null;
+  /** Info popup shown before "Auto Select Meeting Audio" starts capturing. */
+  autoSelectInfoOpen = false;
+  /** True while the capture-protected copilot window ("invisible mode") is open. */
+  invisibleModeActive = false;
 
   /** Answer text used by the "Copy Answer" button. */
   get answerText(): string {
@@ -111,6 +126,9 @@ export class InterviewComponent implements OnInit, OnDestroy {
   private subs: Subscription[] = [];
 
   ngOnInit(): void {
+    if (this.route.snapshot.queryParamMap.get('auto') === '1') {
+      this.autoSelectInfoOpen = true;
+    }
     this.responseLength = this.settings.value.responseLength;
     this.guidanceFontSize = this.settings.value.guidanceFontSize;
     this.ws.connect();
@@ -165,21 +183,18 @@ export class InterviewComponent implements OnInit, OnDestroy {
       // One clip in flight at a time. Sending every clip immediately used to
       // hit the transcription rate limit during a fast interview.
       this.interviewerAudio.clip$.subscribe((clip) => this.enqueueClip(clip)),
+      // When Auto Select needs a system-audio device, surface the setup helper
+      // (with the list of devices the browser currently sees).
+      this.interviewerAudio.systemAudioSetup$.subscribe(
+        (devices) => (this.systemAudioDevices = devices),
+      ),
       // Server-side STT result: show it, and let the backend's own question
       // detection decide when to call the AI (no extra AI call here).
       this.ws.interviewerTranscript$.subscribe(({ text }) => {
+        // Meeting audio has its own dedicated card ("Interviewer (meeting audio)")
+        // above the transcript list, so it is NOT duplicated into entries —
+        // the list stays for microphone / demo speech only.
         this.lastInterviewerText = text;
-        // Also record it in the Transcript panel so the meeting audio shows up
-        // alongside microphone speech (previously only "Heard:" updated).
-        const clean = text.trim();
-        if (clean) {
-          this.entries.push({
-            speaker: 'interviewer',
-            text: clean,
-            timestamp: new Date(),
-            isQuestion: QuestionDetectorService.detect(clean),
-          });
-        }
         this.releaseClipSlot();
       }),
       this.ws.messages$.subscribe((m) => {
@@ -209,7 +224,16 @@ export class InterviewComponent implements OnInit, OnDestroy {
           this.thinking = false;
         }
       }),
+      // --- Invisible mode (Electron copilot window) ---
+      // Push fresh transcript + guidance to the copilot window whenever either
+      // changes. These run after the subscriptions above, so the fields they
+      // read (guidance / lastInterviewerText) are already updated.
+      this.ws.guidance$.subscribe(() => this.pushToCopilot()),
+      this.ws.interviewerTranscript$.subscribe(() => this.pushToCopilot()),
     );
+
+    // If the user closes the copilot window directly, reset the toggle button.
+    window.electronAPI?.invisible.onClosed(() => (this.invisibleModeActive = false));
   }
 
   /**
@@ -256,6 +280,7 @@ export class InterviewComponent implements OnInit, OnDestroy {
     this.stopTimer();
     this.transcription.stop();
     void this.interviewerAudio.stop();
+    if (this.invisibleModeActive) void window.electronAPI?.invisible.stop();
     this.ws.disconnect();
   }
 
@@ -296,9 +321,52 @@ export class InterviewComponent implements OnInit, OnDestroy {
     });
   }
 
+  // ------------------------------------------------ invisible mode (Electron)
+
+  /** True when running inside the Electron wrapper (the feature needs it). */
+  get inElectron(): boolean {
+    // Primary: the preload bridge. Fallback: Electron stamps the user-agent, so
+    // even if the bridge isn't ready at first paint we still detect the shell.
+    return (
+      !!window.electronAPI?.isElectron ||
+      (typeof navigator !== 'undefined' && /Electron/i.test(navigator.userAgent))
+    );
+  }
+
+  /**
+   * Toggle the capture-protected copilot window. Only works in the Electron
+   * wrapper: `setContentProtection` hides the window from screen capture
+   * (Zoom / Meet / Teams / OBS see it black).
+   */
+  toggleInvisibleMode(): void {
+    if (!this.inElectron) return;
+    if (this.invisibleModeActive) {
+      this.invisibleModeActive = false;
+      void window.electronAPI?.invisible.stop();
+    } else {
+      this.invisibleModeActive = true;
+      void window.electronAPI?.invisible.start();
+      this.pushToCopilot();
+    }
+  }
+
+  /** Send the current transcript + guidance to the copilot window (no-op off). */
+  private pushToCopilot(): void {
+    if (!this.invisibleModeActive || !window.electronAPI) return;
+    const payload: CopilotPayload = {
+      transcript: this.lastInterviewerText,
+      guidance: this.guidance,
+    };
+    window.electronAPI.invisible.update(payload);
+  }
+
   // ------------------------------------------------ interviewer audio controls
 
-  /** Ask for tab/meeting audio permission and start capturing the interviewer. */
+  /**
+   * Web build: capture the interviewer through the browser's "share a tab /
+   * meeting" picker. The desktop build uses `startSystemAudio()` (Auto Select)
+   * instead, so the website path stays exactly as it was.
+   */
   async startInterviewerAudio(): Promise<void> {
     this.error = '';
     try {
@@ -313,6 +381,59 @@ export class InterviewComponent implements OnInit, OnDestroy {
   /** Exact reason tab/meeting audio cannot be used (null when supported). */
   get captureBlockReason(): string | null {
     return this.interviewerAudio.getBlockReason();
+  }
+
+  /** Open the info popup for "Auto Select Meeting Audio". */
+  openAutoSelectInfo(): void {
+    this.autoSelectInfoOpen = true;
+  }
+
+  /** Close the info popup without capturing. */
+  closeAutoSelectInfo(): void {
+    this.autoSelectInfoOpen = false;
+  }
+
+  /** User confirmed the popup: close it and start system-audio capture. */
+  confirmAutoSelect(): void {
+    this.autoSelectInfoOpen = false;
+    void this.startSystemAudio();
+  }
+
+  /**
+   * "Auto Select": start capturing the computer's own sound (system output)
+   * through a loopback device, with no browser "share a tab" picker. The AI
+   * then hears the interviewer automatically and answers in real time.
+   */
+  async startSystemAudio(): Promise<void> {
+    this.error = '';
+    try {
+      const started = await this.interviewerAudio.startSystemAudio();
+      // `started === false` means no loopback device exists yet; the service
+      // has already flagged setup and the inline helper takes over.
+      if (started) this.ws.sendInterviewerAudioStart('audio/wav');
+    } catch {
+      // The service already put a specific reason in status$.
+      this.error = this.interviewerAudio.status$.value;
+    }
+  }
+
+  /**
+   * Download a tiny .cmd file that, when double-clicked, runs
+   * `control mmsys.cpl,,1` — opening the Sound panel straight on the Recording
+   * tab (where "Stereo Mix" is enabled). Generated on the client so there is no
+   * static asset to host and no copy-paste step for the user.
+   */
+  downloadSoundPanelCmd(): void {
+    const content = '@echo off\r\ncontrol mmsys.cpl,,1\r\n';
+    const blob = new Blob([content], { type: 'application/octet-stream' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'open-sound-panel.cmd';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   }
 
   /** Stop capturing interviewer audio. */

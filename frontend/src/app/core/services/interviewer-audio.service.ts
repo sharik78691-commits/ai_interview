@@ -58,6 +58,12 @@ export class InterviewerAudioService {
   readonly clip$ = new Subject<{ data: ArrayBuffer; mimeType: string }>();
   /** User-facing status message for the UI. */
   readonly status$ = new BehaviorSubject<string>('');
+  /**
+   * Non-null when "Auto Select" needs the user to enable a system-audio
+   * (loopback) device first. Carries the audio-input labels the browser can
+   * currently see, so the UI can show exactly what's missing.
+   */
+  readonly systemAudioSetup$ = new BehaviorSubject<string[] | null>(null);
 
   /** Consecutive silent checks (~100ms each) that end a clip. */
   private readonly silenceTicksToCut = 12;
@@ -167,11 +173,98 @@ export class InterviewerAudioService {
     }
     track.addEventListener('ended', () => void this.stop());
 
-    this.stream = stream;
-    this._setupRecorder();
-    this._setupCaptureGraph(stream);
-    this.state$.next('capturing');
-    this.status$.next("Listening for the interviewer's question...");
+    this._beginCapture(stream);
+  }
+
+  /**
+   * "Auto Select": capture the COMPUTER'S SOUND (system output) automatically,
+   * with no browser "share a tab" picker.
+   *
+   * Browsers expose no direct "system audio" API, so this reads it through a
+   * loopback INPUT device that mirrors the speakers — on Windows that is
+   * "Stereo Mix" (enable it in Sound settings → Recording) or the free
+   * VB-Cable virtual cable; on macOS BlackHole / Soundflower. Because that
+   * device carries everything the system plays, the interviewer's voice is
+   * heard even when the user wears headphones (the meeting audio plays through
+   * the loopback). Users should close other media apps during the interview so
+   * only the interviewer's voice reaches the AI.
+   */
+  async startSystemAudio(): Promise<boolean> {
+    const blocked = this.getSystemAudioBlockReason();
+    if (blocked) {
+      this.status$.next(blocked);
+      throw new Error('unsupported');
+    }
+    if (this.state$.value === 'capturing') return false;
+
+    this.state$.next('prompting');
+    this.status$.next('Detecting your computer\'s audio output…');
+    this.systemAudioSetup$.next(null);
+
+    const { deviceId, labels, denied } = await this._findSystemAudioDevice();
+
+    // The user declined the microphone permission popup. Nothing is broken —
+    // they just need to allow it so the browser can list audio devices.
+    if (denied) {
+      this.state$.next('idle');
+      this.status$.next('Microphone permission was denied — allow it so Auto Select can list your devices.');
+      throw new Error('permission denied');
+    }
+
+    // No loopback device exists yet. Don't throw (it's not an error the user
+    // can fix in the app) — instead flag setup and let the UI guide them to
+    // the exact Windows panel.
+    if (!deviceId) {
+      this.state$.next('idle');
+      this.status$.next('Set up system audio, then click Auto Select again.');
+      this.systemAudioSetup$.next(labels);
+      return false;
+    }
+
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          deviceId: { exact: deviceId },
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+        },
+      });
+    } catch (err) {
+      this.state$.next('idle');
+      const name = (err as DOMException)?.name ?? '';
+      if (name === 'NotAllowedError' || name === 'SecurityError') {
+        this.status$.next('Audio permission was denied.');
+      } else {
+        this.status$.next('Could not open the system-audio device.');
+      }
+      throw err;
+    }
+
+    const track = stream.getAudioTracks()[0];
+    if (!track) {
+      stream.getTracks().forEach((t) => t.stop());
+      this.state$.next('idle');
+      this.status$.next('The system-audio device returned no audio track.');
+      throw new Error('no audio track');
+    }
+    track.addEventListener('ended', () => void this.stop());
+
+    this._beginCapture(stream);
+    return true;
+  }
+
+  /** Why "Auto Select" (system audio) cannot be used, or null when supported. */
+  getSystemAudioBlockReason(): string | null {
+    const nav = typeof navigator !== 'undefined' ? navigator : undefined;
+    if (!nav?.mediaDevices?.getUserMedia) {
+      return 'This browser cannot capture system audio. Use Chrome or Edge on a desktop computer.';
+    }
+    if (typeof window !== 'undefined' && window.isSecureContext === false) {
+      return 'System-audio capture needs a secure address. Open the app on http://localhost:4200 (not a LAN IP) or use HTTPS.';
+    }
+    return null;
   }
 
   /** Stop capture and flush whatever was recorded. */
@@ -222,6 +315,66 @@ export class InterviewerAudioService {
   }
 
   // ---------------------------------------------------------------- internals
+
+  /**
+   * Common capture setup once a stream has been obtained (whether from the tab
+   * picker or from a system-audio loopback device). Both sources flow through
+   * the identical PCM -> silence-detection -> WAV -> STT pipeline.
+   */
+  private _beginCapture(stream: MediaStream): void {
+    this.stream = stream;
+    this.systemAudioSetup$.next(null);
+    this._setupRecorder();
+    this._setupCaptureGraph(stream);
+    this.state$.next('capturing');
+    this.status$.next("Listening for the interviewer's question…");
+  }
+
+  /**
+   * Find the input device that mirrors the computer's sound output.
+   *
+   * Device labels are hidden until the site holds media permission, so when the
+   * labels come back empty we request (and immediately release) a throwaway mic
+   * stream purely to unlock them, then enumerate again.
+   */
+  private async _findSystemAudioDevice(): Promise<{
+    deviceId: string | null;
+    labels: string[];
+    denied: boolean;
+  }> {
+    const md = navigator.mediaDevices;
+    if (!md?.enumerateDevices) return { deviceId: null, labels: [], denied: false };
+
+    let devices: MediaDeviceInfo[] = [];
+    try {
+      devices = await md.enumerateDevices();
+    } catch {
+      return { deviceId: null, labels: [], denied: false };
+    }
+
+    const labelsVisible = devices.some((d) => d.kind === 'audioinput' && !!d.label);
+    if (!labelsVisible) {
+      try {
+        const probe = await md.getUserMedia({ audio: true });
+        probe.getTracks().forEach((t) => t.stop());
+        devices = await md.enumerateDevices();
+      } catch (err) {
+        const denied = (err as DOMException)?.name === 'NotAllowedError';
+        return { deviceId: null, labels: [], denied };
+      }
+    }
+
+    const inputs = devices.filter((d) => d.kind === 'audioinput');
+    const labels = inputs.map((i) => i.label).filter(Boolean);
+    for (const d of inputs) {
+      if (!d.label) continue;
+      const label = d.label.toLowerCase();
+      if (SYSTEM_AUDIO_LABELS.some((token) => label.includes(token))) {
+        return { deviceId: d.deviceId, labels, denied: false };
+      }
+    }
+    return { deviceId: null, labels, denied: false };
+  }
 
   private pickMimeType(): string {
     const candidates = [
@@ -505,3 +658,28 @@ const MAX_CLIP_MS = 15_000;
 const SILENCE_MS_TO_CUT = 1_200;
 /** ScriptProcessor buffer; ~85 ms of samples at 48 kHz. */
 const PCM_BUFFER_SIZE = 4_096;
+
+/**
+ * Device-label fragments that identify a system-audio loopback input across
+ * platforms. "Auto Select" matches an input device whose label contains any of
+ * these (case-insensitive): Stereo Mix / What U Hear (Windows), VB-Cable /
+ * Voicemeeter (virtual cable), BlackHole / Soundflower (macOS), monitor sources
+ * (Linux PulseAudio/PipeWire).
+ */
+const SYSTEM_AUDIO_LABELS = [
+  'stereo mix',
+  'what u hear',
+  'what-u-hear',
+  'wave out',
+  'loopback',
+  'cable output',
+  'vb-audio',
+  'virtual cable',
+  'voicemeeter',
+  'virtual audio',
+  'system sound',
+  'monitor of',
+  'rec. playback',
+  'blackhole',
+  'soundflower',
+];

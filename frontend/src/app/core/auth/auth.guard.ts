@@ -2,6 +2,7 @@ import { inject } from '@angular/core';
 import { CanActivateFn, Router } from '@angular/router';
 import { map } from 'rxjs';
 import { AuthService } from './auth.service';
+import { environment } from '../../../environments/environment';
 
 /**
  * Protects authenticated routes (/dashboard, /interview, /settings).
@@ -27,13 +28,20 @@ export const authGuard: CanActivateFn = (_route, state) => {
 };
 
 /** Redirects already-authenticated users away from /login and /register. */
-export const guestGuard: CanActivateFn = () => {
+export const guestGuard: CanActivateFn = (route) => {
   const auth = inject(AuthService);
   const router = inject(Router);
 
-  if (auth.isAuthenticated) return router.createUrlTree(['/dashboard']);
+  // Desktop only: honour ?redirect= so a deep-link (e.g. #/interview) survives
+  // the login round-trip. The web build keeps the original /dashboard default,
+  // so its behaviour is unchanged.
+  const redirect =
+    environment.electron && route.queryParamMap.get('redirect')
+      ? route.queryParamMap.get('redirect')!
+      : '/dashboard';
+  const dest = router.parseUrl(redirect.startsWith('/') ? redirect : '/dashboard');
 
-  return auth.checkSession().pipe(
-    map((user) => (user ? router.createUrlTree(['/dashboard']) : true)),
-  );
+  if (auth.isAuthenticated) return dest;
+
+  return auth.checkSession().pipe(map((user) => (user ? dest : true)));
 };

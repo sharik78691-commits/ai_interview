@@ -6,6 +6,12 @@
  */
 export const environment = {
   production: true,
+  electron: false,
+  /**
+   * Base URL for REST calls (/api/*). Empty = same-origin: Vercel proxies /api
+   * to the backend, so the session cookie stays same-origin.
+   */
+  apiBaseUrl: '',
   /**
    * Backend origin for the live-interview WebSocket.
    * Static hosts (Vercel) cannot reliably proxy a WebSocket upgrade to an
