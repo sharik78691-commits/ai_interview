@@ -4,6 +4,7 @@ import { Router } from '@angular/router';
 import { ResumeData } from '../../core/models/interview.models';
 import { ResumeService } from '../../core/services/resume.service';
 import { ErrorBannerComponent } from '../../shared/components/error-banner/error-banner.component';
+import { environment } from '../../../environments/environment';
 
 @Component({
   selector: 'app-dashboard',
@@ -15,6 +16,8 @@ import { ErrorBannerComponent } from '../../shared/components/error-banner/error
 export class DashboardComponent {
   private resumeService = inject(ResumeService);
   private router = inject(Router);
+  /** Desktop installer links + version for the download card (empty URL = coming soon). */
+  readonly desktopApp = environment.desktopApp;
 
   resumeText = this.resumeService.resumeText;
   jobDescription = this.resumeService.jobDescription;

@@ -144,6 +144,10 @@
   gap: 12px;
   flex-wrap: wrap;
 }
+.btn-block {
+  width: 100%;
+  justify-content: center;
+}
 .field-title {
   margin: 0;
   font-size: 0.6769rem;
@@ -161,6 +165,56 @@
   margin: 0;
   font-size: 0.7333rem;
   line-height: 1.55;
+}
+/* Smaller caption under an audio option button. */
+.hint.sub {
+  font-size: 0.68rem;
+  color: var(--muted);
+  margin-top: -4px;
+}
+/* "Listening" pill in the Meeting audio header. */
+.audio-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #4ade80;
+  background: rgba(74, 222, 128, 0.1);
+  border: 1px solid rgba(74, 222, 128, 0.35);
+  border-radius: 999px;
+  padding: 3px 10px;
+}
+.audio-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #4ade80;
+  animation: audio-pulse 1.6s ease-in-out infinite;
+}
+@keyframes audio-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+/* "or automatic" separator between the two audio options. */
+.audio-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 2px 0;
+  color: var(--muted);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.audio-divider::before,
+.audio-divider::after {
+  content: '';
+  flex: 1 1 auto;
+  height: 1px;
+  background: var(--border);
 }
 #manualq {
   width: 100%;
@@ -522,6 +576,74 @@
 button[disabled] {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+/* "Auto Select" setup helper: shown when a system-audio device is missing. */
+.sysaudio-help {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid rgba(252, 211, 77, 0.4);
+  background: rgba(252, 211, 77, 0.06);
+  border-radius: 10px;
+}
+.sysaudio-help em {
+  font-style: italic;
+  color: #fcd34d;
+}
+.sysaudio-steps {
+  margin: 0 0 0 16px;
+  padding: 0;
+  font-size: 0.7333rem;
+  line-height: 1.6;
+  color: var(--muted);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* -------------------- Modal (Auto Select info popup) ---------------------- */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(2, 6, 17, 0.65);
+  backdrop-filter: blur(2px);
+}
+.modal {
+  width: 100%;
+  max-width: 460px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px 22px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 18px 50px rgba(2, 6, 17, 0.5);
+}
+.modal-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.modal .hint {
+  margin: 0;
+}
+.modal-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+.modal-actions .btn-sm {
+  flex: 1 1 auto;
 }
 
 /* ------------------------------ Responsive -------------------------------- */

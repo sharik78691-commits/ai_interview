@@ -30,7 +30,7 @@ const WS_BASE_URL: string =
  * The socket itself is cross-origin and does not, which is exactly why the
  * ticket exists.
  */
-const TICKET_PATH = '/api/auth/ws-ticket';
+const TICKET_PATH = `${environment.apiBaseUrl}/api/auth/ws-ticket`;
 
 interface WsMsg {
   type: string;

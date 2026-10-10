@@ -2,11 +2,11 @@ import { HttpClient } from '@angular/common/http';
 import { Injectable } from '@angular/core';
 import { Observable, map, tap } from 'rxjs';
 import { AIInterviewResponse, ResumeData } from '../models/interview.models';
+import { environment } from '../../../environments/environment';
 
-// Relative base: the dev-server proxy forwards /api to the backend, and in
-// production the API is same-origin. This keeps the session cookie same-origin
-// (no CORS credential juggling) and avoids hard-coded hosts.
-const BASE = '';
+// Relative base in web builds (dev-server proxy / same-origin), absolute URL in
+// the Electron build where no proxy exists under file://.
+const BASE = environment.apiBaseUrl;
 
 /** Shape returned by GET /api/health. */
 export interface HealthInfo {

@@ -30,6 +30,11 @@ GOOGLE_ISSUERS = {"https://accounts.google.com", "accounts.google.com"}
 # Minimal scopes: identity only. No Google password is ever requested.
 GOOGLE_SCOPES = "openid email profile"
 
+# Seconds of tolerance when validating an id_token's exp/nbf/iat claims.
+# Google issues `iat` from Google's clock; a server whose clock runs even a
+# little behind rejects the token as "issued in the future" without this.
+CLOCK_SKEW_LEEWAY = 60
+
 
 class OAuthError(Exception):
     """Raised when the Google exchange/validation fails."""
@@ -131,7 +136,9 @@ async def _verify_id_token(client: httpx.AsyncClient, id_token: str) -> dict:
         jwks = jwks_resp.json()
         key_set = JsonWebKey.import_key_set(jwks)
         claims = jose_jwt.decode(id_token, key_set)
-        claims.validate()  # exp / nbf / iat
+        # leeway tolerates clock skew: without it, `iat` a moment ahead of the
+        # server clock fails verification with "issued in the future".
+        claims.validate(leeway=CLOCK_SKEW_LEEWAY)  # exp / nbf / iat
     except OAuthError:
         raise
     except Exception as exc:

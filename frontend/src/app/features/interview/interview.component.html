@@ -2,23 +2,40 @@
   <!-- ============================ STICKY ACTION BAR ============================ -->
   <header class="topbar">
     <div class="status-group">
-      @if (live) {
-        <span class="pill live"><span class="dot"></span>Live</span>
-      } @else {
+      @if (!sessionActive) {
         <span class="pill"><span class="dot"></span>Idle</span>
+      } @else {
+        <span
+          class="pill"
+          [class.live]="status === 'listening' || statusLabel === 'Live'"
+          [class.thinking]="status === 'thinking' || status === 'processing' || thinking"
+          [class.error]="status === 'error'"
+        >
+          <span class="dot"></span>{{ statusLabel }}
+        </span>
       }
       <span class="timer" title="Session time">⏱ {{ elapsed | timeFormat }}</span>
-      <span
-        class="pill"
-        [class.live]="status === 'listening'"
-        [class.thinking]="status === 'thinking' || status === 'processing'"
-        [class.error]="status === 'error'"
-      >
-        <span class="dot"></span>{{ statusLabel }}
-      </span>
     </div>
     <div class="actions">
-      <button class="btn-ghost btn-sm demo" (click)="runDemo()">▶ Demo</button>
+      @if (isDesktop) {
+        <button class="btn-primary btn-sm" (click)="openAutoSelectInfo()" title="Capture your computer's sound automatically">
+          ⚡ Auto Select Meeting Audio
+        </button>
+        @if (capturingInterviewer) {
+          <button class="btn-ghost btn-sm" (click)="stopInterviewerAudio()">■ Stop audio</button>
+        }
+        <button
+          class="btn-ghost btn-sm"
+          [class.live]="invisibleModeActive"
+          (click)="toggleInvisibleMode()"
+          title="Open a floating transcript + guidance window that stays hidden from screen share"
+        >
+          {{ invisibleModeActive ? '🛑 Stop invisible mode' : '🫥 Invisible mode in screen share' }}
+        </button>
+      }
+      @if (!sessionActive) {
+        <button class="btn-ghost btn-sm demo" (click)="runDemo()">▶ Demo</button>
+      }
     </div>
   </header>
 
@@ -49,31 +66,103 @@
 
         <!-- Interviewer audio (meeting / browser tab) -->
         <div class="field">
-          <div class="field-head">
+          @if (isDesktop) {
             <h4 class="field-title">Interviewer audio</h4>
-            @if (!capturingInterviewer) {
-              <button class="btn-primary btn-sm" (click)="startInterviewerAudio()">
-                🎧 Select meeting audio
-              </button>
-            } @else {
-              <button class="btn-ghost btn-sm" (click)="stopInterviewerAudio()">
+            <button class="btn-primary btn-block" (click)="openAutoSelectInfo()">
+              ⚡ Auto Select Meeting Audio
+            </button>
+            @if (capturingInterviewer) {
+              <button class="btn-ghost btn-block" (click)="stopInterviewerAudio()">
                 ■ Stop interviewer audio
               </button>
             }
-          </div>
-          <p class="muted small hint">
-            Capture the meeting or browser tab so the AI hears the interviewer, not you.
-          </p>
-          @if (captureBlockReason) {
-            <p class="audio-status warn-reason">{{ captureBlockReason }}</p>
-          } @else if (!sttReady) {
-            <p class="audio-status warn-reason">
-              Meeting audio transcription is not configured on the server. Set STT_MODEL in
-              backend/.env, or paste the question manually.
-            </p>
-          }
-          @if (lastInterviewerText) {
-            <p class="muted small heard">Heard: “{{ lastInterviewerText }}”</p>
+            @if (systemAudioDevices !== null) {
+              <div class="sysaudio-help">
+                <p class="muted small hint">
+                  <strong>Enable system audio to use Auto Select.</strong>
+                  @if (systemAudioDevices.length) {
+                    <br />Your browser currently sees only:
+                    <em>{{ systemAudioDevices.join(', ') }}</em>.
+                  } @else {
+                    <br />No audio input devices were detected.
+                  }
+                </p>
+                <button class="btn-primary btn-sm" (click)="downloadSoundPanelCmd()">
+                  ⬇️ Download open-sound-panel.cmd
+                </button>
+                <ol class="sysaudio-steps">
+                  <li>Open the downloaded <strong>open-sound-panel.cmd</strong> — it jumps straight
+                    to the <strong>Recording</strong> tab.</li>
+                  <li>Enable <strong>Stereo Mix</strong> (or install <strong>VB-Cable</strong>).</li>
+                  <li>Come back and click <strong>Auto Select Meeting Audio</strong> again.</li>
+                </ol>
+              </div>
+            }
+            @if (!sttReady) {
+              <p class="audio-status warn-reason">
+                Meeting audio transcription is not configured on the server. Set STT_MODEL in
+                backend/.env, or paste the question manually.
+              </p>
+            }
+          } @else {
+            <div class="field-head">
+              <h4 class="field-title">Meeting audio</h4>
+              @if (capturingInterviewer) {
+                <span class="audio-state"><span class="audio-dot"></span>Listening</span>
+              }
+            </div>
+            @if (!capturingInterviewer) {
+              <p class="muted small hint">
+                Choose how the AI hears the interviewer. Your microphone is never used for this.
+              </p>
+              <button class="btn-primary btn-block" (click)="startInterviewerAudio()">
+                🎧 Select meeting audio
+              </button>
+              <p class="muted small hint sub">Manual — you pick the meeting tab. No setup needed.</p>
+              <div class="audio-divider"><span>or automatic</span></div>
+              <button class="btn-primary btn-block" (click)="openAutoSelectInfo()">
+                ⚡ Auto Select Meeting Audio
+              </button>
+              <p class="muted small hint sub">Hears the meeting by itself, even on headphones. One-time sound setup.</p>
+            } @else {
+              <p class="muted small hint">🎧 The AI is listening to the meeting. Keep this tab open.</p>
+              <button class="btn-ghost btn-block" (click)="stopInterviewerAudio()">
+                ■ Stop interviewer audio
+              </button>
+            }
+            @if (systemAudioDevices !== null) {
+              <div class="sysaudio-help">
+                <p class="muted small hint">
+                  <strong>Enable system audio to use Auto Select.</strong>
+                  @if (systemAudioDevices.length) {
+                    <br />Your browser currently sees only:
+                    <em>{{ systemAudioDevices.join(', ') }}</em>.
+                  } @else {
+                    <br />No audio input devices were detected.
+                  }
+                </p>
+                <button class="btn-primary btn-sm" (click)="downloadSoundPanelCmd()">
+                  ⬇️ Download open-sound-panel.cmd
+                </button>
+                <ol class="sysaudio-steps">
+                  <li>Open the downloaded <strong>open-sound-panel.cmd</strong> — it jumps straight
+                    to the <strong>Recording</strong> tab.</li>
+                  <li>Enable <strong>Stereo Mix</strong> (or install <strong>VB-Cable</strong>).</li>
+                  <li>Come back and click <strong>Auto Select Meeting Audio</strong> again.</li>
+                </ol>
+              </div>
+            }
+            @if (captureBlockReason) {
+              <p class="audio-status warn-reason">{{ captureBlockReason }}</p>
+            } @else if (!sttReady) {
+              <p class="audio-status warn-reason">
+                Automatic transcription is off, so meeting audio cannot be turned into text yet.
+                Paste the question below instead — or switch transcription on (STT_MODEL in backend/.env).
+              </p>
+            }
+            @if (lastInterviewerText) {
+              <p class="muted small heard">Heard: “{{ lastInterviewerText }}”</p>
+            }
           }
         </div>
 
@@ -118,22 +207,20 @@
       <!-- Transcript -->
       <section class="card panel transcript-panel">
         <h3 class="panel-title">Transcript</h3>
-        @if (capturingInterviewer || lastInterviewerText) {
-          <div class="entry iv" [class.q]="lastInterviewerText.includes('?')">
-            <div class="entry-head">
-              <span class="who">🎧 Interviewer (meeting audio)</span>
-              <button
-                class="btn-ghost btn-sm copy-transcript"
-                (click)="copyTranscript()"
-                [disabled]="!lastInterviewerText"
-                title="Copy transcript"
-              >
-                {{ copiedTranscript ? '✓ Copied' : 'Copy' }}
-              </button>
-            </div>
-            <p>{{ lastInterviewerText || 'Listening for the interviewer’s question…' }}</p>
+        <div class="entry iv" [class.q]="lastInterviewerText.includes('?')">
+          <div class="entry-head">
+            <span class="who">🎧 Interviewer (meeting audio)</span>
+            <button
+              class="btn-ghost btn-sm copy-transcript"
+              (click)="copyTranscript()"
+              [disabled]="!lastInterviewerText"
+              title="Copy transcript"
+            >
+              {{ copiedTranscript ? '✓ Copied' : 'Copy' }}
+            </button>
           </div>
-        }
+          <p>{{ lastInterviewerText || 'Listening for the interviewer’s question…' }}</p>
+        </div>
         <div class="transcript">
           @for (e of recentEntries; track $index) {
             <div class="entry" [class.q]="e.isQuestion">
@@ -307,4 +394,27 @@
       </section>
     </main>
   </div>
+
+  <!-- ==================== AUTO SELECT INFO POPUP ==================== -->
+  @if (autoSelectInfoOpen) {
+    <div class="modal-backdrop" (click)="closeAutoSelectInfo()">
+      <div class="modal" (click)="$event.stopPropagation()">
+        <h3 class="modal-title">Auto Select Meeting Audio</h3>
+        <p class="muted small hint">
+          Capture the meeting or browser tab so the AI hears the interviewer, not you.
+        </p>
+        <p class="muted small hint">
+          <strong>Auto Select</strong> listens to your computer's sound automatically — no tab to
+          pick. It needs a system-audio device (Windows: enable "Stereo Mix" or install VB-Cable)
+          so the AI hears the interviewer even on headphones.
+        </p>
+        <div class="modal-actions">
+          <button class="btn-primary btn-sm" (click)="confirmAutoSelect()">
+            Start Auto Select
+          </button>
+          <button class="btn-ghost btn-sm" (click)="closeAutoSelectInfo()">Cancel</button>
+        </div>
+      </div>
+    </div>
+  }
 </div>
