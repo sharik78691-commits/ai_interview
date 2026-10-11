@@ -227,6 +227,48 @@ id). One user can never read another user's resume, job description, context or
 AI answers. Frontend route guards are UX only; the backend derives identity from
 the session on every request.
 
+### Resume library
+
+Uploads are stored server-side (`resumes` table: owner + owner email, original
+file bytes, extracted text, parsed JSON, active flag) — not just in browser
+localStorage — so resumes survive logout and work across devices. A library
+holds at most **4 resumes per user**: storing a 5th auto-deletes the oldest. Extraction
+reads DOCX tables row-by-row (table layouts no longer lose text) and retries
+complex PDFs in layout mode; scanned/image PDFs are rejected with guidance to
+upload DOCX/TXT instead of storing a broken fragment:
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/api/resume/upload` | Parse + store; the new upload becomes the active resume |
+| GET | `/api/resumes` | Own library, newest first (lean rows, no heavy text) |
+| GET | `/api/resumes/{id}` | Full parsed resume + editable source text |
+| GET | `/api/resumes/{id}/download` | Original uploaded file |
+| PATCH | `/api/resumes/{id}` | `{is_active?}` select active, `{raw_text?}` correct text (re-parses skills) |
+| DELETE | `/api/resumes/{id}` | Delete (newest remaining resume becomes active) |
+
+The dashboard's My resumes section lists, activates, downloads and deletes;
+interviews keep using the active resume's text through the unchanged prepare
+flow. The admin users table shows each account's resume count.
+
+### Target-role library
+
+Mirrors the resume library (`target_roles` table: owner + owner email,
+position, job description, active flag). A library holds at most **4 roles
+per user**: saving a 5th auto-deletes the oldest.
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/api/roles` | Save position (required, ≤200 chars) + JD (required, ≤2000 chars); becomes the active role |
+| GET | `/api/roles` | Own library, newest first |
+| GET | `/api/roles/{id}` | Full role with job description |
+| PATCH | `/api/roles/{id}` | `{position?, job_description?, is_active?}` select/correct |
+| DELETE | `/api/roles/{id}` | Delete (newest remaining role becomes active) |
+
+The dashboard's Saved roles section lists, activates and deletes; the editor
+adopts the active role on fresh browsers/devices without overwriting typed
+text. Unknown-or-foreign ids answer 404, so users can never touch each
+other's resumes or roles.
+
 ### Security decisions
 
 - **Passwords**: Argon2id hashing; never logged, never returned. Minimum 8
@@ -283,26 +325,66 @@ Google returns this **before** the callback runs, which means the
 
 ### Database
 
-A lightweight SQLAlchemy 2.x layer backs authentication. SQLite is the default
-for local development (zero infrastructure); set `DATABASE_URL` to a PostgreSQL
-DSN in production. Tables are created on startup.
+A SQLAlchemy 2.x layer backs authentication. SQLite is the default for local
+development (zero infrastructure); set `DATABASE_URL` to a PostgreSQL DSN to
+use Postgres locally or in production:
+
+```env
+# backend/.env
+DATABASE_URL=postgresql+psycopg://postgres:PASSWORD@localhost:5432/oyeinterviewdb
+```
+
+On startup the backend creates the PostgreSQL **database itself when it is
+missing** (SQLite files appear on first connect anyway) and then creates all
+tables — a fresh machine only needs a running Postgres server, nothing manual.
+The driver ships with the requirements (`pip install -r
+backend/requirements.txt` installs `psycopg[binary]`).
 
 `users`: `id, email, password_hash, name, auth_provider, google_subject_id,
-email_verified, is_active, created_at, updated_at, last_login_at`.
+email_verified, is_active, created_at, updated_at, last_login_at, username,
+is_admin, login_count`.
 `password_reset_tokens`: `id, user_id, token_hash, expires_at, used_at,
 created_at` (only a SHA-256 hash of the token is stored; single-use + expiring).
+`revoked_sessions`: one row per logged-out session (server-side logout).
 
 Google-only accounts have `password_hash = NULL` and `auth_provider = "google"`.
 Local accounts have an Argon2id hash and `auth_provider = "local"`. A Google
 identity is linked onto an existing local account with the same verified email,
 so both login methods share one account (no duplicates).
 
+### Admin panel
+
+An admin login is seeded automatically on startup when `ADMIN_PASSWORD` is set
+(local: `backend/.env`, production: host env vars). `ADMIN_EMAIL` (default
+`admin@oyeinterview.com`) and `ADMIN_USERNAME` (default `admin`) are
+configurable; the password is never hardcoded. Login accepts the email **or**
+the username, and every successful sign-in bumps `login_count`.
+
+Admin endpoints (all require an admin session — 401 anonymous, 403 non-admin):
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/admin/stats` | System status (live/demo, AI/STT/Google, DB), headline counters, 14-day series (signups, logins, visits, interviews, visitors), top pages, recent logins |
+| GET | `/api/admin/users?q=&page=&page_size=` | Searchable, paginated user list (newest first) |
+| PATCH | `/api/admin/users/{id}` | `{is_active?, is_admin?}` — activate/deactivate, promote/demote (self-changes refused) |
+| GET | `/api/admin/users/export` | Whole user list as CSV download |
+
+Every request is counted into `visit_logs` (path + salted IP hash, never raw
+IPs) by middleware, excluding only health/docs noise — this powers the "how
+many people visit" counters. Key actions append to the `events` table
+(`user_registered`, `user_login`, `interview_prepared`, `question_analyzed`)
+via a never-failing helper, which powers the login/interview trends. The
+Angular `/admin` page (guarded by `adminGuard`, hidden from search engines)
+renders system status, counters, charts, top pages, recent logins and the user
+table; the navbar shows the Admin link only to admins.
+
 ## API
 
 | Method | Path | Body | Returns |
 |---|---|---|---|
 | GET | `/api/health` | — | `{status, demo_mode, llm_configured, stt_configured, stt_model}` (also aliased at `/health`) |
-| POST | `/api/resume/upload` | multipart `file` (.pdf/.docx/.txt ≤10MB) | `{filename, chars, resume: ResumeData}` |
+| POST | `/api/resume/upload` | multipart `file` (.pdf/.docx/.txt ≤10MB) | `{filename, chars, resume: ResumeData, id, is_active}` (stored + made active) |
+| POST | `/api/resumes/from-text` | `{filename?, raw_text}` (editor text, ≤500KB) | stored + made active; a downloadable `.txt` is synthesized |
 | POST | `/api/interview/prepare` | `{resumeText, jobDescription, responseLength?}` (≥50 chars each) | `{status:"ready", message, resumeChars, jobChars, responseLength}` |
 | GET | `/api/interview/context` | — | `{hasContext, resumeChars, jobChars, responseLength, resume, job}` (resume/job truncated to 500 chars) |
 | POST | `/api/interview/analyze` | `{question, resumeText?, jobDescription?, responseLength?}` | `AIInterviewResponse` |

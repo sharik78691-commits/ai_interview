@@ -77,6 +77,11 @@ export class AuthService implements OnDestroy {
     return this.userSubject.value !== null;
   }
 
+  /** True when the signed-in user is an admin (unlocks /admin). */
+  get isAdmin(): boolean {
+    return this.userSubject.value?.is_admin === true;
+  }
+
   /** Read the readable CSRF cookie for the double-submit header. */
   private csrfToken(): string {
     const match = document.cookie.match(/(?:^|;\s*)aia_csrf=([^;]+)/);

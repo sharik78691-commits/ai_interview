@@ -43,6 +43,17 @@ def require_user(user: User | None = Depends(get_current_user)) -> User:
     return user
 
 
+def require_admin(user: User = Depends(require_user)) -> User:
+    """Require an admin user: 401 when signed out, 403 when not an admin."""
+    if not user.is_admin:
+        logger.warning("Forbidden admin access attempt (user_id=%s)", user.id)
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required.",
+        )
+    return user
+
+
 def require_csrf(request: Request) -> None:
     """Enforce the double-submit CSRF token on state-changing requests."""
     if not security.csrf_ok(request):

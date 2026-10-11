@@ -46,6 +46,17 @@ class User(Base):
     last_login_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Human-readable login name ("admin"). NULL for older rows; unique when set.
+    # Login accepts either the email or this username.
+    username: Mapped[str | None] = mapped_column(
+        String(150), unique=True, index=True, nullable=True
+    )
+    # Admin panel access. Only ever set via server-side seeding/promotion —
+    # no public endpoint can grant it.
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Total successful sign-ins (password + Google + register). Powers the
+    # admin panel's "how much login" counters.
+    login_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     reset_tokens: Mapped[list["PasswordResetToken"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"

@@ -8,7 +8,86 @@
 .chip { font-size: .78rem; background: rgba(110,139,255,.12); border: 1px solid rgba(110,139,255,.3); color: #c3d0ff; padding: 4px 11px; border-radius: 999px; }
 .exp { margin: 12px 0 0 18px; }
 .wide { width: 100%; margin-top: 18px; }
+.save-role { margin-top: 10px; }
+/* Editor save buttons row. */
+.btn-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+/* "Update resume" button beside the Resume heading (shown when one exists). */
+.update-btn { margin-left: 8px; vertical-align: middle; }
+/* Small badges (Active / editor status). */
+.tag {
+  display: inline-block;
+  font-size: 0.68rem;
+  font-weight: 700;
+  background: rgba(110, 139, 255, 0.12);
+  border: 1px solid rgba(110, 139, 255, 0.3);
+  color: #c3d0ff;
+  padding: 2px 9px;
+  border-radius: 999px;
+}
+.editor-status { margin: 0 0 8px; }
+/* Green action button (e.g. Save role) — same language as .btn-primary. */
+.btn-green {
+  background: linear-gradient(180deg, #22c55e, #16a34a);
+  color: #fff; border: 1px solid transparent; border-radius: 10px;
+  padding: 12px 22px; font-weight: 700; font-size: .8574rem;
+  cursor: pointer; transition: transform .15s, box-shadow .15s, opacity .15s;
+  box-shadow: 0 8px 24px rgba(34, 197, 94, .35);
+  display: inline-flex; align-items: center; gap: 8px; justify-content: center;
+}
+.btn-green:hover { transform: translateY(-1px); box-shadow: 0 12px 32px rgba(34, 197, 94, .45); }
+.btn-green:disabled { opacity: .5; cursor: not-allowed; transform: none; }
 .banner { margin-top: 14px; }
+/* ----------------- Mandatory-field helpers (target role) ---------------- */
+.req { color: #f87171; font-weight: 800; }
+.count { color: var(--muted); font-weight: 400; font-size: 0.72rem; }
+.hint { margin: 0 0 6px; }
+.field-err {
+  margin: 4px 0 0;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: #f87171;
+}
+/* ------------------------- Stored resume library ------------------------ */
+.resume-lib { margin-top: 16px; }
+.lib-title { margin: 0 0 8px; font-size: 0.85rem; font-weight: 700; }
+.resume-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.resume-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.02);
+}
+.resume-row.active {
+  border-color: rgba(110, 139, 255, 0.45);
+  background: rgba(110, 139, 255, 0.06);
+}
+.resume-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.resume-meta strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.82rem;
+}
+.resume-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.resume-actions a { text-decoration: none; }
+.active-tag {
+  align-self: flex-start;
+  margin-top: 2px;
+  background: rgba(74, 222, 128, 0.12);
+  border-color: rgba(74, 222, 128, 0.4);
+  color: #4ade80;
+}
 /* ------------------------- Desktop download card ------------------------ */
 .desktop-card {
   margin: 0 0 20px;
@@ -61,5 +140,12 @@
   font-size: .62rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
   color: var(--muted2); background: rgba(110,139,255,.1);
   border: 1px solid var(--border-strong); border-radius: 999px;
+  padding: 2px 8px; margin-left: 6px; vertical-align: middle;
+}
+/* "Required" tag next to mandatory headings (Resume keeps the grey optional). */
+.req-tag {
+  font-size: .62rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  color: #f87171; background: rgba(248, 113, 113, .1);
+  border: 1px solid rgba(248, 113, 113, .4); border-radius: 999px;
   padding: 2px 8px; margin-left: 6px; vertical-align: middle;
 }

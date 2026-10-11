@@ -5,6 +5,7 @@ functionality (``Permissions-Policy`` explicitly allows microphone and
 display-capture for same-origin use), and records every request with enough
 context to diagnose cross-origin / auth problems.
 """
+import hashlib
 import logging
 import time
 import uuid
@@ -19,6 +20,59 @@ logger = logging.getLogger(__name__)
 
 # Paths that would otherwise flood the log stream with health-check noise.
 _QUIET_PATHS = {"/api/health", "/health", "/favicon.ico"}
+
+# Visit logging skips the same noise plus API documentation endpoints.
+_VISIT_SKIP = _QUIET_PATHS | {"/docs", "/openapi.json", "/redoc"}
+
+
+class VisitLogMiddleware(BaseHTTPMiddleware):
+    """Record one ``visit_logs`` row per request for the admin panel.
+
+    Stores path + method, the signed-in user when present, and a salted
+    SHA-256 of the client IP (unique-visitor counting without keeping
+    anything that identifies a person). Logging must NEVER break a request:
+    every failure is swallowed after one warning.
+    """
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        response = await call_next(request)
+        try:
+            self._record(request)
+        except Exception as exc:
+            logger.warning("Visit logging failed (%s)", exc)
+        return response
+
+    def _record(self, request: Request) -> None:
+        from app.auth import security
+        from app.db.session import SessionLocal
+        from app.models.visit import VisitLog
+
+        path = request.url.path
+        if path in _VISIT_SKIP:
+            return
+        settings = get_settings()
+        user_id = security.get_session_user_id(request)
+        ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+        if not ip and request.client:
+            ip = request.client.host
+        ip_hash = (
+            hashlib.sha256(f"{ip}|{settings.session_secret or 'local'}".encode()).hexdigest()
+            if ip
+            else None
+        )
+        db = SessionLocal()
+        try:
+            db.add(
+                VisitLog(
+                    path=path[:500],
+                    method=request.method[:10],
+                    user_id=user_id,
+                    ip_hash=ip_hash,
+                )
+            )
+            db.commit()
+        finally:
+            db.close()
 
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):

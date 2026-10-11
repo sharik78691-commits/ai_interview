@@ -1,0 +1,283 @@
+<div class="container page">
+  <div class="admin-head">
+    <div>
+      <h1>Admin panel</h1>
+      <p class="muted">Registrations, logins, usage and accounts at a glance. Only admins can see this page.</p>
+    </div>
+    <button class="btn-ghost btn-sm" type="button" (click)="refresh()">↻ Refresh</button>
+  </div>
+  <app-error-banner [message]="error" (dismiss)="error = ''"></app-error-banner>
+
+  @if (forbidden) {
+    <div class="card">
+      <h3>Not authorized</h3>
+      <p class="muted small">Your account does not have admin access. If you just signed in as admin, sign out and back in.</p>
+    </div>
+  } @else {
+    @if (loadingStats && !stats) {
+      <p class="muted">Loading statistics…</p>
+    }
+    @if (stats) {
+      <!-- ------------------------- System status ------------------------- -->
+      @if (stats.system) {
+        <div class="card sys-card">
+          <div class="sys-head">
+            @if (stats.system.demo_mode) {
+              <span class="mode-badge demo" title="No AI key configured — answers are templates">DEMO</span>
+            } @else {
+              <span class="mode-badge live" title="AI backend connected">● LIVE</span>
+            }
+            <span class="muted small">v{{ stats.system.version }} · DB: {{ stats.system.database }}</span>
+          </div>
+          <div class="sys-pills">
+            <span class="sys-pill" [class.ok]="stats.system.llm_configured">
+              AI guidance {{ stats.system.llm_configured ? 'on' : 'off' }}
+            </span>
+            <span class="sys-pill" [class.ok]="stats.system.stt_configured">
+              Meeting transcription {{ stats.system.stt_configured ? 'on' : 'off' }}
+            </span>
+            <span class="sys-pill" [class.ok]="stats.system.google_configured">
+              Google login {{ stats.system.google_configured ? 'on' : 'off' }}
+            </span>
+          </div>
+        </div>
+      }
+
+      <!-- ------------------------- Headline counters ------------------------- -->
+      <div class="stat-grid">
+        <div class="card stat">
+          <div class="stat-num">{{ stats.users_total }}</div>
+          <div class="stat-lbl">Registered users</div>
+        </div>
+        <div class="card stat">
+          <div class="stat-num">{{ stats.active_users }}</div>
+          <div class="stat-lbl">Active accounts</div>
+        </div>
+        <div class="card stat">
+          <div class="stat-num">{{ stats.total_logins }}</div>
+          <div class="stat-lbl">Total logins</div>
+        </div>
+        <div class="card stat">
+          <div class="stat-num">{{ stats.logins_today }}</div>
+          <div class="stat-lbl">Logins today</div>
+        </div>
+        <div class="card stat">
+          <div class="stat-num">{{ stats.interviews_total ?? 0 }}</div>
+          <div class="stat-lbl">Interviews prepared</div>
+        </div>
+        <div class="card stat">
+          <div class="stat-num">{{ stats.questions_total ?? 0 }}</div>
+          <div class="stat-lbl">Questions answered</div>
+        </div>
+        <div class="card stat">
+          <div class="stat-num">{{ stats.resumes_total ?? 0 }}</div>
+          <div class="stat-lbl">Resumes stored</div>
+        </div>
+        <div class="card stat">
+          <div class="stat-num">{{ stats.roles_total ?? 0 }}</div>
+          <div class="stat-lbl">Target roles</div>
+        </div>
+        <div class="card stat">
+          <div class="stat-num">{{ stats.visits_today }}</div>
+          <div class="stat-lbl">Visits today</div>
+        </div>
+        <div class="card stat">
+          <div class="stat-num">{{ stats.visitors_today }}</div>
+          <div class="stat-lbl">Visitors today</div>
+        </div>
+      </div>
+
+      <!-- ------------------------------ Charts ------------------------------ -->
+      <div class="chart-grid">
+        <div class="card">
+          <h3>Signups — last 14 days</h3>
+          <div class="bars">
+            @for (b of stats.signups_by_day; track b.day) {
+              <div class="bar-col" [title]="b.day + ': ' + b.count + ' signup(s)'">
+                <span class="bar-val">{{ b.count || '' }}</span>
+                <div class="bar" [style.height.%]="barHeight(b.count, chartMax(stats.signups_by_day))"></div>
+                <span class="bar-lbl">{{ b.day.slice(5) }}</span>
+              </div>
+            }
+          </div>
+        </div>
+        <div class="card">
+          <h3>Logins — last 14 days</h3>
+          <div class="bars">
+            @for (b of (stats.logins_by_day ?? []); track b.day) {
+              <div class="bar-col" [title]="b.day + ': ' + b.count + ' login(s)'">
+                <span class="bar-val">{{ b.count || '' }}</span>
+                <div class="bar alt" [style.height.%]="barHeight(b.count, chartMax(stats.logins_by_day ?? []))"></div>
+                <span class="bar-lbl">{{ b.day.slice(5) }}</span>
+              </div>
+            }
+          </div>
+        </div>
+        <div class="card">
+          <h3>Visits — last 14 days <span class="muted small">({{ stats.visits_total }} total)</span></h3>
+          <div class="bars">
+            @for (b of stats.visits_by_day; track b.day) {
+              <div class="bar-col" [title]="b.day + ': ' + b.count + ' visit(s)'">
+                <span class="bar-val">{{ b.count || '' }}</span>
+                <div class="bar" [style.height.%]="barHeight(b.count, chartMax(stats.visits_by_day))"></div>
+                <span class="bar-lbl">{{ b.day.slice(5) }}</span>
+              </div>
+            }
+          </div>
+        </div>
+        <div class="card">
+          <h3>Interviews — last 14 days</h3>
+          <div class="bars">
+            @for (b of (stats.interviews_by_day ?? []); track b.day) {
+              <div class="bar-col" [title]="b.day + ': ' + b.count + ' interview(s)'">
+                <span class="bar-val">{{ b.count || '' }}</span>
+                <div class="bar alt" [style.height.%]="barHeight(b.count, chartMax(stats.interviews_by_day ?? []))"></div>
+                <span class="bar-lbl">{{ b.day.slice(5) }}</span>
+              </div>
+            }
+          </div>
+        </div>
+      </div>
+
+      <!-- --------------------- Top pages + recent logins --------------------- -->
+      <div class="chart-grid">
+        <div class="card">
+          <h3>Top pages</h3>
+          @if (!(stats.top_pages ?? []).length) {
+            <p class="muted small">No visits recorded yet.</p>
+          } @else {
+            <table class="mini-table">
+              <thead><tr><th>Page</th><th>Visits</th><th>Visitors</th></tr></thead>
+              <tbody>
+                @for (p of (stats.top_pages ?? []); track p.path) {
+                  <tr><td>{{ p.path }}</td><td>{{ p.visits }}</td><td>{{ p.visitors }}</td></tr>
+                }
+              </tbody>
+            </table>
+          }
+        </div>
+        <div class="card">
+          <h3>Recent logins</h3>
+          @if (!(stats.recent_logins ?? []).length) {
+            <p class="muted small">Nobody has signed in yet.</p>
+          } @else {
+            <ul class="login-list">
+              @for (u of (stats.recent_logins ?? []); track u.id) {
+                <li>
+                  <strong>{{ u.name || u.email }}</strong>
+                  <span class="muted small">{{ u.email }} · {{ fmtDate(u.last_login_at) }}</span>
+                </li>
+              }
+            </ul>
+          }
+        </div>
+      </div>
+    }
+
+    <!-- ------------------------------- Users ------------------------------- -->
+    <div class="card users-card">
+      <div class="users-head">
+        <h3>Users @if (total) { <span class="muted small">({{ total }})</span> }</h3>
+        <div class="users-tools">
+          <input
+            type="text"
+            [(ngModel)]="query"
+            (ngModelChange)="onSearch()"
+            placeholder="Search name or email…"
+            class="search"
+          />
+          <button class="btn-ghost btn-sm" type="button" (click)="exportCsv()">⬇ CSV</button>
+        </div>
+      </div>
+      @if (loadingUsers && !users.length) {
+        <p class="muted">Loading users…</p>
+      } @else if (!users.length) {
+        <p class="muted">No users found.</p>
+      } @else {
+        <div class="table-wrap">
+          <table class="users-table">
+            <thead>
+              <tr>
+                <th>User</th>
+                <th>Provider</th>
+                <th>Logins</th>
+                <th>Resumes</th>
+                <th>Roles</th>
+                <th>Last login</th>
+                <th>Status</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (u of users; track u.id) {
+                <tr>
+                  <td>
+                    <strong>{{ u.name || '—' }}</strong>
+                    <span class="muted small block">{{ u.email }}</span>
+                    @if (u.username) {
+                      <span class="muted small block">username: {{ u.username }}</span>
+                    }
+                  </td>
+                  <td>
+                    <span class="tag">{{ u.provider }}</span>
+                    @if (u.is_admin) {
+                      <span class="tag admin-tag">admin</span>
+                    }
+                  </td>
+                  <td>{{ u.login_count }}</td>
+                  <td>{{ u.resumes_count ?? 0 }}</td>
+                  <td>{{ u.roles_count ?? 0 }}</td>
+                  <td class="muted small">{{ fmtDate(u.last_login_at) }}</td>
+                  <td>
+                    @if (u.is_active) {
+                      <span class="pill-ok">Active</span>
+                    } @else {
+                      <span class="pill-off">Off</span>
+                    }
+                  </td>
+                  <td class="actions-cell">
+                    @if (!isSelf(u)) {
+                      @if (!u.is_admin) {
+                        <button
+                          class="btn-ghost btn-sm"
+                          (click)="toggleActive(u)"
+                          [disabled]="toggling[u.id]"
+                        >
+                          {{ u.is_active ? 'Deactivate' : 'Activate' }}
+                        </button>
+                        <button
+                          class="btn-ghost btn-sm"
+                          (click)="toggleAdmin(u)"
+                          [disabled]="toggling[u.id]"
+                          title="Grant admin panel access"
+                        >
+                          Make admin
+                        </button>
+                      } @else {
+                        <button
+                          class="btn-ghost btn-sm"
+                          (click)="toggleAdmin(u)"
+                          [disabled]="toggling[u.id]"
+                          title="Revoke admin panel access"
+                        >
+                          Remove admin
+                        </button>
+                      }
+                    } @else {
+                      <span class="muted small">you</span>
+                    }
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+        <div class="pager">
+          <button class="btn-ghost btn-sm" (click)="prevPage()" [disabled]="page <= 1">← Prev</button>
+          <span class="muted small">Page {{ page }} of {{ totalPages() }} ({{ total }} users)</span>
+          <button class="btn-ghost btn-sm" (click)="nextPage()" [disabled]="page >= totalPages()">Next →</button>
+        </div>
+      }
+    </div>
+  }
+</div>

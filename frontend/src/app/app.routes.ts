@@ -1,6 +1,7 @@
 import { Routes } from '@angular/router';
-import { authGuard, guestGuard } from './core/auth/auth.guard';
+import { adminGuard, authGuard, guestGuard } from './core/auth/auth.guard';
 import { interviewGuard } from './core/guards/interview.guard';
+import { AdminComponent } from './features/admin/admin.component';
 import { DashboardComponent } from './features/dashboard/dashboard.component';
 import { InterviewComponent } from './features/interview/interview.component';
 import { LandingComponent } from './features/landing/landing.component';
@@ -113,6 +114,21 @@ export const routes: Routes = [
         title: 'Settings — OyeInterview',
         description: 'Manage your OyeInterview settings.',
         path: '/settings',
+        noindex: true,
+      },
+    },
+  },
+  // Admin panel — adminGuard redirects anonymous users to /login and
+  // non-admins to /dashboard. Kept out of the search index.
+  {
+    path: 'admin',
+    component: AdminComponent,
+    canActivate: [authGuard, adminGuard],
+    data: {
+      seo: {
+        title: 'Admin panel — OyeInterview',
+        description: 'Usage statistics and user management.',
+        path: '/admin',
         noindex: true,
       },
     },

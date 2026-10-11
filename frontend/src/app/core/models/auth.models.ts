@@ -6,6 +6,7 @@ export interface AuthUser {
   name: string;
   provider: 'local' | 'google' | string;
   email_verified?: boolean;
+  is_admin?: boolean;
 }
 
 export interface AuthStatus {

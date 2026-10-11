@@ -8,8 +8,10 @@
     <div class="links">
       @if (user) {
         <a routerLink="/dashboard" routerLinkActive="active">Dashboard</a>
-        <a routerLink="/interview" routerLinkActive="active">Interview</a>
         <a routerLink="/settings" routerLinkActive="active">Settings</a>
+        @if (user.is_admin) {
+          <a routerLink="/admin" routerLinkActive="active">Admin</a>
+        }
       }
       <!-- Dark / white mode toggle. Persists in settings. -->
       <button class="theme-btn" (click)="toggleTheme()" [title]="theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'" [attr.aria-label]="theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'">
