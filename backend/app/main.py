@@ -6,10 +6,14 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api import auth, health, interview, resume, websocket
+from app.api import admin, auth, health, interview, resume, roles, websocket
 from app.core.config import get_settings
 from app.core.logging import setup_logging
-from app.core.middleware import RequestLoggingMiddleware, SecurityHeadersMiddleware
+from app.core.middleware import (
+    RequestLoggingMiddleware,
+    SecurityHeadersMiddleware,
+    VisitLogMiddleware,
+)
 from app.db.session import init_db
 
 setup_logging()
@@ -63,6 +67,9 @@ app.add_middleware(
     allow_credentials=True,
 )
 app.add_middleware(SecurityHeadersMiddleware)
+# Visit logging sits INSIDE the request logger: rejected/CORS-blocked traffic
+# never reaches a route, and must not pollute the admin visit counters.
+app.add_middleware(VisitLogMiddleware)
 # Added LAST so it is the OUTERMOST layer: requests that CORS rejects never
 # reach a route, and without this they would produce no server-side log at all.
 app.add_middleware(RequestLoggingMiddleware)
@@ -96,7 +103,9 @@ app.include_router(health.router, prefix="/api")
 # Root-level alias: some probes/clients hit /health directly.
 app.include_router(health.router)
 app.include_router(auth.router, prefix="/api")
+app.include_router(admin.router, prefix="/api")
 app.include_router(resume.router, prefix="/api")
+app.include_router(roles.router, prefix="/api")
 app.include_router(interview.router, prefix="/api")
 app.include_router(websocket.router)
 

@@ -39,10 +39,10 @@ itsdangerous>=2.1
 # Google OAuth 2.0 / OpenID Connect (authorization-code flow + id_token).
 authlib>=1.3
 
-# --- Production database driver (optional) ---
-# Only needed when DATABASE_URL points at PostgreSQL
+# --- Production database driver ---
+# Required when DATABASE_URL points at PostgreSQL
 # (postgresql+psycopg://user:pass@host:5432/db). SQLite needs no driver.
-# psycopg[binary]>=3.1
+psycopg[binary]>=3.1
 
 # --- Dev / test ---
 pytest>=8.0

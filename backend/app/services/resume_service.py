@@ -25,6 +25,25 @@ SECTION_HEADERS = {
     "certifications": ["certifications", "certificates", "licenses"],
 }
 
+# Below this many non-space characters, a PDF/DOCX almost certainly failed to
+# parse (typically a scanned, image-only PDF) — better to ask for DOCX/TXT
+# than to store a broken fragment as the user's resume.
+_MIN_READABLE_CHARS = 200
+
+
+def _readable_len(text: str) -> int:
+    return len(re.sub(r"\s", "", text))
+
+
+def _page_text(page, layout: bool = False) -> str:
+    """Extract one PDF page's text, never raising (blank/image pages vary)."""
+    try:
+        if layout:
+            return page.extract_text(extraction_mode="layout") or ""
+        return page.extract_text() or ""
+    except Exception:
+        return ""
+
 
 def _split_sections(text: str) -> dict[str, list[str]]:
     sections: dict[str, list[str]] = {k: [] for k in SECTION_HEADERS}
@@ -80,16 +99,45 @@ class ResumeService:
             from pypdf import PdfReader
 
             reader = PdfReader(io.BytesIO(content))
-            parts = [(page.extract_text() or "") for page in reader.pages]
-            text = "\n".join(parts).strip()
-            if not text:
-                raise ValueError("Could not extract text from PDF.")
+            text = "\n".join(_page_text(page) for page in reader.pages).strip()
+            # Plain extraction drops content on complex layouts — retry in
+            # layout mode and keep whichever yields more real text.
+            if _readable_len(text) < _MIN_READABLE_CHARS and len(reader.pages) > 0:
+                layout = "\n".join(
+                    _page_text(page, layout=True) for page in reader.pages
+                ).strip()
+                if _readable_len(layout) > _readable_len(text):
+                    text = layout
+            if _readable_len(text) < _MIN_READABLE_CHARS:
+                raise ValueError(
+                    "Could not read this PDF (it looks scanned or image-based). "
+                    "Please upload the DOCX or TXT version of the resume instead."
+                )
             return text
         if ext == ".docx":
             import docx
+            from docx.oxml.table import CT_Tbl
+            from docx.oxml.text.paragraph import CT_P
+            from docx.table import Table
+            from docx.text.paragraph import Paragraph
 
             doc = docx.Document(io.BytesIO(content))
-            text = "\n".join(p.text for p in doc.paragraphs).strip()
+            # Walk the body in document order. Plain python-docx extraction
+            # only sees paragraphs, so table-based resumes (very common) lost
+            # most of their text — tables are read row by row here.
+            parts: list[str] = []
+            for child in doc.element.body.iterchildren():
+                if isinstance(child, CT_P):
+                    line = Paragraph(child, doc).text.strip()
+                    if line:
+                        parts.append(line)
+                elif isinstance(child, CT_Tbl):
+                    for row in Table(child, doc).rows:
+                        cells = [cell.text.strip() for cell in row.cells]
+                        line = " | ".join(t for t in cells if t)
+                        if line:
+                            parts.append(line)
+            text = "\n".join(parts).strip()
             if not text:
                 raise ValueError("Could not extract text from DOCX.")
             return text

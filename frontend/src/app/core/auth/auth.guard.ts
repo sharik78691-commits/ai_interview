@@ -45,3 +45,29 @@ export const guestGuard: CanActivateFn = (route) => {
 
   return auth.checkSession().pipe(map((user) => (user ? dest : true)));
 };
+
+/**
+ * Protects /admin. Anonymous visitors go to /login; signed-in non-admins go
+ * to /dashboard. (The backend enforces this too with 401/403.)
+ */
+export const adminGuard: CanActivateFn = () => {
+  const auth = inject(AuthService);
+  const router = inject(Router);
+
+  if (auth.isAuthenticated) {
+    return auth.isAdmin ? true : router.createUrlTree(['/dashboard']);
+  }
+  return auth
+    .checkSession()
+    .pipe(
+      map((user) =>
+        user
+          ? user.is_admin
+            ? true
+            : router.createUrlTree(['/dashboard'])
+          : router.createUrlTree(['/login'], {
+              queryParams: { redirect: '/admin' },
+            }),
+      ),
+    );
+};

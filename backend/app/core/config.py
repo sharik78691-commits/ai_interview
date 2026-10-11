@@ -137,6 +137,16 @@ class Settings:
         # would silently drop the session cookie.
         self.cookie_domain: str = os.getenv("COOKIE_DOMAIN", "")
 
+        # ---------------------------------------------------------------- admin
+        # Seed admin login. The password is NEVER hardcoded: it comes only from
+        # the environment, and seeding is skipped (with a warning) when unset.
+        # Local dev: put ADMIN_PASSWORD in backend/.env (gitignored).
+        # Production: set ADMIN_PASSWORD on the host (Render env vars).
+        self.admin_email: str = os.getenv("ADMIN_EMAIL", "admin@oyeinterview.com")
+        self.admin_username: str = os.getenv("ADMIN_USERNAME", "admin")
+        self.admin_name: str = os.getenv("ADMIN_NAME", "Administrator")
+        self.admin_password: str = os.getenv("ADMIN_PASSWORD", "")
+
         # ------------------------------------------------------------ websocket
         # Lifetime of the short-lived ticket used to authenticate the live
         # interview socket. The socket is opened directly against the backend

@@ -11,3 +11,10 @@
   `electron-builder`, or rebuild the `.exe` installer unless explicitly asked.
 - Desktop-only UI must stay gated behind `environment.electron` so the web
   build is unaffected. Desktop changes happen ONLY on explicit request.
+
+## Preserve existing functionality (user-set, persistent)
+- When adding a feature or fix, NEVER modify, remove, or regress existing
+  configuration, files, or behavior. READ a file before writing it; merge or
+  append — never blind-overwrite (especially `.env` and other local config).
+- After any change, verify the old functionality still works (build + smoke
+  test the touched flows: login, Google OAuth, Live/STT status).

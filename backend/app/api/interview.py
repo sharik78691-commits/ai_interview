@@ -9,6 +9,7 @@ from app.auth.dependencies import require_user
 from app.models.ai_response import AIInterviewResponse
 from app.models.interview import PrepareRequest, PrepareResponse
 from app.models.user import User
+from app.services.activity import log_event
 from app.services.ai_service import AIService
 
 logger = logging.getLogger(__name__)
@@ -68,6 +69,7 @@ async def prepare(
         "Interview prepared: user=%s resume_chars=%d job_chars=%d length=%s",
         user.id, len(resume), len(job), length,
     )
+    log_event("interview_prepared", user.id)
     return PrepareResponse(
         status="ready",
         message="Interview context stored. Ready for live guidance.",
@@ -118,9 +120,11 @@ async def analyze(
         user.id, len(question), length,
     )
     try:
-        return await service.analyze(question)
+        answer = await service.analyze(question)
     except Exception:
         logger.exception("Analyze failed: user=%s question=%r", user.id, question[:200])
         raise HTTPException(
             status_code=502, detail="AI response unavailable. Please try again."
         )
+    log_event("question_analyzed", user.id)
+    return answer

@@ -44,13 +44,25 @@
   </div>
 
   <h1>Prepare your interview</h1>
-  <p class="muted">Optionally upload your resume and paste the job description — the AI tunes every answer to your background. You can also start directly without them.</p>
+  <p class="muted">Upload your resume (optional) and paste the job description — the AI tunes every answer to your background. A position title and job description are required to start.</p>
   <app-error-banner [message]="error" (dismiss)="error=''"></app-error-banner>
   <div class="banner info">🎙 Browser mic note: live transcription uses the Web Speech API (best in Chrome/Edge). You can always type questions manually or use Demo mode.</div>
 
   <div class="grid2" style="margin-top:18px">
     <div class="card">
-      <h3>📄 Resume <span class="opt-tag">optional</span></h3>
+      <h3>📄 Resume <span class="opt-tag">optional</span>
+        @if (serverResumes.length || resumeData) {
+          <button
+            class="btn-ghost btn-sm update-btn"
+            type="button"
+            (click)="updateFileInput.click()"
+            title="Upload a newer version of your resume"
+          >
+            ↻ Update resume
+          </button>
+        }
+      </h3>
+      <input #updateFileInput type="file" hidden accept=".pdf,.docx,.txt" (change)="onFilePicked($event)">
       <p class="muted small">PDF, DOCX or TXT</p>
       <div class="drop" [class.over]="dragOver" (dragover)="$event.preventDefault(); dragOver=true" (dragleave)="dragOver=false" (drop)="onDrop($event)">
         @if (uploading) {
@@ -62,6 +74,66 @@
           <label class="btn-ghost btn-sm pick">Choose file<input type="file" hidden accept=".pdf,.docx,.txt" (change)="onFilePicked($event)"></label>
         }
       </div>
+      @if (serverOk) {
+        <div class="resume-lib">
+          <h4 class="lib-title">📚 My resumes
+            @if (serverResumes.length) {
+              <span class="muted small">({{ serverResumes.length }}/4)</span>
+            }
+          </h4>
+          @if (resumesLoading) {
+            <p class="muted small">Loading saved resumes…</p>
+          } @else if (!serverResumes.length) {
+            <p class="muted small">No saved resumes yet — upload below and it will be stored on your account.</p>
+          } @else {
+            <ul class="resume-list">
+              @for (r of serverResumes; track r.id) {
+                <li class="resume-row" [class.active]="r.is_active">
+                  <div class="resume-meta">
+                    <strong>{{ r.filename }}</strong>
+                    <span class="muted small">{{ fmtDate(r.created_at) }} · {{ formatSize(r.size_bytes) }}</span>
+                    @if (r.is_active) {
+                      <span class="tag active-tag">Active</span>
+                    }
+                  </div>
+                  <div class="resume-actions">
+                    <button
+                      class="btn-ghost btn-sm"
+                      type="button"
+                      (click)="editResume(r)"
+                      [disabled]="actingResumeId === r.id"
+                      title="Load into the editor to correct the text"
+                    >
+                      ✏️
+                    </button>
+                    @if (!r.is_active) {
+                      <button
+                        class="btn-ghost btn-sm"
+                        type="button"
+                        (click)="useResume(r)"
+                        [disabled]="actingResumeId === r.id"
+                      >
+                        Use
+                      </button>
+                    }
+                    <a class="btn-ghost btn-sm" [href]="downloadHref(r.id)" title="Download original file">⬇</a>
+                    <button
+                      class="btn-ghost btn-sm"
+                      type="button"
+                      (click)="removeResume(r)"
+                      [disabled]="actingResumeId === r.id"
+                      title="Delete this resume"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </li>
+              }
+            </ul>
+            <p class="muted small hint">Max 4 resumes — uploading a 5th auto-deletes the oldest.</p>
+          }
+        </div>
+      }
       @if (resumeData?.skills?.length) {
         <div class="chips">@for (s of resumeData!.skills.slice(0,12); track s) { <span class="chip">{{ s }}</span> } </div>
       }
@@ -69,19 +141,125 @@
         <ul class="exp">@for (e of resumeData!.experience.slice(0,4); track e) { <li class="small muted">{{ e }}</li> } </ul>
       }
       <label class="lbl" for="resumeText">Resume text (editable)</label>
+      @if (serverOk) {
+        <p class="editor-status">
+          @if (editingResumeId !== null) {
+            <span class="tag active-tag">Editing saved resume — Save updates it</span>
+          } @else {
+            <span class="tag">Unsaved text — will save as a new resume</span>
+          }
+        </p>
+      }
       <textarea id="resumeText" [(ngModel)]="resumeText" rows="7" placeholder="Paste resume text here as an alternative to file upload…"></textarea>
+      @if (serverOk) {
+        <div class="btn-row">
+          @if (editingResumeId !== null) {
+            <button
+              class="btn-primary btn-sm"
+              type="button"
+              (click)="saveResumeEdits()"
+              [disabled]="savingResumeText"
+            >
+              {{ savingResumeText ? 'Saving…' : '💾 Update saved resume' }}
+            </button>
+            <button
+              class="btn-ghost btn-sm"
+              type="button"
+              (click)="saveResumeAsNew()"
+              [disabled]="savingResumeText"
+              title="Keep this copy untouched and store the editor text as a separate resume"
+            >
+              Save as a copy
+            </button>
+          } @else {
+            <button
+              class="btn-primary btn-sm"
+              type="button"
+              (click)="saveResumeAsNew()"
+              [disabled]="savingResumeText"
+            >
+              {{ savingResumeText ? 'Saving…' : '💾 Save as new resume' }}
+            </button>
+          }
+        </div>
+        <p class="muted small hint">Edits update the saved copy on your account — interviews always use the latest text.</p>
+      }
     </div>
 
     <div class="card">
-      <h3>💼 Target role <span class="opt-tag">optional</span></h3>
-      <label class="lbl" for="position">Position</label>
-      <input id="position" type="text" [(ngModel)]="targetPosition" placeholder="e.g. Senior Backend Engineer">
-      <label class="lbl" for="jd">Job description ({{ jobDescription.length }} chars)</label>
-      <textarea id="jd" [(ngModel)]="jobDescription" rows="11" placeholder="Paste the full job description…"></textarea>
+      <h3>💼 Target role <span class="req-tag">Required</span></h3>
+      @if (serverOk) {
+        <div class="resume-lib">
+          <h4 class="lib-title">Saved roles
+            @if (serverRoles.length) {
+              <span class="muted small">({{ serverRoles.length }}/4)</span>
+            }
+          </h4>
+          @if (rolesLoading) {
+            <p class="muted small">Loading saved roles…</p>
+          } @else if (!serverRoles.length) {
+            <p class="muted small">No saved roles yet — fill in below and Save; it stays on your account.</p>
+          } @else {
+            <ul class="resume-list">
+              @for (r of serverRoles; track r.id) {
+                <li class="resume-row" [class.active]="r.is_active">
+                  <div class="resume-meta">
+                    <strong>{{ r.position || '(No title)' }}</strong>
+                    <span class="muted small">{{ fmtDate(r.created_at) }} · {{ r.chars }} chars</span>
+                    @if (r.is_active) {
+                      <span class="tag active-tag">Active</span>
+                    }
+                  </div>
+                  <div class="resume-actions">
+                    @if (!r.is_active) {
+                      <button
+                        class="btn-ghost btn-sm"
+                        type="button"
+                        (click)="useRole(r)"
+                        [disabled]="actingRoleId === r.id"
+                      >
+                        Use
+                      </button>
+                    }
+                    <button
+                      class="btn-ghost btn-sm"
+                      type="button"
+                      (click)="removeRole(r)"
+                      [disabled]="actingRoleId === r.id"
+                      title="Delete this role"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </li>
+              }
+            </ul>
+            <p class="muted small hint">Max 4 roles — saving a 5th auto-deletes the oldest.</p>
+          }
+        </div>
+      }
+      <label class="lbl" for="position">Position <span class="req">*</span>
+        <span class="count">({{ targetPosition.length }}/200)</span>
+      </label>
+      <p class="muted small hint">(If you are a developer or programmer, please mention programming language) · max 200 characters.</p>
+      <input id="position" type="text" [(ngModel)]="targetPosition" maxlength="200" placeholder="e.g. Senior Backend Engineer (Python, AWS)">
+      @if (positionError) {
+        <p class="field-err">{{ positionError }}</p>
+      }
+      <label class="lbl" for="jd">Job description <span class="req">*</span>
+        <span class="count">({{ jobDescription.length }} / 2000 chars)</span>
+      </label>
+      <textarea id="jd" [(ngModel)]="jobDescription" rows="11" maxlength="2000" placeholder="Paste the full job description…"></textarea>
+      @if (jdError) {
+        <p class="field-err">{{ jdError }}</p>
+      }
       <button class="btn-primary wide" (click)="prepare()" [disabled]="preparing">
         {{ preparing ? 'Preparing…' : 'Prepare Interview →' }}
       </button>
-      <p class="muted small" style="margin-top:8px">Resume and target role are optional — you can start the interview right away.</p>
+      <button class="btn-green wide save-role" (click)="saveRole()" [disabled]="savingRole">
+        {{ savingRole ? 'Saving…' : '💾 Save role' }}
+      </button>
+      <p class="muted small" style="margin-top:8px">Position and job description are required to start. Resume is optional.</p>
     </div>
   </div>
 

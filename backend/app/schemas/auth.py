@@ -21,6 +21,7 @@ class UserPublic(BaseModel):
     name: str
     provider: str
     email_verified: bool = False
+    is_admin: bool = False
 
 
 class AuthStatus(BaseModel):
@@ -56,7 +57,9 @@ class RegisterRequest(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    # Field name stays "email" for frontend compatibility, but the value may
+    # be an email address OR a username (e.g. the admin's "admin").
+    email: str = Field(min_length=1, max_length=320)
     password: str = Field(min_length=1, max_length=MAX_PASSWORD_LENGTH)
 
 

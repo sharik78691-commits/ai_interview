@@ -1,0 +1,208 @@
+.page { padding: 36px 24px 60px; }
+.page h1 { font-size: 1.8rem; font-weight: 800; margin: 0; }
+.admin-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.admin-head p { margin: 6px 0 0; }
+
+/* ------------------------- System status card -------------------------- */
+.sys-card { margin-top: 18px; }
+.sys-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.mode-badge {
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  border-radius: 999px;
+  padding: 4px 12px;
+}
+.mode-badge.live {
+  color: #4ade80;
+  background: rgba(74, 222, 128, 0.1);
+  border: 1px solid rgba(74, 222, 128, 0.4);
+}
+.mode-badge.demo {
+  color: #fcd34d;
+  background: rgba(252, 211, 77, 0.08);
+  border: 1px solid rgba(252, 211, 77, 0.35);
+}
+.sys-pills { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+.sys-pill {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 12px;
+}
+.sys-pill.ok { color: #4ade80; border-color: rgba(74, 222, 128, 0.35); }
+
+/* ------------------------- Headline stat cards ------------------------- */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  margin-top: 18px;
+}
+.stat { text-align: center; padding: 18px 12px; }
+.stat-num {
+  font-size: 1.7rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: #c3d0ff;
+}
+.stat-lbl {
+  margin-top: 4px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* ------------------------------ Bar charts ----------------------------- */
+.chart-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+.bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  height: 170px;
+  margin-top: 14px;
+  padding-top: 18px;
+  border-bottom: 1px solid var(--border);
+}
+.bar-col {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  min-width: 0;
+  height: 100%;
+}
+.bar {
+  width: 100%;
+  max-width: 26px;
+  border-radius: 5px 5px 0 0;
+  background: linear-gradient(180deg, rgba(110, 139, 255, 0.9), rgba(110, 139, 255, 0.25));
+}
+.bar.alt {
+  background: linear-gradient(180deg, rgba(74, 222, 128, 0.9), rgba(74, 222, 128, 0.25));
+}
+.bar-val { font-size: 0.66rem; font-weight: 700; color: var(--muted); min-height: 1em; }
+.bar-lbl { font-size: 0.62rem; color: var(--muted); }
+
+/* ------------------------------ Users table ---------------------------- */
+.users-card { margin-top: 12px; }
+.users-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.users-head h3 { margin: 0; }
+.users-tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.search { max-width: 260px; }
+.table-wrap { overflow-x: auto; margin-top: 12px; }
+.users-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+.users-table th {
+  text-align: left;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.users-table td {
+  padding: 10px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.users-table tr:last-child td { border-bottom: 0; }
+.block { display: block; }
+.tag {
+  display: inline-block;
+  font-size: 0.68rem;
+  background: rgba(110, 139, 255, 0.12);
+  border: 1px solid rgba(110, 139, 255, 0.3);
+  color: #c3d0ff;
+  padding: 2px 9px;
+  border-radius: 999px;
+  margin-right: 4px;
+}
+.admin-tag {
+  background: rgba(252, 211, 77, 0.12);
+  border-color: rgba(252, 211, 77, 0.4);
+  color: #fcd34d;
+}
+.pill-ok, .pill-off {
+  display: inline-block;
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 2px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.pill-ok { color: #4ade80; background: rgba(74, 222, 128, 0.1); border: 1px solid rgba(74, 222, 128, 0.35); }
+.pill-off { color: #f87171; background: rgba(248, 113, 113, 0.1); border: 1px solid rgba(248, 113, 113, 0.35); }
+.actions-cell { white-space: nowrap; }
+.actions-cell .btn-ghost { margin-right: 6px; }
+.actions-cell .btn-ghost:last-child { margin-right: 0; }
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+
+/* --------------------- Top pages + recent logins ----------------------- */
+.mini-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; margin-top: 10px; }
+.mini-table th {
+  text-align: left;
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.mini-table td { padding: 8px; border-bottom: 1px solid var(--border); }
+.mini-table tr:last-child td { border-bottom: 0; }
+.login-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.login-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.82rem;
+}
+.login-list li:last-child { border-bottom: 0; }

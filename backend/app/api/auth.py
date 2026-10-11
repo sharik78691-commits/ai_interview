@@ -68,6 +68,7 @@ def _public(user: User) -> UserPublic:
         name=user.name or "",
         provider=user.auth_provider,
         email_verified=user.email_verified,
+        is_admin=bool(user.is_admin),
     )
 
 

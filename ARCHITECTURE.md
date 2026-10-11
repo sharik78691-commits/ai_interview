@@ -81,8 +81,12 @@ reproducing it locally.
 
 ## Decisions
 
-- **No DB:** MVP session only. `InterviewRepository`-style seam = `_context` dict
-  server-side + `history$` client-side; add Postgres later without touching WS schema.
+- **Auth in Postgres/SQLite, interview state in memory:** `users`,
+  `password_reset_tokens` and `revoked_sessions` live in SQLAlchemy 2.x
+  (SQLite locally, PostgreSQL via `DATABASE_URL`; database + tables are
+  auto-created on startup). Live-interview state stays an in-memory seam =
+  `_context` dict server-side + `history$` client-side, so the WS schema never
+  touches the DB.
 - **Browser STT for the candidate mic, server STT for meeting audio:** the Web
   Speech API only accepts microphone input, so the candidate's own voice is
   transcribed in-browser via `SpeechToTextProvider`. Meeting/tab audio cannot be

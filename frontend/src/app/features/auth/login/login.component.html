@@ -17,8 +17,8 @@
 
     <form (ngSubmit)="submit()" #f="ngForm">
       <label class="field">
-        <span>Email</span>
-        <input type="email" name="email" [(ngModel)]="email" autocomplete="email" placeholder="you@example.com" required />
+        <span>Email or username</span>
+        <input type="text" name="email" [(ngModel)]="email" autocomplete="username" placeholder="you@example.com" required />
       </label>
       <label class="field">
         <span>Password</span>
