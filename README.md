@@ -212,6 +212,29 @@ a signed, `HttpOnly` cookie — no token is ever stored in `localStorage` or
 
 Responses never include password hashes, OAuth tokens or internal security data.
 
+### Password reset emails
+
+Forgot-password actually **sends** the reset link by email (1-hour, single-use
+token). Any SMTP host works — configure in `backend/.env` (local) and Render
+env vars (production):
+
+```env
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=you@gmail.com
+SMTP_PASSWORD=<app-password>
+SMTP_FROM=you@gmail.com   # defaults to SMTP_USER when empty
+SMTP_USE_TLS=true
+```
+
+For Gmail, create an **App Password** (Google Account > Security > 2-Step
+Verification > App passwords) — a normal login password is rejected. With no
+`SMTP_HOST` set, mail is disabled and the link goes to the server log only
+(local-dev fallback); the API response is identical either way, and a mail
+failure never breaks the endpoint. The emailed link points at `FRONTEND_URL`,
+so it opens the website's reset page — desktop-app users reset there and sign
+back into the app, no installer change needed.
+
 ### Protected endpoints
 
 `/api/resume/upload`, `/api/interview/prepare`, `/api/interview/context`,
@@ -377,6 +400,25 @@ via a never-failing helper, which powers the login/interview trends. The
 Angular `/admin` page (guarded by `adminGuard`, hidden from search engines)
 renders system status, counters, charts, top pages, recent logins and the user
 table; the navbar shows the Admin link only to admins.
+
+### Product analytics
+
+The admin panel answers "kitna, kahan, kab" from three append-only logs
+(all auto-created, all privacy-conservative — salted IP hashes + GeoIP labels
+only, never raw IPs; clicks record button labels, never input values):
+
+| Source | Table | What |
+|---|---|---|
+| Every request (middleware) | `activity_log` (`visit`) | path, user, geo (country/region/city), device (user-agent) |
+| Login/register/prepare/analyze | `activity_log` (`login`/`register`/`prepare`/`analyze`) | action + user + geo |
+| Frontend heartbeat (30s) + route changes | `activity_log` (`stay`) | seconds per page path |
+| Frontend click listener (batched) | `activity_log` (`click`) | button label + page path |
+
+`GET /api/admin/stats?from=YYYY-MM-DD&to=YYYY-MM-DD` (default: last 30 days)
+returns lifetime totals plus in-range counters, daily series, top pages,
+top clicks, time-on-pages, recent logins/visits with locations. The Angular
+`/admin` page renders a From–To range bar (7/14/30/90-day presets) driving
+every section. Analytics respects browser Do-Not-Track (fully off when set).
 
 ## API
 

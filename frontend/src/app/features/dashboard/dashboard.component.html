@@ -1,4 +1,25 @@
 <div class="container page">
+  @if (isDesktop) {
+    <!-- Desktop build: no self-download card — a disabled updater placeholder. -->
+    <div class="card desktop-card update-card">
+      <div class="desktop-head">
+        <h3>⬇ App updates</h3>
+        @if (desktopApp.version) {
+          <span class="ver">v{{ desktopApp.version }}</span>
+        }
+      </div>
+      <div class="dl-row">
+        <button
+          class="btn-ghost btn-sm"
+          type="button"
+          disabled
+          title="In-app updates are not available in this version — download new releases from the website"
+        >
+          ⬇ Download updated version
+        </button>
+      </div>
+    </div>
+  } @else {
   <!-- ======================= DESKTOP APP DOWNLOAD ======================= -->
   <div class="card desktop-card">
     <div class="desktop-head">
@@ -42,6 +63,7 @@
       <p class="muted small dl-note">Download links appear here as soon as the desktop build is published.</p>
     }
   </div>
+  }
 
   <h1>Prepare your interview</h1>
   <p class="muted">Upload your resume (optional) and paste the job description — the AI tunes every answer to your background. A position title and job description are required to start.</p>

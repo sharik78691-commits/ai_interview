@@ -6,6 +6,31 @@
     </div>
     <button class="btn-ghost btn-sm" type="button" (click)="refresh()">↻ Refresh</button>
   </div>
+
+  <!-- ------------------------- Date range (all sections) ------------------------- -->
+  <div class="card range-bar">
+    <div class="range-fields">
+      <label class="lbl" for="fromDate">From
+        <input id="fromDate" type="date" [(ngModel)]="fromDate" />
+      </label>
+      <label class="lbl" for="toDate">To
+        <input id="toDate" type="date" [(ngModel)]="toDate" />
+      </label>
+      <button class="btn-primary btn-sm" type="button" (click)="applyRange()">Apply</button>
+    </div>
+    <div class="range-presets">
+      <button class="btn-ghost btn-sm" type="button" (click)="preset(7)">7d</button>
+      <button class="btn-ghost btn-sm" type="button" (click)="preset(14)">14d</button>
+      <button class="btn-ghost btn-sm" type="button" (click)="preset(30)">30d</button>
+      <button class="btn-ghost btn-sm" type="button" (click)="preset(90)">90d</button>
+      @if (stats) {
+        <span class="muted small">Showing {{ rangeLabel() }}</span>
+      } @else {
+        <span class="muted small">Default: last 30 days</span>
+      }
+    </div>
+  </div>
+
   <app-error-banner [message]="error" (dismiss)="error = ''"></app-error-banner>
 
   @if (forbidden) {
@@ -19,78 +44,98 @@
     }
     @if (stats) {
       <!-- ------------------------- System status ------------------------- -->
-      @if (stats.system) {
-        <div class="card sys-card">
-          <div class="sys-head">
-            @if (stats.system.demo_mode) {
-              <span class="mode-badge demo" title="No AI key configured — answers are templates">DEMO</span>
-            } @else {
-              <span class="mode-badge live" title="AI backend connected">● LIVE</span>
-            }
-            <span class="muted small">v{{ stats.system.version }} · DB: {{ stats.system.database }}</span>
-          </div>
-          <div class="sys-pills">
-            <span class="sys-pill" [class.ok]="stats.system.llm_configured">
-              AI guidance {{ stats.system.llm_configured ? 'on' : 'off' }}
-            </span>
-            <span class="sys-pill" [class.ok]="stats.system.stt_configured">
-              Meeting transcription {{ stats.system.stt_configured ? 'on' : 'off' }}
-            </span>
-            <span class="sys-pill" [class.ok]="stats.system.google_configured">
-              Google login {{ stats.system.google_configured ? 'on' : 'off' }}
-            </span>
-          </div>
+      <div class="card sys-card">
+        <div class="sys-head">
+          @if (stats.system.demo_mode) {
+            <span class="mode-badge demo" title="No AI key configured — answers are templates">DEMO</span>
+          } @else {
+            <span class="mode-badge live" title="AI backend connected">● LIVE</span>
+          }
+          <span class="muted small">v{{ stats.system.version }} · DB: {{ stats.system.database }}</span>
         </div>
-      }
+        <div class="sys-pills">
+          <span class="sys-pill" [class.ok]="stats.system.llm_configured">
+            AI guidance {{ stats.system.llm_configured ? 'on' : 'off' }}
+          </span>
+          <span class="sys-pill" [class.ok]="stats.system.stt_configured">
+            Meeting transcription {{ stats.system.stt_configured ? 'on' : 'off' }}
+          </span>
+          <span class="sys-pill" [class.ok]="stats.system.google_configured">
+            Google login {{ stats.system.google_configured ? 'on' : 'off' }}
+          </span>
+        </div>
+      </div>
 
-      <!-- ------------------------- Headline counters ------------------------- -->
+      <!-- ------------------------- Lifetime totals ------------------------- -->
+      <h3 class="section-title">All time</h3>
       <div class="stat-grid">
         <div class="card stat">
-          <div class="stat-num">{{ stats.users_total }}</div>
+          <div class="stat-num">{{ stats.all_time.users_total }}</div>
           <div class="stat-lbl">Registered users</div>
         </div>
         <div class="card stat">
-          <div class="stat-num">{{ stats.active_users }}</div>
+          <div class="stat-num">{{ stats.all_time.active_users }}</div>
           <div class="stat-lbl">Active accounts</div>
         </div>
         <div class="card stat">
-          <div class="stat-num">{{ stats.total_logins }}</div>
+          <div class="stat-num">{{ stats.all_time.total_logins }}</div>
           <div class="stat-lbl">Total logins</div>
         </div>
         <div class="card stat">
-          <div class="stat-num">{{ stats.logins_today }}</div>
-          <div class="stat-lbl">Logins today</div>
-        </div>
-        <div class="card stat">
-          <div class="stat-num">{{ stats.interviews_total ?? 0 }}</div>
+          <div class="stat-num">{{ stats.all_time.interviews_total }}</div>
           <div class="stat-lbl">Interviews prepared</div>
         </div>
         <div class="card stat">
-          <div class="stat-num">{{ stats.questions_total ?? 0 }}</div>
+          <div class="stat-num">{{ stats.all_time.questions_total }}</div>
           <div class="stat-lbl">Questions answered</div>
         </div>
         <div class="card stat">
-          <div class="stat-num">{{ stats.resumes_total ?? 0 }}</div>
-          <div class="stat-lbl">Resumes stored</div>
+          <div class="stat-num">{{ stats.all_time.visits_total }}</div>
+          <div class="stat-lbl">Total visits</div>
+        </div>
+      </div>
+
+      <!-- ------------------------- Selected range ------------------------- -->
+      <h3 class="section-title">In selected range <span class="muted small">({{ rangeLabel() }})</span></h3>
+      <div class="stat-grid">
+        <div class="card stat">
+          <div class="stat-num">{{ stats.in_range.signups }}</div>
+          <div class="stat-lbl">Signups</div>
         </div>
         <div class="card stat">
-          <div class="stat-num">{{ stats.roles_total ?? 0 }}</div>
-          <div class="stat-lbl">Target roles</div>
+          <div class="stat-num">{{ stats.in_range.logins }}</div>
+          <div class="stat-lbl">Logins</div>
         </div>
         <div class="card stat">
-          <div class="stat-num">{{ stats.visits_today }}</div>
-          <div class="stat-lbl">Visits today</div>
+          <div class="stat-num">{{ stats.in_range.interviews }}</div>
+          <div class="stat-lbl">Interviews</div>
         </div>
         <div class="card stat">
-          <div class="stat-num">{{ stats.visitors_today }}</div>
-          <div class="stat-lbl">Visitors today</div>
+          <div class="stat-num">{{ stats.in_range.questions }}</div>
+          <div class="stat-lbl">Questions</div>
+        </div>
+        <div class="card stat">
+          <div class="stat-num">{{ stats.in_range.visits }}</div>
+          <div class="stat-lbl">Visits</div>
+        </div>
+        <div class="card stat">
+          <div class="stat-num">{{ stats.in_range.visitors }}</div>
+          <div class="stat-lbl">Unique visitors</div>
+        </div>
+        <div class="card stat">
+          <div class="stat-num">{{ stats.in_range.clicks }}</div>
+          <div class="stat-lbl">Button clicks</div>
+        </div>
+        <div class="card stat">
+          <div class="stat-num">{{ fmtSeconds(stats.in_range.seconds) }}</div>
+          <div class="stat-lbl">Time on site</div>
         </div>
       </div>
 
       <!-- ------------------------------ Charts ------------------------------ -->
       <div class="chart-grid">
         <div class="card">
-          <h3>Signups — last 14 days</h3>
+          <h3>Signups — per day</h3>
           <div class="bars">
             @for (b of stats.signups_by_day; track b.day) {
               <div class="bar-col" [title]="b.day + ': ' + b.count + ' signup(s)'">
@@ -102,19 +147,19 @@
           </div>
         </div>
         <div class="card">
-          <h3>Logins — last 14 days</h3>
+          <h3>Logins — per day</h3>
           <div class="bars">
-            @for (b of (stats.logins_by_day ?? []); track b.day) {
+            @for (b of stats.logins_by_day; track b.day) {
               <div class="bar-col" [title]="b.day + ': ' + b.count + ' login(s)'">
                 <span class="bar-val">{{ b.count || '' }}</span>
-                <div class="bar alt" [style.height.%]="barHeight(b.count, chartMax(stats.logins_by_day ?? []))"></div>
+                <div class="bar alt" [style.height.%]="barHeight(b.count, chartMax(stats.logins_by_day))"></div>
                 <span class="bar-lbl">{{ b.day.slice(5) }}</span>
               </div>
             }
           </div>
         </div>
         <div class="card">
-          <h3>Visits — last 14 days <span class="muted small">({{ stats.visits_total }} total)</span></h3>
+          <h3>Visits — per day <span class="muted small">({{ stats.all_time.visits_total }} total)</span></h3>
           <div class="bars">
             @for (b of stats.visits_by_day; track b.day) {
               <div class="bar-col" [title]="b.day + ': ' + b.count + ' visit(s)'">
@@ -126,12 +171,12 @@
           </div>
         </div>
         <div class="card">
-          <h3>Interviews — last 14 days</h3>
+          <h3>Interviews — per day</h3>
           <div class="bars">
-            @for (b of (stats.interviews_by_day ?? []); track b.day) {
+            @for (b of stats.interviews_by_day; track b.day) {
               <div class="bar-col" [title]="b.day + ': ' + b.count + ' interview(s)'">
                 <span class="bar-val">{{ b.count || '' }}</span>
-                <div class="bar alt" [style.height.%]="barHeight(b.count, chartMax(stats.interviews_by_day ?? []))"></div>
+                <div class="bar alt" [style.height.%]="barHeight(b.count, chartMax(stats.interviews_by_day))"></div>
                 <span class="bar-lbl">{{ b.day.slice(5) }}</span>
               </div>
             }
@@ -139,17 +184,17 @@
         </div>
       </div>
 
-      <!-- --------------------- Top pages + recent logins --------------------- -->
+      <!-- --------------------- Top pages + top clicks --------------------- -->
       <div class="chart-grid">
         <div class="card">
           <h3>Top pages</h3>
-          @if (!(stats.top_pages ?? []).length) {
-            <p class="muted small">No visits recorded yet.</p>
+          @if (!stats.top_pages.length) {
+            <p class="muted small">No visits in this range.</p>
           } @else {
             <table class="mini-table">
               <thead><tr><th>Page</th><th>Visits</th><th>Visitors</th></tr></thead>
               <tbody>
-                @for (p of (stats.top_pages ?? []); track p.path) {
+                @for (p of stats.top_pages; track p.path) {
                   <tr><td>{{ p.path }}</td><td>{{ p.visits }}</td><td>{{ p.visitors }}</td></tr>
                 }
               </tbody>
@@ -157,20 +202,96 @@
           }
         </div>
         <div class="card">
+          <h3>Top clicks</h3>
+          @if (!stats.top_clicks.length) {
+            <p class="muted small">No button presses recorded in this range yet.</p>
+          } @else {
+            <table class="mini-table">
+              <thead><tr><th>Button</th><th>Page</th><th>Presses</th></tr></thead>
+              <tbody>
+                @for (c of stats.top_clicks; track c.label + c.path) {
+                  <tr><td>{{ c.label || '(no label)' }}</td><td class="muted small">{{ c.path }}</td><td>{{ c.count }}</td></tr>
+                }
+              </tbody>
+            </table>
+          }
+        </div>
+      </div>
+
+      <!-- ------------------ Time on pages + recent logins ------------------ -->
+      <div class="chart-grid">
+        <div class="card">
+          <h3>Time on pages</h3>
+          @if (!stats.page_times.length) {
+            <p class="muted small">No dwell time recorded in this range yet.</p>
+          } @else {
+            <table class="mini-table">
+              <thead><tr><th>Page</th><th>Time</th><th>Views</th></tr></thead>
+              <tbody>
+                @for (p of stats.page_times; track p.path) {
+                  <tr><td>{{ p.path }}</td><td>{{ fmtSeconds(p.seconds) }}</td><td>{{ p.views }}</td></tr>
+                }
+              </tbody>
+            </table>
+          }
+        </div>
+        <div class="card">
           <h3>Recent logins</h3>
-          @if (!(stats.recent_logins ?? []).length) {
-            <p class="muted small">Nobody has signed in yet.</p>
+          @if (!stats.recent_logins.length) {
+            <p class="muted small">Nobody signed in during this range.</p>
           } @else {
             <ul class="login-list">
-              @for (u of (stats.recent_logins ?? []); track u.id) {
+              @for (u of stats.recent_logins; track u.email + u.at) {
                 <li>
                   <strong>{{ u.name || u.email }}</strong>
-                  <span class="muted small">{{ u.email }} · {{ fmtDate(u.last_login_at) }}</span>
+                  <span class="muted small">{{ u.email }} · {{ fmtDate(u.at) }}</span>
+                  <span class="muted small">📍 {{ u.location || 'Unknown' }}</span>
                 </li>
               }
             </ul>
           }
         </div>
+      </div>
+
+      <!-- --------------------------- Latest visits --------------------------- -->
+      <div class="card users-card">
+        <h3>Latest visits <span class="muted small">(IPs are never stored — visitors show as short IDs)</span></h3>
+        @if (!stats.recent_visits.length) {
+          <p class="muted small">No visits in this range.</p>
+        } @else {
+          <div class="table-wrap">
+            <table class="users-table">
+              <thead><tr><th>Time</th><th>Page</th><th>User</th><th>Location</th><th>Device</th><th>Visitor</th></tr></thead>
+              <tbody>
+                @for (v of stats.recent_visits; track v.at + v.path + v.visitor) {
+                  <tr>
+                    <td class="muted small">{{ fmtDate(v.at) }}</td>
+                    <td>{{ v.path }}</td>
+                    <td class="muted small">{{ v.email }}</td>
+                    <td class="muted small">📍 {{ v.location || 'Unknown' }}</td>
+                    <td class="muted small">{{ v.device || '—' }}</td>
+                    <td class="muted small mono">{{ v.visitor || '—' }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        }
+      </div>
+    }
+
+    <!-- --------------------------- Live activity --------------------------- -->
+    @if ((stats?.live_feed ?? []).length) {
+      <div class="card users-card">
+        <h3>⚡ Live activity <span class="muted small">(latest actions in this range)</span></h3>
+        <ul class="login-list">
+          @for (f of (stats?.live_feed ?? []); track $index) {
+            <li>
+              <strong>{{ f.text }}</strong>
+              <span class="muted small">{{ fmtDate(f.at) }} · 📍 {{ f.location || 'Unknown' }}</span>
+            </li>
+          }
+        </ul>
       </div>
     }
 
@@ -204,6 +325,7 @@
                 <th>Resumes</th>
                 <th>Roles</th>
                 <th>Last login</th>
+                <th>Location</th>
                 <th>Status</th>
                 <th></th>
               </tr>
@@ -228,6 +350,7 @@
                   <td>{{ u.resumes_count ?? 0 }}</td>
                   <td>{{ u.roles_count ?? 0 }}</td>
                   <td class="muted small">{{ fmtDate(u.last_login_at) }}</td>
+                  <td class="muted small">📍 {{ u.last_location || '—' }}</td>
                   <td>
                     @if (u.is_active) {
                       <span class="pill-ok">Active</span>

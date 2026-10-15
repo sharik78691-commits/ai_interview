@@ -147,6 +147,22 @@ class Settings:
         self.admin_name: str = os.getenv("ADMIN_NAME", "Administrator")
         self.admin_password: str = os.getenv("ADMIN_PASSWORD", "")
 
+        # ---------------------------------------------------------------- email
+        # Outgoing mail for password-reset links. Any SMTP host works; for
+        # Gmail use an App Password (Google Account > Security > 2-Step
+        # Verification > App passwords) — a normal login password is rejected.
+        # Empty SMTP_HOST = mail disabled: reset links are only written to the
+        # server log (local-dev fallback), the API response stays the same.
+        self.smtp_host: str = os.getenv("SMTP_HOST", "")
+        try:
+            self.smtp_port: int = int(os.getenv("SMTP_PORT", "587"))
+        except ValueError:
+            self.smtp_port = 587
+        self.smtp_user: str = os.getenv("SMTP_USER", "")
+        self.smtp_password: str = os.getenv("SMTP_PASSWORD", "")
+        self.smtp_from: str = os.getenv("SMTP_FROM", "") or self.smtp_user
+        self.smtp_use_tls: bool = _as_bool(os.getenv("SMTP_USE_TLS"), default=True)
+
         # ------------------------------------------------------------ websocket
         # Lifetime of the short-lived ticket used to authenticate the live
         # interview socket. The socket is opened directly against the backend
@@ -293,6 +309,11 @@ class Settings:
     @property
     def google_configured(self) -> bool:
         return bool(self.google_client_id and self.google_client_secret)
+
+    @property
+    def smtp_configured(self) -> bool:
+        """Outbound mail available (host + sender identity present)."""
+        return bool(self.smtp_host and self.smtp_from)
 
     @property
     def is_production(self) -> bool:

@@ -18,20 +18,20 @@
     </div>
     <div class="actions">
       @if (isDesktop) {
-        <button class="btn-primary btn-sm" (click)="openAutoSelectInfo()" title="Capture your computer's sound automatically">
-          ⚡ Auto Select Meeting Audio
-        </button>
         @if (capturingInterviewer) {
           <button class="btn-ghost btn-sm" (click)="stopInterviewerAudio()">■ Stop audio</button>
         }
-        <button
-          class="btn-ghost btn-sm"
-          [class.live]="invisibleModeActive"
-          (click)="toggleInvisibleMode()"
-          title="Open a floating transcript + guidance window that stays hidden from screen share"
-        >
-          {{ invisibleModeActive ? '🛑 Stop invisible mode' : '🫥 Invisible mode in screen share' }}
-        </button>
+        <label class="opacity-ctl" title="Make the app window see-through (0% = solid, 88% = almost fully transparent) so windows behind it show through">
+          <span class="opacity-lbl">Transparency {{ windowTransparency }}%</span>
+          <input
+            type="range"
+            min="0"
+            max="88"
+            step="4"
+            [value]="windowTransparency"
+            (input)="setWindowTransparency($event)"
+          />
+        </label>
       }
       @if (!sessionActive) {
         <button class="btn-ghost btn-sm demo" (click)="runDemo()">▶ Demo</button>

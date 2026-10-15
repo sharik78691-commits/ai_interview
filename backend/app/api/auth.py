@@ -39,6 +39,8 @@ from app.core.config import get_settings
 from app.core.ratelimit import rate_limit
 from app.db.session import get_db
 from app.models.user import User
+from app.services.email_service import send_password_reset_email
+from app.services.activity import client_ip, log_event
 from app.schemas.auth import (
     AuthStatus,
     ForgotPasswordRequest,
@@ -118,6 +120,7 @@ async def login(
         )
     # Fresh session token on login prevents session fixation.
     security.set_session_cookies(response, user.id)
+    log_event("user_login", user.id, ip=client_ip(request))
     settings = get_settings()
     logger.info(
         "Login succeeded (user_id=%s). Cookie set with secure=%s samesite=%s domain=%r — "
@@ -268,6 +271,7 @@ async def google_callback(
 
     redirect = RedirectResponse(f"{frontend}/dashboard", status_code=status.HTTP_302_FOUND)
     security.set_session_cookies(redirect, user.id)
+    log_event("user_login", user.id, ip=client_ip(request))
     # Clear the one-time state cookie.
     redirect.delete_cookie(security.OAUTH_STATE_COOKIE, path="/")
     return redirect
@@ -286,11 +290,22 @@ async def forgot_password(
     user = get_user_by_email(db, req.email)
     if user is not None and user.is_active:
         raw = create_reset_token(db, user)
-        # In a real deployment this link is emailed. For the MVP it is logged
-        # WITHOUT the email address, and never returned in the API response.
         settings = get_settings()
         link = f"{settings.frontend_url.rstrip('/')}/reset-password?token={raw}"
-        logger.info("Password reset link generated for user id=%s: %s", user.id, link)
+        # The link itself is NEVER returned in the API response and the email
+        # address is never logged (enumeration-resistant + PII rule).
+        emailed = send_password_reset_email(user.email, link)
+        if emailed:
+            logger.info("Password reset link emailed (user_id=%s)", user.id)
+        else:
+            # SMTP unconfigured or failed: keep the local-dev escape hatch —
+            # full link in the server log — so testing is never blocked.
+            logger.info(
+                "Password reset link generated (user_id=%s, emailed=False): %s",
+                user.id, link,
+            )
+    # Always the same response — never reveal whether the email exists.
+    return MessageResponse(message=_GENERIC_FORGOT)
     # Always the same response — never reveal whether the email exists.
     return MessageResponse(message=_GENERIC_FORGOT)
 

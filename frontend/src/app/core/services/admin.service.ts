@@ -15,17 +15,22 @@ const BASE = environment.apiBaseUrl;
 export class AdminService {
   private http = inject(HttpClient);
 
-  /** Headline counters, 14-day series and recent signups. */
-  stats(): Observable<AdminStats> {
-    return this.http.get<AdminStats>(`${BASE}/api/admin/stats`);
+  /** Headline counters, series and tables for a date range (YYYY-MM-DD). */
+  stats(from?: string, to?: string): Observable<AdminStats> {
+    let params = new HttpParams();
+    if (from) params = params.set('from', from);
+    if (to) params = params.set('to', to);
+    return this.http.get<AdminStats>(`${BASE}/api/admin/stats`, { params });
   }
 
-  /** Searchable, paginated user list (newest first). */
-  users(query = '', page = 1, pageSize = 20): Observable<AdminUsersPage> {
-    const params = new HttpParams()
+  /** Searchable, paginated user list (newest first), optional signup range. */
+  users(query = '', page = 1, pageSize = 20, from?: string, to?: string): Observable<AdminUsersPage> {
+    let params = new HttpParams()
       .set('q', query)
       .set('page', page)
       .set('page_size', pageSize);
+    if (from) params = params.set('from', from);
+    if (to) params = params.set('to', to);
     return this.http.get<AdminUsersPage>(`${BASE}/api/admin/users`, { params });
   }
 

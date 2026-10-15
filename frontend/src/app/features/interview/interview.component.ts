@@ -21,7 +21,6 @@ import { SettingsService } from '../../core/services/settings.service';
 import { TranscriptionService } from '../../core/services/transcription.service';
 import { ErrorBannerComponent } from '../../shared/components/error-banner/error-banner.component';
 import { TimeFormatPipe } from '../../shared/pipes/time-format.pipe';
-import type { CopilotPayload } from '../../core/services/electron-bridge';
 
 @Component({
   selector: 'app-interview',
@@ -40,7 +39,7 @@ export class InterviewComponent implements OnInit, OnDestroy {
   private demo = inject(DemoService);
   private settings = inject(SettingsService);
   private route = inject(ActivatedRoute);
-  /** True in the packaged desktop build (Auto Select + Invisible mode). */
+  /** True in the packaged desktop build (Auto Select + transparency slider). */
   readonly isDesktop = environment.electron;
 
   entries: TranscriptEntry[] = [];
@@ -94,8 +93,8 @@ export class InterviewComponent implements OnInit, OnDestroy {
   systemAudioDevices: string[] | null = null;
   /** Info popup shown before "Auto Select Meeting Audio" starts capturing. */
   autoSelectInfoOpen = false;
-  /** True while the capture-protected copilot window ("invisible mode") is open. */
-  invisibleModeActive = false;
+  /** Window transparency in percent (desktop top-bar slider, 0 = solid). */
+  windowTransparency = 0;
 
   /** Answer text used by the "Copy Answer" button. */
   get answerText(): string {
@@ -232,16 +231,12 @@ export class InterviewComponent implements OnInit, OnDestroy {
           this.thinking = false;
         }
       }),
-      // --- Invisible mode (Electron copilot window) ---
-      // Push fresh transcript + guidance to the copilot window whenever either
-      // changes. These run after the subscriptions above, so the fields they
-      // read (guidance / lastInterviewerText) are already updated.
-      this.ws.guidance$.subscribe(() => this.pushToCopilot()),
-      this.ws.interviewerTranscript$.subscribe(() => this.pushToCopilot()),
     );
 
-    // If the user closes the copilot window directly, reset the toggle button.
-    window.electronAPI?.invisible.onClosed(() => (this.invisibleModeActive = false));
+    // --- Window transparency (Electron top-bar slider) ---
+    // Restore the user's last choice so a restart keeps the same look.
+    this.windowTransparency = this.readTransparency();
+    this.applyTransparency(this.windowTransparency);
   }
 
   /**
@@ -288,7 +283,6 @@ export class InterviewComponent implements OnInit, OnDestroy {
     this.stopTimer();
     this.transcription.stop();
     void this.interviewerAudio.stop();
-    if (this.invisibleModeActive) void window.electronAPI?.invisible.stop();
     this.ws.disconnect();
   }
 
@@ -329,43 +323,51 @@ export class InterviewComponent implements OnInit, OnDestroy {
     });
   }
 
-  // ------------------------------------------------ invisible mode (Electron)
+  // --------------------------------- window transparency (Electron)
 
-  /** True when running inside the Electron wrapper (the feature needs it). */
-  get inElectron(): boolean {
-    // Primary: the preload bridge. Fallback: Electron stamps the user-agent, so
-    // even if the bridge isn't ready at first paint we still detect the shell.
-    return (
-      !!window.electronAPI?.isElectron ||
-      (typeof navigator !== 'undefined' && /Electron/i.test(navigator.userAgent))
+  /** Slider value (0–88). 0% = solid window, 88% = almost fully see-through. */
+  private static readonly MAX_TRANSPARENCY = 88;
+  private static readonly TRANSPARENCY_KEY = 'aia_window_transparency';
+
+  private clampTransparency(value: number): number {
+    if (!Number.isFinite(value)) return 0;
+    return Math.min(
+      InterviewComponent.MAX_TRANSPARENCY,
+      Math.max(0, Math.round(value)),
     );
   }
 
-  /**
-   * Toggle the capture-protected copilot window. Only works in the Electron
-   * wrapper: `setContentProtection` hides the window from screen capture
-   * (Zoom / Meet / Teams / OBS see it black).
-   */
-  toggleInvisibleMode(): void {
-    if (!this.inElectron) return;
-    if (this.invisibleModeActive) {
-      this.invisibleModeActive = false;
-      void window.electronAPI?.invisible.stop();
-    } else {
-      this.invisibleModeActive = true;
-      void window.electronAPI?.invisible.start();
-      this.pushToCopilot();
+  private readTransparency(): number {
+    try {
+      const raw = localStorage.getItem(InterviewComponent.TRANSPARENCY_KEY);
+      // Older versions allowed up to 100 — clamp into the current range.
+      return this.clampTransparency(raw === null ? 0 : Number(raw));
+    } catch {
+      return 0;
     }
   }
 
-  /** Send the current transcript + guidance to the copilot window (no-op off). */
-  private pushToCopilot(): void {
-    if (!this.invisibleModeActive || !window.electronAPI) return;
-    const payload: CopilotPayload = {
-      transcript: this.lastInterviewerText,
-      guidance: this.guidance,
-    };
-    window.electronAPI.invisible.update(payload);
+  /** Slider moved: live update + remember the choice. */
+  setWindowTransparency(event: Event): void {
+    const input = event.target as HTMLInputElement | null;
+    this.windowTransparency = this.clampTransparency(
+      input ? Number(input.value) : 0,
+    );
+    try {
+      localStorage.setItem(
+        InterviewComponent.TRANSPARENCY_KEY,
+        String(this.windowTransparency),
+      );
+    } catch {
+      // Private mode / blocked storage — the slider still works this session.
+    }
+    this.applyTransparency(this.windowTransparency);
+  }
+
+  /** Send 0–88% transparency to the Electron shell as 1.0–0.12 opacity. */
+  private applyTransparency(percent: number): void {
+    const opacity = 1 - this.clampTransparency(percent) / 100;
+    void window.electronAPI?.setOpacity?.(opacity);
   }
 
   // ------------------------------------------------ interviewer audio controls

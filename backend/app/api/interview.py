@@ -2,14 +2,14 @@
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from app.auth.dependencies import require_user
 from app.models.ai_response import AIInterviewResponse
 from app.models.interview import PrepareRequest, PrepareResponse
 from app.models.user import User
-from app.services.activity import log_event
+from app.services.activity import client_ip, log_event
 from app.services.ai_service import AIService
 
 logger = logging.getLogger(__name__)
@@ -52,6 +52,7 @@ class AnalyzeRequest(BaseModel):
 @router.post("/interview/prepare", response_model=PrepareResponse)
 async def prepare(
     req: PrepareRequest,
+    request: Request,
     user: User = Depends(require_user),
 ) -> PrepareResponse:
     # Resume and job description are optional — the user may prepare an
@@ -69,7 +70,7 @@ async def prepare(
         "Interview prepared: user=%s resume_chars=%d job_chars=%d length=%s",
         user.id, len(resume), len(job), length,
     )
-    log_event("interview_prepared", user.id)
+    log_event("interview_prepared", user.id, ip=client_ip(request))
     return PrepareResponse(
         status="ready",
         message="Interview context stored. Ready for live guidance.",
@@ -99,6 +100,7 @@ async def get_context_endpoint(user: User = Depends(require_user)) -> dict:
 @router.post("/interview/analyze", response_model=AIInterviewResponse)
 async def analyze(
     req: AnalyzeRequest,
+    request: Request,
     user: User = Depends(require_user),
 ) -> AIInterviewResponse:
     question = (req.question or "").strip()
@@ -126,5 +128,5 @@ async def analyze(
         raise HTTPException(
             status_code=502, detail="AI response unavailable. Please try again."
         )
-    log_event("question_analyzed", user.id)
+    log_event("question_analyzed", user.id, ip=client_ip(request))
     return answer

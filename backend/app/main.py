@@ -6,7 +6,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api import admin, auth, health, interview, resume, roles, websocket
+from app.api import admin, auth, activity, health, interview, resume, roles, websocket
 from app.core.config import get_settings
 from app.core.logging import setup_logging
 from app.core.middleware import (
@@ -104,6 +104,7 @@ app.include_router(health.router, prefix="/api")
 app.include_router(health.router)
 app.include_router(auth.router, prefix="/api")
 app.include_router(admin.router, prefix="/api")
+app.include_router(activity.router, prefix="/api")
 app.include_router(resume.router, prefix="/api")
 app.include_router(roles.router, prefix="/api")
 app.include_router(interview.router, prefix="/api")

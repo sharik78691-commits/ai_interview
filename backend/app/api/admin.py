@@ -12,7 +12,7 @@ runs unchanged on SQLite and PostgreSQL.
 import csv
 import io
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
@@ -23,31 +23,40 @@ from app.auth.dependencies import require_admin
 from app.core.config import get_settings
 from app.core.ratelimit import rate_limit
 from app.db.session import get_db
-from app.models.event import (
-    INTERVIEW_PREPARED,
-    QUESTION_ANALYZED,
-    USER_LOGIN,
-    EventLog,
+from app.models.activity_log import (
+    ANALYZE,
+    CLICK,
+    LOGIN,
+    PREPARE,
+    REGISTER,
+    STAY,
+    VISIT,
+    ActivityLog,
 )
 from app.models.resume_record import ResumeRecord
 from app.models.target_role import TargetRole
 from app.models.user import User
-from app.models.visit import VisitLog
 from app.schemas.admin import (
     AdminStats,
     AdminUserRow,
     AdminUsersPage,
+    AllTime,
     DayCount,
+    InRange,
+    LiveFeedItem,
+    LoginRow,
+    PageTimeRow,
+    RangeInfo,
     SetActiveRequest,
     SystemStatus,
+    TopClick,
     TopPage,
+    VisitRow,
 )
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
-
-_SERIES_DAYS = 14
 
 
 def _as_utc(value: datetime | None) -> datetime | None:
@@ -59,22 +68,51 @@ def _as_utc(value: datetime | None) -> datetime | None:
     return value
 
 
-def _is_today(value: datetime | None) -> bool:
-    value = _as_utc(value)
-    return value is not None and value.date() == datetime.now(timezone.utc).date()
+def _parse_range(from_s: str | None, to_s: str | None) -> tuple[date, date]:
+    """Parse ?from=&to= (YYYY-MM-DD) with a last-30-days default.
 
-
-def _empty_series(days: int = _SERIES_DAYS) -> list[DayCount]:
+    Invalid input falls back to the default; a reversed range is swapped;
+    spans longer than a year are clamped — the admin UI always gets a sane,
+    bounded window.
+    """
     today = datetime.now(timezone.utc).date()
-    return [
-        DayCount(day=(today - timedelta(days=i)).isoformat(), count=0)
-        for i in reversed(range(days))
-    ]
+    default_from = today - timedelta(days=29)
+    d0, d1 = default_from, today
+    try:
+        if from_s:
+            d0 = date.fromisoformat(from_s)
+    except ValueError:
+        pass
+    try:
+        if to_s:
+            d1 = date.fromisoformat(to_s)
+    except ValueError:
+        pass
+    if d0 > d1:
+        d0, d1 = d1, d0
+    if (d1 - d0).days > 365:
+        d0 = d1 - timedelta(days=365)
+    return d0, d1
 
 
-def _bucket(datetimes: list[datetime | None], days: int = _SERIES_DAYS) -> list[DayCount]:
-    series = _empty_series(days)
-    by_day = {b.day: b for b in series}
+def _in_range(value: datetime | None, d0: date, d1: date) -> bool:
+    value = _as_utc(value)
+    return value is not None and d0 <= value.date() <= d1
+
+
+def _series_days(d0: date, d1: date) -> list[DayCount]:
+    """Zero-filled daily buckets covering exactly [d0, d1]."""
+    out, day = [], d0
+    while day <= d1:
+        out.append(DayCount(day=day.isoformat(), count=0))
+        day += timedelta(days=1)
+    return out
+
+
+def _bucket_range(
+    datetimes: list[datetime | None], days: list[DayCount]
+) -> list[DayCount]:
+    by_day = {b.day: b for b in days}
     for value in datetimes:
         value = _as_utc(value)
         if value is None:
@@ -82,7 +120,43 @@ def _bucket(datetimes: list[datetime | None], days: int = _SERIES_DAYS) -> list[
         bucket = by_day.get(value.date().isoformat())
         if bucket is not None:
             bucket.count += 1
-    return series
+    return days
+
+
+def _location(country: str | None, region: str | None, city: str | None) -> str:
+    """Human location from GeoIP labels. Raw IPs never leave the server."""
+    if country == "Local":
+        return "Local network"
+    parts = [p for p in (city, region, country) if p and p != "Unknown"]
+    return ", ".join(parts) if parts else "Unknown"
+
+
+def _device(user_agent: str | None) -> str:
+    """Short 'Browser · OS' label from a user-agent string."""
+    ua = user_agent or ""
+    if "Edg/" in ua:
+        browser = "Edge"
+    elif "Chrome/" in ua:
+        browser = "Chrome"
+    elif "Firefox/" in ua:
+        browser = "Firefox"
+    elif "Safari/" in ua:
+        browser = "Safari"
+    else:
+        browser = "Browser"
+    if "Windows" in ua:
+        os_name = "Windows"
+    elif "Android" in ua:
+        os_name = "Android"
+    elif "iPhone" in ua or "iPad" in ua:
+        os_name = "iOS"
+    elif "Macintosh" in ua or "Mac OS" in ua:
+        os_name = "Mac"
+    elif "Linux" in ua:
+        os_name = "Linux"
+    else:
+        os_name = ""
+    return f"{browser} · {os_name}" if os_name else browser
 
 
 def _resume_counts(db: Session) -> dict[int, int]:
@@ -105,6 +179,7 @@ def _row(
     user: User,
     resume_counts: dict[int, int] | None = None,
     role_counts: dict[int, int] | None = None,
+    location: str = "",
 ) -> AdminUserRow:
     return AdminUserRow(
         id=user.id,
@@ -119,7 +194,26 @@ def _row(
         roles_count=(role_counts or {}).get(user.id, 0),
         last_login_at=_as_utc(user.last_login_at),
         created_at=_as_utc(user.created_at),
+        last_location=location,
     )
+
+
+def _last_locations(
+    db: Session,
+) -> dict[int, str]:
+    """Latest known location per user from any geo-tagged activity."""
+    latest: dict[int, tuple[datetime, str]] = {}
+
+    def _note(user_id: int | None, at: datetime | None, loc: str) -> None:
+        if not user_id or not loc or loc == "Unknown":
+            return
+        at = _as_utc(at) or datetime.min.replace(tzinfo=timezone.utc)
+        if user_id not in latest or at > latest[user_id][0]:
+            latest[user_id] = (at, loc)
+
+    for a in db.scalars(select(ActivityLog)).all():
+        _note(a.user_id, a.created_at, _location(a.country, a.region, a.city))
+    return {uid: loc for uid, (_, loc) in latest.items()}
 
 
 @router.get("/stats", response_model=AdminStats)
@@ -127,53 +221,88 @@ async def stats(
     request: Request,
     _admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
+    from_date: str | None = Query(default=None, alias="from", max_length=10),
+    to_date: str | None = Query(default=None, alias="to", max_length=10),
 ) -> AdminStats:
     rate_limit(request, "admin")
+    d0, d1 = _parse_range(from_date, to_date)
 
     users = db.scalars(select(User)).all()
+    by_id = {u.id: u for u in users}
     counts = _resume_counts(db)
     role_counts = _role_counts(db)
     resumes_total = sum(counts.values())
     roles_total = sum(role_counts.values())
-    users_total = len(users)
-    active_users = sum(1 for u in users if u.is_active)
-    admin_count = sum(1 for u in users if u.is_admin)
-    total_logins = sum(u.login_count or 0 for u in users)
-    logins_today = sum(1 for u in users if _is_today(u.last_login_at))
 
-    visits = db.scalars(select(VisitLog)).all()
-    visits_total = len(visits)
-    today_visits = [v for v in visits if _is_today(v.created_at)]
-    visits_today = len(today_visits)
-    visitors_today = len({v.ip_hash for v in today_visits if v.ip_hash})
+    all_time = AllTime(
+        users_total=len(users),
+        active_users=sum(1 for u in users if u.is_active),
+        admin_count=sum(1 for u in users if u.is_admin),
+        resumes_total=resumes_total,
+        roles_total=roles_total,
+        total_logins=sum(u.login_count or 0 for u in users),
+        visits_total=db.scalar(
+            select(func.count()).select_from(ActivityLog).where(ActivityLog.kind == VISIT)
+        ) or 0,
+        interviews_total=db.scalar(
+            select(func.count()).select_from(ActivityLog).where(ActivityLog.kind == PREPARE)
+        ) or 0,
+        questions_total=db.scalar(
+            select(func.count()).select_from(ActivityLog).where(ActivityLog.kind == ANALYZE)
+        ) or 0,
+    )
 
-    # --- Activity trends from the append-only event log ---
-    events = db.scalars(select(EventLog)).all()
+    # --- Range-bound activity (one unified log, filtered by kind) ---
+    acts = db.scalars(select(ActivityLog)).all()
 
-    def _named(name: str) -> list[datetime | None]:
-        return [e.created_at for e in events if e.name == name]
+    def _of_kind(kind: str) -> list:
+        return [a for a in acts if a.kind == kind and _in_range(a.created_at, d0, d1)]
 
-    logins = _named(USER_LOGIN)
-    interviews = _named(INTERVIEW_PREPARED)
-    questions = _named(QUESTION_ANALYZED)
-    interviews_total = len(interviews)
-    interviews_today = sum(1 for t in interviews if _is_today(t))
-    questions_total = len(questions)
+    logins = _of_kind(LOGIN)
+    interviews = _of_kind(PREPARE)
+    questions = _of_kind(ANALYZE)
+    visits = _of_kind(VISIT)
+    clicks = _of_kind(CLICK)
+    stays = _of_kind(STAY)
 
-    # Unique visitors per day (salted IP hashes, never raw IPs).
+    by_id = {u.id: u for u in users}
+    signups = [u.created_at for u in users if _in_range(u.created_at, d0, d1)]
+    range_visits, range_clicks, range_stays = visits, clicks, stays
+    range_ips = {v.ip_hash for v in visits if v.ip_hash}
+
+    in_range = InRange(
+        signups=len(signups),
+        logins=len(logins),
+        interviews=len(interviews),
+        questions=len(questions),
+        visits=len(range_visits),
+        visitors=len(range_ips),
+        clicks=len(range_clicks),
+        seconds=sum(s.seconds or 0 for s in range_stays),
+    )
+
+    days = _series_days(d0, d1)
+    signups_by_day = _bucket_range([u for u in signups], days)
+    logins_by_day = _bucket_range([e.created_at for e in logins], _series_days(d0, d1))
+    visits_by_day = _bucket_range([v.created_at for v in range_visits], _series_days(d0, d1))
+    interviews_by_day = _bucket_range(
+        [e.created_at for e in interviews], _series_days(d0, d1)
+    )
+
     per_day_visitors: dict[str, set[str]] = {}
-    for v in visits:
+    for v in range_visits:
         day = (_as_utc(v.created_at) or datetime.now(timezone.utc)).date().isoformat()
         if v.ip_hash:
             per_day_visitors.setdefault(day, set()).add(v.ip_hash)
-    visitors_series = _empty_series()
-    for bucket in visitors_series:
+    visitors_by_day = _series_days(d0, d1)
+    for bucket in visitors_by_day:
         bucket.count = len(per_day_visitors.get(bucket.day, ()))
 
-    # Most-visited paths with their visitor counts.
+
+    # Most-visited paths (range) with visitor counts.
     path_visits: dict[str, int] = {}
     path_visitors: dict[str, set[str]] = {}
-    for v in visits:
+    for v in range_visits:
         path_visits[v.path] = path_visits.get(v.path, 0) + 1
         if v.ip_hash:
             path_visitors.setdefault(v.path, set()).add(v.ip_hash)
@@ -186,14 +315,98 @@ async def stats(
         reverse=True,
     )[:8]
 
-    recent_logins = [
-        _row(u, counts, role_counts)
-        for u in sorted(
-            (u for u in users if u.last_login_at is not None),
-            key=lambda u: _as_utc(u.last_login_at) or datetime.min.replace(tzinfo=timezone.utc),
+    # Most-pressed buttons/links (range): grouped by label + page.
+    click_groups: dict[tuple[str, str], int] = {}
+    for c in range_clicks:
+        key = ((c.label or "(no label)"), c.path)
+        click_groups[key] = click_groups.get(key, 0) + 1
+    top_clicks = sorted(
+        (
+            TopClick(label=label, path=path, count=count)
+            for (label, path), count in click_groups.items()
+        ),
+        key=lambda t: t.count,
+        reverse=True,
+    )[:10]
+
+    # Dwell time per page (range): total seconds + stay count.
+    stay_groups: dict[str, dict[str, int]] = {}
+    for s in range_stays:
+        entry = stay_groups.setdefault(s.path, {"seconds": 0, "views": 0})
+        entry["seconds"] += s.seconds or 0
+        entry["views"] += 1
+    page_times = sorted(
+        (
+            PageTimeRow(path=path, seconds=info["seconds"], views=info["views"])
+            for path, info in stay_groups.items()
+        ),
+        key=lambda p: p.seconds,
+        reverse=True,
+    )[:10]
+
+    def _user_of(user_id: int | None) -> User | None:
+        return by_id.get(user_id) if user_id else None
+
+    recent_logins = []
+    for e in sorted(logins, key=lambda e: _as_utc(e.created_at) or datetime.min.replace(tzinfo=timezone.utc), reverse=True)[:8]:
+        u = _user_of(e.user_id)
+        recent_logins.append(
+            LoginRow(
+                email=u.email if u else "",
+                name=(u.name or "") if u else "",
+                at=_as_utc(e.created_at),
+                location=_location(e.country, e.region, e.city),
+            )
+        )
+
+    # Live activity feed: the freshest actions of any kind, in plain words.
+    _FEED_TEXT = {
+        LOGIN: "signed in",
+        REGISTER: "created an account",
+        PREPARE: "prepared an interview",
+        ANALYZE: "got an AI answer",
+        VISIT: "visited",
+        STAY: "spent time on",
+        CLICK: "pressed",
+    }
+
+    def _feed_text(a) -> str:
+        u = _user_of(a.user_id)
+        who = (u.name or u.email) if u else "A guest"
+        if a.kind == VISIT:
+            return f"{who} visited {a.path or 'the site'}"
+        if a.kind == STAY:
+            return f"{who} spent {a.seconds or 0}s on {a.path or 'a page'}"
+        if a.kind == CLICK:
+            return f"{who} pressed “{a.label or 'a button'}” on {a.path or 'a page'}"
+        return f"{who} {_FEED_TEXT.get(a.kind, a.kind)}"
+
+    live_feed = [
+        LiveFeedItem(
+            at=_as_utc(a.created_at),
+            text=_feed_text(a),
+            location=_location(a.country, a.region, a.city),
+        )
+        for a in sorted(
+            (a for a in acts if _in_range(a.created_at, d0, d1)),
+            key=lambda a: _as_utc(a.created_at) or datetime.min.replace(tzinfo=timezone.utc),
             reverse=True,
-        )[:8]
+        )[:15]
     ]
+
+    recent_visits = []
+    for v in sorted(visits, key=lambda v: _as_utc(v.created_at) or datetime.min.replace(tzinfo=timezone.utc), reverse=True)[:20]:
+        u = _user_of(v.user_id)
+        recent_visits.append(
+            VisitRow(
+                at=_as_utc(v.created_at),
+                path=v.path,
+                email=u.email if u else "Guest",
+                location=_location(v.country, v.region, v.city),
+                device=_device(v.user_agent),
+                visitor=(v.ip_hash or "")[:8],
+            )
+        )
 
     settings = get_settings()
     db_url = settings.database_url
@@ -207,28 +420,22 @@ async def stats(
     )
 
     return AdminStats(
-        users_total=users_total,
-        active_users=active_users,
-        admin_count=admin_count,
-        total_logins=total_logins,
-        logins_today=logins_today,
-        visits_total=visits_total,
-        visits_today=visits_today,
-        visitors_today=visitors_today,
-        signups_by_day=_bucket([u.created_at for u in users]),
-        visits_by_day=_bucket([v.created_at for v in visits]),
-        recent_users=[_row(u, counts, role_counts) for u in sorted(users, key=lambda u: u.id, reverse=True)[:8]],
+        range=RangeInfo(from_date=d0.isoformat(), to_date=d1.isoformat()),
         system=system,
-        interviews_total=interviews_total,
-        interviews_today=interviews_today,
-        questions_total=questions_total,
-        logins_by_day=_bucket(logins),
-        interviews_by_day=_bucket(interviews),
-        visitors_by_day=visitors_series,
+        all_time=all_time,
+        in_range=in_range,
+        signups_by_day=signups_by_day,
+        logins_by_day=logins_by_day,
+        visits_by_day=visits_by_day,
+        interviews_by_day=interviews_by_day,
+        visitors_by_day=visitors_by_day,
         top_pages=top_pages,
+        top_clicks=top_clicks,
+        page_times=page_times,
         recent_logins=recent_logins,
-        resumes_total=resumes_total,
-        roles_total=roles_total,
+        recent_visits=recent_visits,
+        live_feed=live_feed,
+        recent_users=[_row(u, counts, role_counts) for u in sorted(users, key=lambda u: u.id, reverse=True)[:8]],
     )
 
 
@@ -239,6 +446,8 @@ async def list_users(
     q: str = Query(default="", max_length=200),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
+    from_date: str | None = Query(default=None, alias="from", max_length=10),
+    to_date: str | None = Query(default=None, alias="to", max_length=10),
     db: Session = Depends(get_db),
 ) -> AdminUsersPage:
     rate_limit(request, "admin")
@@ -247,15 +456,23 @@ async def list_users(
     if needle:
         like = f"%{needle}%"
         stmt = stmt.where(or_(User.email.ilike(like), User.name.ilike(like)))
+    if from_date or to_date:
+        d0, d1 = _parse_range(from_date, to_date)
+        users_in_range = [
+            u.id for u in db.scalars(stmt).all()
+            if _in_range(u.created_at, d0, d1)
+        ]
+        stmt = stmt.where(User.id.in_(users_in_range)) if users_in_range else stmt.where(User.id == -1)
     total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
     rows = db.scalars(
         stmt.order_by(User.id.desc()).offset((page - 1) * page_size).limit(page_size)
     ).all()
     counts = _resume_counts(db)
     role_counts = _role_counts(db)
+    locations = _last_locations(db)
     return AdminUsersPage(
         total=total, page=page, page_size=page_size,
-        users=[_row(u, counts, role_counts) for u in rows],
+        users=[_row(u, counts, role_counts, locations.get(u.id, "")) for u in rows],
     )
 
 

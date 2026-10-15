@@ -3,6 +3,7 @@ import { RouterLink, RouterLinkActive } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { AuthService } from '../../../core/auth/auth.service';
 import { AuthUser } from '../../../core/models/auth.models';
+import { environment } from '../../../../environments/environment';
 import { ResumeService } from '../../../core/services/resume.service';
 import { SettingsService, ThemeName } from '../../../core/services/settings.service';
 
@@ -22,6 +23,8 @@ export class NavbarComponent implements OnInit, OnDestroy {
   theme: ThemeName = 'dark';
   /** Current authenticated user (null when signed out). */
   user: AuthUser | null = null;
+  /** Desktop build only: shows the auto-invisible notice next to the brand. */
+  readonly isDesktop = environment.electron;
   signingOut = false;
   private sub: Subscription | null = null;
   private userSub: Subscription | null = null;

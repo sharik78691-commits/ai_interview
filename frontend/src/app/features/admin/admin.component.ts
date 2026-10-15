@@ -2,9 +2,15 @@ import { Component, OnDestroy, OnInit, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Subscription } from 'rxjs';
 import { AdminService } from '../../core/services/admin.service';
-import { AuthService } from '../../core/auth/auth.service';
 import { AdminStats, AdminUserRow, DayCount } from '../../core/models/admin.models';
+import { AuthService } from '../../core/auth/auth.service';
 import { ErrorBannerComponent } from '../../shared/components/error-banner/error-banner.component';
+
+function toISODate(d: Date): string {
+  const m = `${d.getMonth() + 1}`.padStart(2, '0');
+  const day = `${d.getDate()}`.padStart(2, '0');
+  return `${d.getFullYear()}-${m}-${day}`;
+}
 
 @Component({
   selector: 'app-admin',
@@ -31,7 +37,16 @@ export class AdminComponent implements OnInit, OnDestroy {
   toggling: Record<number, boolean> = {};
   private searchTimer: ReturnType<typeof setTimeout> | null = null;
 
+  /** Date range driving every section. Default: last 30 days (incl. today). */
+  fromDate = '';
+  toDate = '';
+
   ngOnInit(): void {
+    const to = new Date();
+    const from = new Date();
+    from.setDate(to.getDate() - 29);
+    this.toDate = toISODate(to);
+    this.fromDate = toISODate(from);
     this.loadStats();
     this.loadUsers();
   }
@@ -46,9 +61,12 @@ export class AdminComponent implements OnInit, OnDestroy {
   loadStats(): void {
     this.loadingStats = true;
     this.subs.push(
-      this.admin.stats().subscribe({
+      this.admin.stats(this.fromDate || undefined, this.toDate || undefined).subscribe({
         next: (s) => {
           this.stats = s;
+          // Trust the server's normalized range for the labels.
+          this.fromDate = s.range.from_date;
+          this.toDate = s.range.to_date;
           this.loadingStats = false;
         },
         error: (err) => {
@@ -62,18 +80,20 @@ export class AdminComponent implements OnInit, OnDestroy {
   loadUsers(): void {
     this.loadingUsers = true;
     this.subs.push(
-      this.admin.users(this.query.trim(), this.page, this.pageSize).subscribe({
-        next: (p) => {
-          this.users = p.users;
-          this.total = p.total;
-          this.page = p.page;
-          this.loadingUsers = false;
-        },
-        error: (err) => {
-          this.loadingUsers = false;
-          this.handleError(err);
-        },
-      }),
+      this.admin
+        .users(this.query.trim(), this.page, this.pageSize, this.fromDate || undefined, this.toDate || undefined)
+        .subscribe({
+          next: (p) => {
+            this.users = p.users;
+            this.total = p.total;
+            this.page = p.page;
+            this.loadingUsers = false;
+          },
+          error: (err) => {
+            this.loadingUsers = false;
+            this.handleError(err);
+          },
+        }),
     );
   }
 
@@ -86,6 +106,31 @@ export class AdminComponent implements OnInit, OnDestroy {
       return;
     }
     this.error = 'Could not load admin data — is the backend running?';
+  }
+
+  // -------------------------------------------------------------------- range
+
+  /** Re-query every section for the chosen From–To window. */
+  applyRange(): void {
+    this.error = '';
+    this.page = 1;
+    this.loadStats();
+    this.loadUsers();
+  }
+
+  /** Quick presets: last N days including today. */
+  preset(days: number): void {
+    const to = new Date();
+    const from = new Date();
+    from.setDate(to.getDate() - (days - 1));
+    this.toDate = toISODate(to);
+    this.fromDate = toISODate(from);
+    this.applyRange();
+  }
+
+  rangeLabel(): string {
+    if (!this.stats) return '';
+    return `${this.stats.range.from_date} → ${this.stats.range.to_date}`;
   }
 
   // -------------------------------------------------------------------- users
@@ -127,9 +172,7 @@ export class AdminComponent implements OnInit, OnDestroy {
           this.toggling[user.id] = false;
           const i = this.users.findIndex((u) => u.id === updated.id);
           if (i >= 0) this.users[i] = updated;
-          if (this.stats) {
-            this.stats.active_users += updated.is_active ? 1 : -1;
-          }
+          this.loadStats();
         },
         error: (err) => {
           this.toggling[user.id] = false;
@@ -150,9 +193,7 @@ export class AdminComponent implements OnInit, OnDestroy {
           this.toggling[user.id] = false;
           const i = this.users.findIndex((u) => u.id === updated.id);
           if (i >= 0) this.users[i] = updated;
-          if (this.stats) {
-            this.stats.admin_count += updated.is_admin ? 1 : -1;
-          }
+          this.loadStats();
         },
         error: (err) => {
           this.toggling[user.id] = false;
@@ -168,16 +209,16 @@ export class AdminComponent implements OnInit, OnDestroy {
     return me !== undefined && me !== null && String(me) === String(user.id);
   }
 
+  /** CSV download navigates (session cookie travels automatically). */
+  exportCsv(): void {
+    window.location.assign(this.admin.exportUrl());
+  }
+
   /** Reload every section (stats + current users page). */
   refresh(): void {
     this.error = '';
     this.loadStats();
     this.loadUsers();
-  }
-
-  /** CSV download navigates (session cookie travels automatically). */
-  exportCsv(): void {
-    window.location.assign(this.admin.exportUrl());
   }
 
   // ------------------------------------------------------------------- charts
@@ -197,5 +238,14 @@ export class AdminComponent implements OnInit, OnDestroy {
     if (!iso) return '—';
     const d = new Date(iso);
     return isNaN(d.getTime()) ? '—' : d.toLocaleString();
+  }
+
+  /** 3661 → "1h 1m"; 90 → "1m 30s"; 45 → "45s". */
+  fmtSeconds(total: number): string {
+    const s = Math.max(0, Math.round(total || 0));
+    if (s < 60) return `${s}s`;
+    const m = Math.floor(s / 60);
+    if (m < 60) return `${m}m ${s % 60}s`;
+    return `${Math.floor(m / 60)}h ${m % 60}m`;
   }
 }

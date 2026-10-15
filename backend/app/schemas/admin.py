@@ -1,8 +1,8 @@
 """Admin-panel response schemas (Pydantic v2).
 
 Everything here is served only to admins (see ``require_admin``); still, no
-password hashes, tokens or raw IPs are ever included — visitors appear only as
-aggregate counts.
+password hashes, tokens, raw IPs or raw user-agents are ever included —
+visitors appear as aggregate counts plus short visitor hashes.
 """
 from datetime import datetime
 from typing import Optional
@@ -30,6 +30,7 @@ class AdminUserRow(BaseModel):
     roles_count: int = 0
     last_login_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
+    last_location: str = ""
 
 
 class AdminUsersPage(BaseModel):
@@ -58,30 +59,99 @@ class TopPage(BaseModel):
     visitors: int
 
 
+class TopClick(BaseModel):
+    """A frequently pressed button/link: label, page and press count."""
+
+    label: str
+    path: str
+    count: int
+
+
+class PageTimeRow(BaseModel):
+    """Total dwell time on one path plus how many stays produced it."""
+
+    path: str
+    seconds: int
+    views: int
+
+
+class VisitRow(BaseModel):
+    """One recent visit: when, where (page + location) and on what device."""
+
+    at: Optional[datetime] = None
+    path: str = ""
+    email: str = ""
+    location: str = ""
+    device: str = ""
+    visitor: str = ""
+
+
+class LoginRow(BaseModel):
+    """One recent sign-in with its location."""
+
+    email: str = ""
+    name: str = ""
+    at: Optional[datetime] = None
+    location: str = ""
+
+
+class LiveFeedItem(BaseModel):
+    """One fresh action in plain words for the live activity feed."""
+
+    at: Optional[datetime] = None
+    text: str = ""
+    location: str = ""
+
+
+class RangeInfo(BaseModel):
+    from_date: str
+    to_date: str
+
+
+class AllTime(BaseModel):
+    """Lifetime counters (never range-bound — they are states, not events)."""
+
+    users_total: int = 0
+    active_users: int = 0
+    admin_count: int = 0
+    resumes_total: int = 0
+    roles_total: int = 0
+    total_logins: int = 0
+    visits_total: int = 0
+    interviews_total: int = 0
+    questions_total: int = 0
+
+
+class InRange(BaseModel):
+    """Everything that happened inside the selected date range."""
+
+    signups: int = 0
+    logins: int = 0
+    interviews: int = 0
+    questions: int = 0
+    visits: int = 0
+    visitors: int = 0
+    clicks: int = 0
+    seconds: int = 0
+
+
 class AdminStats(BaseModel):
-    users_total: int
-    active_users: int
-    admin_count: int
-    total_logins: int
-    logins_today: int
-    visits_total: int
-    visits_today: int
-    visitors_today: int
-    signups_by_day: list[DayCount]
-    visits_by_day: list[DayCount]
-    recent_users: list[AdminUserRow]
-    # --- Professional panel additions ---
+    range: RangeInfo
     system: SystemStatus
-    interviews_total: int
-    interviews_today: int
-    questions_total: int
+    all_time: AllTime
+    in_range: InRange
+    signups_by_day: list[DayCount]
     logins_by_day: list[DayCount]
+    visits_by_day: list[DayCount]
     interviews_by_day: list[DayCount]
     visitors_by_day: list[DayCount]
     top_pages: list[TopPage]
-    recent_logins: list[AdminUserRow]
-    resumes_total: int = 0
-    roles_total: int = 0
+    top_clicks: list[TopClick]
+    page_times: list[PageTimeRow]
+    recent_logins: list[LoginRow]
+    recent_visits: list[VisitRow]
+    live_feed: list[LiveFeedItem]
+    recent_users: list[AdminUserRow]
 
 
 class SetActiveRequest(BaseModel):
