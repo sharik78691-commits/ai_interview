@@ -9,7 +9,8 @@ from app.auth.dependencies import require_user
 from app.models.ai_response import AIInterviewResponse
 from app.models.interview import PrepareRequest, PrepareResponse
 from app.models.user import User
-from app.services.activity import client_ip, log_event
+from app.providers.llm.registry import validate_model_key
+from app.services.activity import log_event, log_llm_usage
 from app.services.ai_service import AIService
 
 logger = logging.getLogger(__name__)
@@ -47,6 +48,7 @@ class AnalyzeRequest(BaseModel):
     resumeText: Optional[str] = None
     jobDescription: Optional[str] = None
     responseLength: Optional[str] = None
+    model: Optional[str] = None
 
 
 @router.post("/interview/prepare", response_model=PrepareResponse)
@@ -70,7 +72,7 @@ async def prepare(
         "Interview prepared: user=%s resume_chars=%d job_chars=%d length=%s",
         user.id, len(resume), len(job), length,
     )
-    log_event("interview_prepared", user.id, ip=client_ip(request))
+    log_event("interview_prepared", user.id)
     return PrepareResponse(
         status="ready",
         message="Interview context stored. Ready for live guidance.",
@@ -106,6 +108,11 @@ async def analyze(
     question = (req.question or "").strip()
     if not question:
         raise HTTPException(status_code=422, detail="question must be non-empty.")
+    # Validate the model against the server-side allowlist BEFORE calling out.
+    try:
+        model_key = validate_model_key(req.model)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     ctx = get_context(user.id)
     resume = (req.resumeText or "").strip() or ctx["resume"]
     job = (req.jobDescription or "").strip() or ctx["job"]
@@ -118,15 +125,26 @@ async def analyze(
         response_length=length,
     )
     logger.info(
-        "Analyze question: user=%s question_chars=%d length=%s",
-        user.id, len(question), length,
+        "Analyze question: user=%s question_chars=%d length=%s model=%s",
+        user.id, len(question), length, model_key,
     )
     try:
-        answer = await service.analyze(question)
+        answer = await service.analyze(question, model_key=model_key)
     except Exception:
         logger.exception("Analyze failed: user=%s question=%r", user.id, question[:200])
         raise HTTPException(
             status_code=502, detail="AI response unavailable. Please try again."
         )
-    log_event("question_analyzed", user.id, ip=client_ip(request))
+    log_event("question_analyzed", user.id)
+    # Usage tracking (provider-reported tokens only, never estimated).
+    log_llm_usage(
+        user_id=user.id,
+        request_type="analyze",
+        provider=service.last_provider,
+        model=service.last_model,
+        latency_ms=service.last_usage.get("latency_ms"),
+        input_tokens=service.last_usage.get("input_tokens"),
+        output_tokens=service.last_usage.get("output_tokens"),
+        error_category=service.last_usage.get("error_category"),
+    )
     return answer

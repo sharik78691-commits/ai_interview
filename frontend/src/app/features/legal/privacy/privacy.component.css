@@ -1,0 +1,12 @@
+.legal { max-width: 760px; padding: 48px 24px 72px; }
+.legal-head { margin-bottom: 36px; }
+.legal-head h1 { font-size: clamp(1.8rem, 4vw, 2.6rem); font-weight: 800; letter-spacing: -0.02em; margin-bottom: 10px; }
+.legal-head .muted { margin-bottom: 8px; }
+.legal-head .lead { color: var(--muted); font-size: 1.05rem; line-height: 1.7; }
+.legal-section { margin-bottom: 32px; }
+.legal-section h2 { font-size: 1.15rem; font-weight: 700; margin-bottom: 12px; }
+.legal-section p { color: var(--text); line-height: 1.75; margin-bottom: 12px; }
+.legal-section ul { padding-left: 22px; display: grid; gap: 8px; margin-bottom: 12px; }
+.legal-section li { line-height: 1.65; }
+.legal-section a { color: var(--accent); }
+.legal-section a:hover { text-decoration: underline; }

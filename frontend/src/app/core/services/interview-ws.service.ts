@@ -43,6 +43,17 @@ export class InterviewWsService {
   status$ = new BehaviorSubject<InterviewStatus>('idle');
   guidance$ = new BehaviorSubject<AIInterviewResponse | null>(null);
   history$ = new BehaviorSubject<HistoryItem[]>([]);
+  /** Model/provider that produced the latest guidance (from ai_guidance). */
+  lastModel$ = new BehaviorSubject<string | null>(null);
+  lastProvider$ = new BehaviorSubject<string | null>(null);
+  /**
+   * Provisional answer bullets streamed token-by-token (ai_stream_delta).
+   * These are a PREVIEW only — the validated ai_guidance card replaces them.
+   * Never render these as the final answer.
+   */
+  streamPoints$ = new BehaviorSubject<string[]>([]);
+  /** True while a streamed answer is in flight (ai_stream_start → ai_guidance). */
+  streaming$ = new BehaviorSubject<boolean>(false);
   /**
    * Non-fatal warnings. `scope` separates AI warnings (template guidance is
    * shown instead) from speech-to-text warnings (no fallback exists).
@@ -186,7 +197,23 @@ export class InterviewWsService {
             ...this.history$.value,
             { question: g.question, guidance: g, timestamp: new Date() },
           ]);
+          this.lastModel$.next(typeof msg['model'] === 'string' ? msg['model'] : null);
+          this.lastProvider$.next(
+            typeof msg['provider'] === 'string' ? msg['provider'] : null,
+          );
+          // Final validated card replaces any provisional preview.
+          this.streaming$.next(false);
+          this.streamPoints$.next([]);
           this.status$.next('ready');
+        } else if (msg.type === 'ai_stream_start') {
+          // A streamed answer began: show which model is generating, live.
+          this.streaming$.next(true);
+          this.streamPoints$.next([]);
+          if (typeof msg['model'] === 'string') this.lastModel$.next(msg['model']);
+          if (typeof msg['provider'] === 'string') this.lastProvider$.next(msg['provider']);
+        } else if (msg.type === 'ai_stream_delta') {
+          const point = typeof msg['point'] === 'string' ? msg['point'] : '';
+          if (point) this.streamPoints$.next([...this.streamPoints$.value, point]);
         } else if (msg.type === 'status') {
           const s = msg['status'] as string | undefined;
           if (s === 'idle' || s === 'listening' || s === 'processing' || s === 'thinking' || s === 'ready' || s === 'paused' || s === 'error') {
@@ -216,6 +243,9 @@ export class InterviewWsService {
           console.error(
             `[ws] server error: ${String(msg['message'] ?? 'unknown')}`,
           );
+          // A failed stream stops, but already-shown provisional bullets stay
+          // visible so Retry has context.
+          this.streaming$.next(false);
           this.status$.next('error');
         }
       } catch (err) {
@@ -266,35 +296,42 @@ export class InterviewWsService {
   }
 
   /** Stream one interviewer audio clip as a binary frame. */
-  sendAudioClip(data: ArrayBuffer, mimeType: string, responseLength = 'medium'): void {
+  sendAudioClip(data: ArrayBuffer, mimeType: string, responseLength = 'medium', model?: string): void {
     if (this.ws?.readyState !== WebSocket.OPEN) return;
     this.ws.send(data);
     // Following control frame tells the backend "clip complete, transcribe now".
-    this.ws.send(JSON.stringify({ type: 'audio_flush', mimeType, responseLength }));
+    this.ws.send(JSON.stringify({ type: 'audio_flush', mimeType, responseLength, model }));
     this.status$.next('processing');
   }
 
   /** Manual interviewer question -> existing AI flow. */
-  sendInterviewerQuestion(text: string, responseLength = 'medium'): void {
+  sendInterviewerQuestion(text: string, responseLength = 'medium', model?: string): void {
     if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify({ type: 'interviewer_question', text, responseLength }));
+      this.ws.send(JSON.stringify({ type: 'interviewer_question', text, responseLength, model }));
       this.status$.next('thinking');
     }
   }
 
-  sendTranscript(text: string, responseLength = 'medium'): void {
+  sendTranscript(text: string, responseLength = 'medium', model?: string): void {
     if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify({ type: 'transcript', text, responseLength }));
+      this.ws.send(JSON.stringify({ type: 'transcript', text, responseLength, model }));
       this.status$.next('thinking');
     }
   }
 
-  sendForce(question: string, responseLength = 'medium'): void {
+  sendForce(question: string, responseLength = 'medium', model?: string): void {
     if (this.ws?.readyState === WebSocket.OPEN) {
       // Text was already streamed via sendTranscript; the server analyzes its
       // buffer. `text` is included only as a fallback if the buffer is empty.
-      this.ws.send(JSON.stringify({ type: 'force', text: question, responseLength }));
+      this.ws.send(JSON.stringify({ type: 'force', text: question, responseLength, model }));
       this.status$.next('thinking');
+    }
+  }
+
+  /** Switch the AI model for subsequent answers (mid-session). */
+  sendSetModel(model: string): void {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: 'set_model', model }));
     }
   }
 
@@ -304,6 +341,8 @@ export class InterviewWsService {
     }
     this.guidance$.next(null);
     this.history$.next([]);
+    this.streamPoints$.next([]);
+    this.streaming$.next(false);
     this.status$.next('idle');
   }
 
@@ -313,12 +352,16 @@ export class InterviewWsService {
     this.retries = 0;
     this.guidance$.next(null);
     this.history$.next([]);
+    this.streamPoints$.next([]);
+    this.streaming$.next(false);
     this.status$.next('idle');
   }
 
   pushLocalGuidance(g: AIInterviewResponse): void {
     this.guidance$.next(g);
     this.history$.next([...this.history$.value, { question: g.question, guidance: g, timestamp: new Date() }]);
+    this.streamPoints$.next([]);
+    this.streaming$.next(false);
     this.status$.next('ready');
   }
 

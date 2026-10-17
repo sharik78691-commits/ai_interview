@@ -14,11 +14,8 @@ export interface AdminUserRow {
   is_admin: boolean;
   is_active: boolean;
   login_count: number;
-  resumes_count?: number;
-  roles_count?: number;
   last_login_at: string | null;
   created_at: string | null;
-  last_location?: string;
 }
 
 export interface AdminUsersPage {
@@ -37,44 +34,11 @@ export interface SystemStatus {
   version: string;
 }
 
-export interface TopPage {
-  path: string;
-  visits: number;
-  visitors: number;
-}
-
-export interface TopClick {
-  label: string;
-  path: string;
-  count: number;
-}
-
-export interface PageTimeRow {
-  path: string;
-  seconds: number;
-  views: number;
-}
-
-export interface VisitRow {
-  at: string | null;
-  path: string;
-  email: string;
-  location: string;
-  device: string;
-  visitor: string;
-}
-
-export interface LoginRow {
-  email: string;
-  name: string;
-  at: string | null;
-  location: string;
-}
-
-export interface LiveFeedItem {
-  at: string | null;
-  text: string;
-  location: string;
+export interface Totals {
+  users_total: number;
+  active_users: number;
+  admin_count: number;
+  total_logins: number;
 }
 
 export interface RangeInfo {
@@ -82,44 +46,28 @@ export interface RangeInfo {
   to_date: string;
 }
 
-export interface AllTime {
-  users_total: number;
-  active_users: number;
-  admin_count: number;
-  resumes_total: number;
-  roles_total: number;
-  total_logins: number;
-  visits_total: number;
-  interviews_total: number;
-  questions_total: number;
-}
-
 export interface InRange {
   signups: number;
-  logins: number;
   interviews: number;
   questions: number;
-  visits: number;
-  visitors: number;
-  clicks: number;
-  seconds: number;
+  ai_calls: number;
+  ai_errors: number;
+}
+
+export interface AiUsageRow {
+  provider: string;
+  model: string;
+  calls: number;
+  errors: number;
+  avg_latency_ms: number | null;
 }
 
 export interface AdminStats {
-  range: RangeInfo;
   system: SystemStatus;
-  all_time: AllTime;
+  range: RangeInfo;
+  totals: Totals;
   in_range: InRange;
   signups_by_day: DayCount[];
-  logins_by_day: DayCount[];
-  visits_by_day: DayCount[];
-  interviews_by_day: DayCount[];
-  visitors_by_day: DayCount[];
-  top_pages: TopPage[];
-  top_clicks: TopClick[];
-  page_times: PageTimeRow[];
-  recent_logins: LoginRow[];
-  recent_visits: VisitRow[];
-  live_feed: LiveFeedItem[];
+  ai_usage: AiUsageRow[];
   recent_users: AdminUserRow[];
 }

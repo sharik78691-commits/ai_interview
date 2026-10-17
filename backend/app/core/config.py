@@ -42,8 +42,23 @@ class Settings:
         logger.info("Initializing application settings...")
         self.app_name: str = os.getenv("APP_NAME", "AI Interview Assistant")
         self.llm_api_key: str = os.getenv("LLM_API_KEY", "")
-        self.llm_model: str = os.getenv("LLM_MODEL", "gpt-4o-mini")
-        self.llm_base_url: str = os.getenv("LLM_BASE_URL", "https://api.openai.com/v1")
+        self.llm_model: str = os.getenv("LLM_MODEL", "openai/gpt-oss-120b")
+        self.llm_base_url: str = os.getenv("LLM_BASE_URL", "https://api.groq.com/openai/v1")
+        # ------------------------------------------------------------ multi-LLM
+        # Additional provider keys/models. Keys stay ONLY in the backend env —
+        # never in the browser or in API responses. A model is "available" only
+        # when its provider key is present.
+        # Groq key falls back to the legacy LLM_API_KEY for backward compat.
+        self.groq_api_key: str = os.getenv("GROQ_API_KEY", "") or self.llm_api_key
+        self.gemini_api_key: str = os.getenv("GEMINI_API_KEY", "")
+        # Gemini Flash on Google's official OpenAI-compatible endpoint.
+        self.gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+        # Qwen + the OpenRouter free model share the OpenRouter key.
+        self.openrouter_api_key: str = os.getenv("OPENROUTER_API_KEY", "")
+        self.qwen_model: str = os.getenv("QWEN_MODEL", "qwen/qwen3-coder:free")
+        self.openrouter_model: str = os.getenv(
+            "OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct:free"
+        )
         self.stt_api_key: str = os.getenv("STT_API_KEY", "")
         self.stt_model: str = os.getenv("STT_MODEL", "whisper-large-v3-turbo")
         # Server-side STT only. Browsers cannot transcribe tab/meeting audio
@@ -210,6 +225,8 @@ class Settings:
             self.cookie_domain or "",
         )
         logger.info("  llm_configured   = %s", self.llm_configured)
+        logger.info("  gemini_configured= %s", self.gemini_configured)
+        logger.info("  openrouter_conf  = %s", self.openrouter_configured)
         logger.info("  stt_configured   = %s", self.stt_configured)
         logger.info("  demo_mode        = %s", self.demo_mode)
         logger.info("  google_oauth     = %s", self.google_configured)
@@ -300,6 +317,14 @@ class Settings:
     @property
     def llm_configured(self) -> bool:
         return bool(self.llm_api_key)
+
+    @property
+    def gemini_configured(self) -> bool:
+        return bool(self.gemini_api_key)
+
+    @property
+    def openrouter_configured(self) -> bool:
+        return bool(self.openrouter_api_key)
 
     @property
     def stt_configured(self) -> bool:

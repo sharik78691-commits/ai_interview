@@ -3,6 +3,7 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import { AdminStats, AdminUserRow, AdminUsersPage } from '../models/admin.models';
+import { AiModel } from '../models/ai-models';
 
 const BASE = environment.apiBaseUrl;
 
@@ -51,5 +52,23 @@ export class AdminService {
   /** CSV download URL (cookie auth travels on full-page navigation). */
   exportUrl(): string {
     return `${BASE}/api/admin/users/export`;
+  }
+
+  /** Model catalog + default + provider error stats (no secrets). */
+  aiModels(): Observable<{ models: AiModel[]; default: string; errors: Record<string, Record<string, number>> }> {
+    return this.http.get<{ models: AiModel[]; default: string; errors: Record<string, Record<string, number>> }>(
+      `${BASE}/api/admin/ai-models`,
+    );
+  }
+
+  /** Update admin-editable model flags (enabled/default/labels/priority). */
+  updateAiModel(
+    key: string,
+    patch: { enabled?: boolean; is_default?: boolean; display_name?: string; description?: string; free_tier?: boolean; priority?: number },
+  ): Observable<{ models: AiModel[]; default: string }> {
+    return this.http.patch<{ models: AiModel[]; default: string }>(
+      `${BASE}/api/admin/ai-models/${encodeURIComponent(key)}`,
+      patch,
+    );
   }
 }

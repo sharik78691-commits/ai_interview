@@ -10,6 +10,7 @@ import logging
 import httpx
 
 from app.core.config import get_settings
+from app.core.http import shared_http
 from app.providers.stt.base import STTProvider
 
 logger = logging.getLogger(__name__)
@@ -78,12 +79,14 @@ class GroqWhisperSTTProvider(STTProvider):
 
         last_error: str = ""
         for attempt in range(MAX_ATTEMPTS):
-            async with httpx.AsyncClient(timeout=60.0) as client:
+            # Shared pool: no per-call TLS handshake across retries.
+            async with shared_http() as client:
                 resp = await client.post(
                     f"{self.base_url}/audio/transcriptions",
                     headers={"Authorization": f"Bearer {self.api_key}"},
                     data=data,
                     files=files,
+                    timeout=60.0,
                 )
 
             if resp.status_code < 400:

@@ -1,13 +1,12 @@
-"""Unified activity log — ONE table replacing visit_logs, events, page_times
-and click_events.
+"""Unified activity log — ONE table for business events + AI usage.
 
-Kinds: ``visit`` (every request), ``stay`` (dwell-time heartbeat),
-``click`` (button/link press), ``login`` / ``register`` (auth),
-``prepare`` (interview prepared), ``analyze`` (question answered).
-Only the columns a kind needs are filled; the rest stay NULL.
+Kinds: ``user_login`` / ``user_registered`` (auth), ``interview_prepared``,
+``question_analyzed`` (engagement), and ``llm_usage`` (AI cost/reliability).
 
-Privacy rules (non-negotiable): raw IPs are NEVER stored (salted hash +
-GeoIP labels only); clicks record button labels, never input values.
+Only what a business owner needs is stored: WHO (user_id) did WHAT (kind)
+and WHEN (created_at), plus LLM usage telemetry. Page analytics (per-request
+visits, button clicks, dwell time, GeoIP, device) were removed — they were
+high-volume noise, not signal.
 """
 from datetime import datetime, timezone
 
@@ -16,13 +15,12 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
 
-VISIT = "visit"
-STAY = "stay"
-CLICK = "click"
 LOGIN = "user_login"
 REGISTER = "user_registered"
 PREPARE = "interview_prepared"
 ANALYZE = "question_analyzed"
+# LLM usage row: one per answer-generation call (provider/model/latency/tokens).
+LLM_USAGE = "llm_usage"
 
 # Backwards-compatible aliases so existing call sites barely change.
 USER_LOGIN = LOGIN
@@ -41,16 +39,16 @@ class ActivityLog(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     kind: Mapped[str] = mapped_column(String(20), index=True, nullable=False)
     user_id: Mapped[int | None] = mapped_column(Integer, index=True, nullable=True)
-    ip_hash: Mapped[str | None] = mapped_column(String(64), index=True, nullable=True)
-    country: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    region: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    city: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    path: Mapped[str | None] = mapped_column(String(500), index=True, nullable=True)
-    method: Mapped[str | None] = mapped_column(String(10), nullable=True)
-    label: Mapped[str | None] = mapped_column(String(120), nullable=True)
-    target: Mapped[str | None] = mapped_column(String(120), nullable=True)
-    seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    user_agent: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    # --- LLM usage tracking (kind = "llm_usage") ---
+    # provider key + model id actually used (never secrets).
+    provider: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    model: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # e.g. "ok", "rate_limit", "quota", "auth", "not_found", "network", "timeout"
+    error_category: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    request_type: Mapped[str | None] = mapped_column(String(30), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, index=True
     )
@@ -58,13 +56,11 @@ class ActivityLog(Base):
 
 __all__ = [
     "ActivityLog",
-    "VISIT",
-    "STAY",
-    "CLICK",
     "LOGIN",
     "REGISTER",
     "PREPARE",
     "ANALYZE",
+    "LLM_USAGE",
     "USER_LOGIN",
     "USER_REGISTERED",
     "INTERVIEW_PREPARED",

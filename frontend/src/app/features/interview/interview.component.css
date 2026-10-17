@@ -370,6 +370,19 @@
   border-top-color: #b9c6ff;
   animation: spin 0.8s linear infinite;
 }
+.spin.sm {
+  width: 11px;
+  height: 11px;
+  border-width: 2px;
+}
+/* Provisional streaming preview: dimmer than the validated card so it never
+   reads as a final answer. */
+.gsec.drafting {
+  opacity: 0.82;
+}
+.gsec.drafting .pts li.typing {
+  list-style: none;
+}
 @keyframes spin {
   to {
     transform: rotate(360deg);
@@ -550,6 +563,47 @@
   /* The code surface stays dark in both themes, so the text must stay light
      regardless of the active theme's --text (which is dark in light mode). */
   color: #d6e2ff;
+}
+
+/* Comparison table (difference / compare questions). */
+.table-scroll { overflow-x: auto; margin-top: 4px; }
+.cmp-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8744em;
+  line-height: 1.55;
+}
+.cmp-table th, .cmp-table td {
+  border: 1px solid var(--border-strong);
+  padding: 8px 11px;
+  text-align: left;
+  vertical-align: top;
+}
+.cmp-table th {
+  background: rgba(110, 139, 255, 0.13);
+  color: var(--text);
+  font-weight: 700;
+}
+.cmp-table td:first-child {
+  font-weight: 600;
+  color: var(--muted);
+}
+.cmp-table tbody tr:nth-child(even) td {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+/* Inline formatting injected by RichTextPipe (bold + code). */
+.guidance-body code {
+  background: rgba(110, 139, 255, 0.14);
+  color: var(--accent);
+  border-radius: 5px;
+  padding: 1px 5px;
+  font-family: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+  font-size: 0.9em;
+}
+.guidance-body strong {
+  color: var(--text);
+  font-weight: 700;
 }
 
 /* Session history accordions. */

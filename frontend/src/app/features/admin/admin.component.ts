@@ -2,7 +2,13 @@ import { Component, OnDestroy, OnInit, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Subscription } from 'rxjs';
 import { AdminService } from '../../core/services/admin.service';
-import { AdminStats, AdminUserRow, DayCount } from '../../core/models/admin.models';
+import {
+  AdminStats,
+  AdminUserRow,
+  AiUsageRow,
+  DayCount,
+} from '../../core/models/admin.models';
+import { AiModel } from '../../core/models/ai-models';
 import { AuthService } from '../../core/auth/auth.service';
 import { ErrorBannerComponent } from '../../shared/components/error-banner/error-banner.component';
 
@@ -37,7 +43,14 @@ export class AdminComponent implements OnInit, OnDestroy {
   toggling: Record<number, boolean> = {};
   private searchTimer: ReturnType<typeof setTimeout> | null = null;
 
-  /** Date range driving every section. Default: last 30 days (incl. today). */
+  /** AI model catalog + provider health (admin-managed, no secrets). */
+  aiModels: AiModel[] = [];
+  aiDefault = '';
+  aiErrors: Record<string, Record<string, number>> = {};
+  loadingModels = true;
+  savingModel: Record<string, boolean> = {};
+
+  /** Date range driving the dashboard metrics. Default: last 30 days. */
   fromDate = '';
   toDate = '';
 
@@ -49,6 +62,7 @@ export class AdminComponent implements OnInit, OnDestroy {
     this.fromDate = toISODate(from);
     this.loadStats();
     this.loadUsers();
+    this.loadAiModels();
   }
 
   ngOnDestroy(): void {
@@ -80,28 +94,42 @@ export class AdminComponent implements OnInit, OnDestroy {
   loadUsers(): void {
     this.loadingUsers = true;
     this.subs.push(
-      this.admin
-        .users(this.query.trim(), this.page, this.pageSize, this.fromDate || undefined, this.toDate || undefined)
-        .subscribe({
-          next: (p) => {
-            this.users = p.users;
-            this.total = p.total;
-            this.page = p.page;
-            this.loadingUsers = false;
-          },
-          error: (err) => {
-            this.loadingUsers = false;
-            this.handleError(err);
-          },
-        }),
+      this.admin.users(this.query.trim(), this.page, this.pageSize).subscribe({
+        next: (p) => {
+          this.users = p.users;
+          this.total = p.total;
+          this.page = p.page;
+          this.loadingUsers = false;
+        },
+        error: (err) => {
+          this.loadingUsers = false;
+          this.handleError(err);
+        },
+      }),
+    );
+  }
+
+  loadAiModels(): void {
+    this.loadingModels = true;
+    this.subs.push(
+      this.admin.aiModels().subscribe({
+        next: (res) => {
+          this.aiModels = res.models ?? [];
+          this.aiDefault = res.default ?? '';
+          this.aiErrors = res.errors ?? {};
+          this.loadingModels = false;
+        },
+        error: (err) => {
+          this.loadingModels = false;
+          this.handleError(err);
+        },
+      }),
     );
   }
 
   private handleError(err: unknown): void {
     const status = (err as { status?: number })?.status;
     if (status === 401 || status === 403) {
-      // Signed out mid-session or not an admin: the guard usually redirects
-      // first, but a direct API failure still gets a clear message.
       this.forbidden = true;
       return;
     }
@@ -110,12 +138,10 @@ export class AdminComponent implements OnInit, OnDestroy {
 
   // -------------------------------------------------------------------- range
 
-  /** Re-query every section for the chosen From–To window. */
+  /** Re-query the dashboard metrics for the chosen From–To window. */
   applyRange(): void {
     this.error = '';
-    this.page = 1;
     this.loadStats();
-    this.loadUsers();
   }
 
   /** Quick presets: last N days including today. */
@@ -135,7 +161,6 @@ export class AdminComponent implements OnInit, OnDestroy {
 
   // -------------------------------------------------------------------- users
 
-  /** Debounced search: waits for typing to pause before reloading page 1. */
   onSearch(): void {
     if (this.searchTimer) clearTimeout(this.searchTimer);
     this.searchTimer = setTimeout(() => {
@@ -162,7 +187,6 @@ export class AdminComponent implements OnInit, OnDestroy {
     }
   }
 
-  /** Flip an account between active and deactivated (admins excluded). */
   toggleActive(user: AdminUserRow): void {
     if (user.is_admin || this.toggling[user.id]) return;
     this.toggling[user.id] = true;
@@ -182,7 +206,6 @@ export class AdminComponent implements OnInit, OnDestroy {
     );
   }
 
-  /** Grant / revoke admin rights (never your own row). */
   toggleAdmin(user: AdminUserRow): void {
     if (user.is_admin && this.isSelf(user)) return;
     if (this.toggling[user.id]) return;
@@ -203,49 +226,90 @@ export class AdminComponent implements OnInit, OnDestroy {
     );
   }
 
-  /** True for the row of the currently signed-in admin (self actions hidden). */
   isSelf(user: AdminUserRow): boolean {
     const me = this.auth.currentUser?.id;
     return me !== undefined && me !== null && String(me) === String(user.id);
   }
 
-  /** CSV download navigates (session cookie travels automatically). */
   exportCsv(): void {
     window.location.assign(this.admin.exportUrl());
   }
 
-  /** Reload every section (stats + current users page). */
   refresh(): void {
     this.error = '';
     this.loadStats();
     this.loadUsers();
+    this.loadAiModels();
+  }
+
+  // ------------------------------------------------------- AI model management
+
+  modelHealth(provider: string): string {
+    const stats = this.aiErrors[provider];
+    if (!stats) return 'no calls yet';
+    const total = Object.values(stats).reduce((a, b) => a + b, 0);
+    const bad = Object.entries(stats)
+      .filter(([k]) => k !== 'ok')
+      .map(([k, v]) => `${k}: ${v}`)
+      .join(', ');
+    return bad ? `${total} calls · ${bad}` : `${total} calls · all ok`;
+  }
+
+  toggleModel(m: AiModel): void {
+    if (this.savingModel[m.key]) return;
+    this.savingModel[m.key] = true;
+    this.subs.push(
+      this.admin.updateAiModel(m.key, { enabled: !m.enabled }).subscribe({
+        next: (res) => {
+          this.savingModel[m.key] = false;
+          this.aiModels = res.models ?? [];
+          this.aiDefault = res.default ?? '';
+        },
+        error: (err) => {
+          this.savingModel[m.key] = false;
+          this.handleError(err);
+        },
+      }),
+    );
+  }
+
+  setDefaultModel(m: AiModel): void {
+    if (this.savingModel[m.key] || m.key === this.aiDefault) return;
+    this.savingModel[m.key] = true;
+    this.subs.push(
+      this.admin.updateAiModel(m.key, { is_default: true }).subscribe({
+        next: (res) => {
+          this.savingModel[m.key] = false;
+          this.aiModels = res.models ?? [];
+          this.aiDefault = res.default ?? '';
+        },
+        error: (err) => {
+          this.savingModel[m.key] = false;
+          this.handleError(err);
+        },
+      }),
+    );
   }
 
   // ------------------------------------------------------------------- charts
 
-  /** Tallest bar in a series (0-safe) for percentage heights. */
   chartMax(series: DayCount[]): number {
     return Math.max(0, ...series.map((b) => b.count));
   }
 
-  /** Bar height 4–100%: never invisible, never overflowing. */
   barHeight(value: number, max: number): number {
     if (max <= 0 || value <= 0) return 4;
     return Math.max(8, Math.round((value / max) * 100));
+  }
+
+  aiErrorRate(row: AiUsageRow): string {
+    if (!row.calls) return '—';
+    return `${Math.round((row.errors / row.calls) * 100)}%`;
   }
 
   fmtDate(iso: string | null): string {
     if (!iso) return '—';
     const d = new Date(iso);
     return isNaN(d.getTime()) ? '—' : d.toLocaleString();
-  }
-
-  /** 3661 → "1h 1m"; 90 → "1m 30s"; 45 → "45s". */
-  fmtSeconds(total: number): string {
-    const s = Math.max(0, Math.round(total || 0));
-    if (s < 60) return `${s}s`;
-    const m = Math.floor(s / 60);
-    if (m < 60) return `${m}m ${s % 60}s`;
-    return `${Math.floor(m / 60)}h ${m % 60}m`;
   }
 }

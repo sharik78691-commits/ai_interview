@@ -40,7 +40,7 @@ from app.core.ratelimit import rate_limit
 from app.db.session import get_db
 from app.models.user import User
 from app.services.email_service import send_password_reset_email
-from app.services.activity import client_ip, log_event
+from app.services.activity import log_event
 from app.schemas.auth import (
     AuthStatus,
     ForgotPasswordRequest,
@@ -120,7 +120,7 @@ async def login(
         )
     # Fresh session token on login prevents session fixation.
     security.set_session_cookies(response, user.id)
-    log_event("user_login", user.id, ip=client_ip(request))
+    log_event("user_login", user.id)
     settings = get_settings()
     logger.info(
         "Login succeeded (user_id=%s). Cookie set with secure=%s samesite=%s domain=%r — "
@@ -271,7 +271,7 @@ async def google_callback(
 
     redirect = RedirectResponse(f"{frontend}/dashboard", status_code=status.HTTP_302_FOUND)
     security.set_session_cookies(redirect, user.id)
-    log_event("user_login", user.id, ip=client_ip(request))
+    log_event("user_login", user.id)
     # Clear the one-time state cookie.
     redirect.delete_cookie(security.OAUTH_STATE_COOKIE, path="/")
     return redirect

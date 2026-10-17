@@ -1,9 +1,12 @@
 """Admin-panel REST endpoints (admin users only).
 
-GET  /api/admin/stats          — headline counters + 14-day series + recent users
-GET  /api/admin/users          — searchable, paginated user list
-PATCH /api/admin/users/{id}    — activate/deactivate, promote/demote admin
-GET  /api/admin/users/export   — full user list as CSV download
+GET  /api/admin/stats           — business dashboard: system status, totals,
+                                   signups (last 30 days), AI usage summary
+GET  /api/admin/users           — searchable, paginated user list
+PATCH /api/admin/users/{id}     — activate/deactivate, promote/demote admin
+GET  /api/admin/users/export    — full user list as CSV download
+GET  /api/admin/ai-models       — model catalog + provider error stats
+PATCH /api/admin/ai-models/{key} — admin-editable model flags
 
 Every route requires an admin session (401 anonymous, 403 non-admin).
 Aggregations are computed in Python over small result sets so the same code
@@ -23,40 +26,30 @@ from app.auth.dependencies import require_admin
 from app.core.config import get_settings
 from app.core.ratelimit import rate_limit
 from app.db.session import get_db
-from app.models.activity_log import (
-    ANALYZE,
-    CLICK,
-    LOGIN,
-    PREPARE,
-    REGISTER,
-    STAY,
-    VISIT,
-    ActivityLog,
-)
-from app.models.resume_record import ResumeRecord
-from app.models.target_role import TargetRole
+from app.models.activity_log import ANALYZE, LLM_USAGE, PREPARE, ActivityLog
+from app.models.ai_model_config import AIModelConfig
 from app.models.user import User
+from app.providers.llm import registry
 from app.schemas.admin import (
+    AIModelUpdateRequest,
     AdminStats,
     AdminUserRow,
     AdminUsersPage,
-    AllTime,
+    AiUsageRow,
     DayCount,
     InRange,
-    LiveFeedItem,
-    LoginRow,
-    PageTimeRow,
     RangeInfo,
     SetActiveRequest,
     SystemStatus,
-    TopClick,
-    TopPage,
-    VisitRow,
+    Totals,
 )
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+_DEFAULT_DAYS = 30
+_MAX_DAYS = 365
 
 
 def _as_utc(value: datetime | None) -> datetime | None:
@@ -76,8 +69,7 @@ def _parse_range(from_s: str | None, to_s: str | None) -> tuple[date, date]:
     bounded window.
     """
     today = datetime.now(timezone.utc).date()
-    default_from = today - timedelta(days=29)
-    d0, d1 = default_from, today
+    d0, d1 = today - timedelta(days=_DEFAULT_DAYS - 1), today
     try:
         if from_s:
             d0 = date.fromisoformat(from_s)
@@ -90,8 +82,8 @@ def _parse_range(from_s: str | None, to_s: str | None) -> tuple[date, date]:
         pass
     if d0 > d1:
         d0, d1 = d1, d0
-    if (d1 - d0).days > 365:
-        d0 = d1 - timedelta(days=365)
+    if (d1 - d0).days > _MAX_DAYS:
+        d0 = d1 - timedelta(days=_MAX_DAYS)
     return d0, d1
 
 
@@ -109,78 +101,7 @@ def _series_days(d0: date, d1: date) -> list[DayCount]:
     return out
 
 
-def _bucket_range(
-    datetimes: list[datetime | None], days: list[DayCount]
-) -> list[DayCount]:
-    by_day = {b.day: b for b in days}
-    for value in datetimes:
-        value = _as_utc(value)
-        if value is None:
-            continue
-        bucket = by_day.get(value.date().isoformat())
-        if bucket is not None:
-            bucket.count += 1
-    return days
-
-
-def _location(country: str | None, region: str | None, city: str | None) -> str:
-    """Human location from GeoIP labels. Raw IPs never leave the server."""
-    if country == "Local":
-        return "Local network"
-    parts = [p for p in (city, region, country) if p and p != "Unknown"]
-    return ", ".join(parts) if parts else "Unknown"
-
-
-def _device(user_agent: str | None) -> str:
-    """Short 'Browser · OS' label from a user-agent string."""
-    ua = user_agent or ""
-    if "Edg/" in ua:
-        browser = "Edge"
-    elif "Chrome/" in ua:
-        browser = "Chrome"
-    elif "Firefox/" in ua:
-        browser = "Firefox"
-    elif "Safari/" in ua:
-        browser = "Safari"
-    else:
-        browser = "Browser"
-    if "Windows" in ua:
-        os_name = "Windows"
-    elif "Android" in ua:
-        os_name = "Android"
-    elif "iPhone" in ua or "iPad" in ua:
-        os_name = "iOS"
-    elif "Macintosh" in ua or "Mac OS" in ua:
-        os_name = "Mac"
-    elif "Linux" in ua:
-        os_name = "Linux"
-    else:
-        os_name = ""
-    return f"{browser} · {os_name}" if os_name else browser
-
-
-def _resume_counts(db: Session) -> dict[int, int]:
-    """Resumes per user in ONE query (avoids N+1 on every user list)."""
-    rows = db.execute(
-        select(ResumeRecord.user_id, func.count()).group_by(ResumeRecord.user_id)
-    ).all()
-    return {user_id: count for user_id, count in rows}
-
-
-def _role_counts(db: Session) -> dict[int, int]:
-    """Saved target roles per user in ONE query."""
-    rows = db.execute(
-        select(TargetRole.user_id, func.count()).group_by(TargetRole.user_id)
-    ).all()
-    return {user_id: count for user_id, count in rows}
-
-
-def _row(
-    user: User,
-    resume_counts: dict[int, int] | None = None,
-    role_counts: dict[int, int] | None = None,
-    location: str = "",
-) -> AdminUserRow:
+def _row(user: User) -> AdminUserRow:
     return AdminUserRow(
         id=user.id,
         email=user.email,
@@ -190,30 +111,9 @@ def _row(
         is_admin=bool(user.is_admin),
         is_active=bool(user.is_active),
         login_count=user.login_count or 0,
-        resumes_count=(resume_counts or {}).get(user.id, 0),
-        roles_count=(role_counts or {}).get(user.id, 0),
         last_login_at=_as_utc(user.last_login_at),
         created_at=_as_utc(user.created_at),
-        last_location=location,
     )
-
-
-def _last_locations(
-    db: Session,
-) -> dict[int, str]:
-    """Latest known location per user from any geo-tagged activity."""
-    latest: dict[int, tuple[datetime, str]] = {}
-
-    def _note(user_id: int | None, at: datetime | None, loc: str) -> None:
-        if not user_id or not loc or loc == "Unknown":
-            return
-        at = _as_utc(at) or datetime.min.replace(tzinfo=timezone.utc)
-        if user_id not in latest or at > latest[user_id][0]:
-            latest[user_id] = (at, loc)
-
-    for a in db.scalars(select(ActivityLog)).all():
-        _note(a.user_id, a.created_at, _location(a.country, a.region, a.city))
-    return {uid: loc for uid, (_, loc) in latest.items()}
 
 
 @router.get("/stats", response_model=AdminStats)
@@ -228,214 +128,90 @@ async def stats(
     d0, d1 = _parse_range(from_date, to_date)
 
     users = db.scalars(select(User)).all()
-    by_id = {u.id: u for u in users}
-    counts = _resume_counts(db)
-    role_counts = _role_counts(db)
-    resumes_total = sum(counts.values())
-    roles_total = sum(role_counts.values())
+    acts = db.scalars(select(ActivityLog)).all()
 
-    all_time = AllTime(
+    # --- lifetime account counters (states, not events) ---
+    totals = Totals(
         users_total=len(users),
         active_users=sum(1 for u in users if u.is_active),
         admin_count=sum(1 for u in users if u.is_admin),
-        resumes_total=resumes_total,
-        roles_total=roles_total,
         total_logins=sum(u.login_count or 0 for u in users),
-        visits_total=db.scalar(
-            select(func.count()).select_from(ActivityLog).where(ActivityLog.kind == VISIT)
-        ) or 0,
-        interviews_total=db.scalar(
-            select(func.count()).select_from(ActivityLog).where(ActivityLog.kind == PREPARE)
-        ) or 0,
-        questions_total=db.scalar(
-            select(func.count()).select_from(ActivityLog).where(ActivityLog.kind == ANALYZE)
-        ) or 0,
     )
 
-    # --- Range-bound activity (one unified log, filtered by kind) ---
-    acts = db.scalars(select(ActivityLog)).all()
-
-    def _of_kind(kind: str) -> list:
-        return [a for a in acts if a.kind == kind and _in_range(a.created_at, d0, d1)]
-
-    logins = _of_kind(LOGIN)
-    interviews = _of_kind(PREPARE)
-    questions = _of_kind(ANALYZE)
-    visits = _of_kind(VISIT)
-    clicks = _of_kind(CLICK)
-    stays = _of_kind(STAY)
-
-    by_id = {u.id: u for u in users}
-    signups = [u.created_at for u in users if _in_range(u.created_at, d0, d1)]
-    range_visits, range_clicks, range_stays = visits, clicks, stays
-    range_ips = {v.ip_hash for v in visits if v.ip_hash}
-
+    # --- in-range event metrics ---
+    signups = [u for u in users if _in_range(u.created_at, d0, d1)]
+    interviews = [a for a in acts if a.kind == PREPARE and _in_range(a.created_at, d0, d1)]
+    questions = [a for a in acts if a.kind == ANALYZE and _in_range(a.created_at, d0, d1)]
+    llm = [a for a in acts if a.kind == LLM_USAGE and _in_range(a.created_at, d0, d1)]
     in_range = InRange(
         signups=len(signups),
-        logins=len(logins),
         interviews=len(interviews),
         questions=len(questions),
-        visits=len(range_visits),
-        visitors=len(range_ips),
-        clicks=len(range_clicks),
-        seconds=sum(s.seconds or 0 for s in range_stays),
+        ai_calls=len(llm),
+        ai_errors=sum(
+            1 for a in llm if a.error_category is not None and a.error_category != "ok"
+        ),
     )
 
-    days = _series_days(d0, d1)
-    signups_by_day = _bucket_range([u for u in signups], days)
-    logins_by_day = _bucket_range([e.created_at for e in logins], _series_days(d0, d1))
-    visits_by_day = _bucket_range([v.created_at for v in range_visits], _series_days(d0, d1))
-    interviews_by_day = _bucket_range(
-        [e.created_at for e in interviews], _series_days(d0, d1)
+    # --- signups per day over the selected window ---
+    buckets: dict[str, int] = {b.day: 0 for b in _series_days(d0, d1)}
+    for u in users:
+        created = _as_utc(u.created_at)
+        if created is not None:
+            key = created.date().isoformat()
+            if key in buckets:
+                buckets[key] += 1
+    signups_by_day = [DayCount(day=k, count=v) for k, v in buckets.items()]
+
+    # --- AI usage summary over the window (cost/reliability view) ---
+    by_model: dict[tuple[str, str], list[ActivityLog]] = {}
+    for a in llm:
+        by_model.setdefault((a.provider or "unknown", a.model or "unknown"), []).append(a)
+
+    def _avg_latency(rows: list[ActivityLog]) -> float | None:
+        lat = [r.latency_ms for r in rows if r.latency_ms is not None]
+        return round(sum(lat) / len(lat), 1) if lat else None
+
+    ai_usage = sorted(
+        (
+            AiUsageRow(
+                provider=p,
+                model=m,
+                calls=len(rows),
+                errors=sum(
+                    1 for r in rows if r.error_category is not None and r.error_category != "ok"
+                ),
+                avg_latency_ms=_avg_latency(rows),
+            )
+            for (p, m), rows in by_model.items()
+        ),
+        key=lambda r: r.calls,
+        reverse=True,
     )
 
-    per_day_visitors: dict[str, set[str]] = {}
-    for v in range_visits:
-        day = (_as_utc(v.created_at) or datetime.now(timezone.utc)).date().isoformat()
-        if v.ip_hash:
-            per_day_visitors.setdefault(day, set()).add(v.ip_hash)
-    visitors_by_day = _series_days(d0, d1)
-    for bucket in visitors_by_day:
-        bucket.count = len(per_day_visitors.get(bucket.day, ()))
-
-
-    # Most-visited paths (range) with visitor counts.
-    path_visits: dict[str, int] = {}
-    path_visitors: dict[str, set[str]] = {}
-    for v in range_visits:
-        path_visits[v.path] = path_visits.get(v.path, 0) + 1
-        if v.ip_hash:
-            path_visitors.setdefault(v.path, set()).add(v.ip_hash)
-    top_pages = sorted(
-        (
-            TopPage(path=path, visits=count, visitors=len(path_visitors.get(path, ())))
-            for path, count in path_visits.items()
-        ),
-        key=lambda p: p.visits,
-        reverse=True,
-    )[:8]
-
-    # Most-pressed buttons/links (range): grouped by label + page.
-    click_groups: dict[tuple[str, str], int] = {}
-    for c in range_clicks:
-        key = ((c.label or "(no label)"), c.path)
-        click_groups[key] = click_groups.get(key, 0) + 1
-    top_clicks = sorted(
-        (
-            TopClick(label=label, path=path, count=count)
-            for (label, path), count in click_groups.items()
-        ),
-        key=lambda t: t.count,
-        reverse=True,
-    )[:10]
-
-    # Dwell time per page (range): total seconds + stay count.
-    stay_groups: dict[str, dict[str, int]] = {}
-    for s in range_stays:
-        entry = stay_groups.setdefault(s.path, {"seconds": 0, "views": 0})
-        entry["seconds"] += s.seconds or 0
-        entry["views"] += 1
-    page_times = sorted(
-        (
-            PageTimeRow(path=path, seconds=info["seconds"], views=info["views"])
-            for path, info in stay_groups.items()
-        ),
-        key=lambda p: p.seconds,
-        reverse=True,
-    )[:10]
-
-    def _user_of(user_id: int | None) -> User | None:
-        return by_id.get(user_id) if user_id else None
-
-    recent_logins = []
-    for e in sorted(logins, key=lambda e: _as_utc(e.created_at) or datetime.min.replace(tzinfo=timezone.utc), reverse=True)[:8]:
-        u = _user_of(e.user_id)
-        recent_logins.append(
-            LoginRow(
-                email=u.email if u else "",
-                name=(u.name or "") if u else "",
-                at=_as_utc(e.created_at),
-                location=_location(e.country, e.region, e.city),
-            )
-        )
-
-    # Live activity feed: the freshest actions of any kind, in plain words.
-    _FEED_TEXT = {
-        LOGIN: "signed in",
-        REGISTER: "created an account",
-        PREPARE: "prepared an interview",
-        ANALYZE: "got an AI answer",
-        VISIT: "visited",
-        STAY: "spent time on",
-        CLICK: "pressed",
-    }
-
-    def _feed_text(a) -> str:
-        u = _user_of(a.user_id)
-        who = (u.name or u.email) if u else "A guest"
-        if a.kind == VISIT:
-            return f"{who} visited {a.path or 'the site'}"
-        if a.kind == STAY:
-            return f"{who} spent {a.seconds or 0}s on {a.path or 'a page'}"
-        if a.kind == CLICK:
-            return f"{who} pressed “{a.label or 'a button'}” on {a.path or 'a page'}"
-        return f"{who} {_FEED_TEXT.get(a.kind, a.kind)}"
-
-    live_feed = [
-        LiveFeedItem(
-            at=_as_utc(a.created_at),
-            text=_feed_text(a),
-            location=_location(a.country, a.region, a.city),
-        )
-        for a in sorted(
-            (a for a in acts if _in_range(a.created_at, d0, d1)),
-            key=lambda a: _as_utc(a.created_at) or datetime.min.replace(tzinfo=timezone.utc),
-            reverse=True,
-        )[:15]
-    ]
-
-    recent_visits = []
-    for v in sorted(visits, key=lambda v: _as_utc(v.created_at) or datetime.min.replace(tzinfo=timezone.utc), reverse=True)[:20]:
-        u = _user_of(v.user_id)
-        recent_visits.append(
-            VisitRow(
-                at=_as_utc(v.created_at),
-                path=v.path,
-                email=u.email if u else "Guest",
-                location=_location(v.country, v.region, v.city),
-                device=_device(v.user_agent),
-                visitor=(v.ip_hash or "")[:8],
-            )
-        )
-
-    settings = get_settings()
-    db_url = settings.database_url
     system = SystemStatus(
-        demo_mode=settings.demo_mode,
-        llm_configured=settings.llm_configured,
-        stt_configured=settings.stt_configured,
-        google_configured=settings.google_configured,
-        database="PostgreSQL" if db_url.startswith("postgres") else "SQLite",
+        demo_mode=get_settings().demo_mode,
+        llm_configured=get_settings().llm_configured,
+        stt_configured=get_settings().stt_configured,
+        google_configured=get_settings().google_configured,
+        database=(
+            "PostgreSQL"
+            if get_settings().database_url.startswith("postgres")
+            else "SQLite"
+        ),
         version="0.1.0",
     )
 
     return AdminStats(
-        range=RangeInfo(from_date=d0.isoformat(), to_date=d1.isoformat()),
         system=system,
-        all_time=all_time,
+        range=RangeInfo(from_date=d0.isoformat(), to_date=d1.isoformat()),
+        totals=totals,
         in_range=in_range,
         signups_by_day=signups_by_day,
-        logins_by_day=logins_by_day,
-        visits_by_day=visits_by_day,
-        interviews_by_day=interviews_by_day,
-        visitors_by_day=visitors_by_day,
-        top_pages=top_pages,
-        top_clicks=top_clicks,
-        page_times=page_times,
-        recent_logins=recent_logins,
-        recent_visits=recent_visits,
-        live_feed=live_feed,
-        recent_users=[_row(u, counts, role_counts) for u in sorted(users, key=lambda u: u.id, reverse=True)[:8]],
+        ai_usage=ai_usage,
+        recent_users=[
+            _row(u) for u in sorted(users, key=lambda u: u.id, reverse=True)[:8]
+        ],
     )
 
 
@@ -446,8 +222,6 @@ async def list_users(
     q: str = Query(default="", max_length=200),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
-    from_date: str | None = Query(default=None, alias="from", max_length=10),
-    to_date: str | None = Query(default=None, alias="to", max_length=10),
     db: Session = Depends(get_db),
 ) -> AdminUsersPage:
     rate_limit(request, "admin")
@@ -456,23 +230,13 @@ async def list_users(
     if needle:
         like = f"%{needle}%"
         stmt = stmt.where(or_(User.email.ilike(like), User.name.ilike(like)))
-    if from_date or to_date:
-        d0, d1 = _parse_range(from_date, to_date)
-        users_in_range = [
-            u.id for u in db.scalars(stmt).all()
-            if _in_range(u.created_at, d0, d1)
-        ]
-        stmt = stmt.where(User.id.in_(users_in_range)) if users_in_range else stmt.where(User.id == -1)
     total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
     rows = db.scalars(
         stmt.order_by(User.id.desc()).offset((page - 1) * page_size).limit(page_size)
     ).all()
-    counts = _resume_counts(db)
-    role_counts = _role_counts(db)
-    locations = _last_locations(db)
     return AdminUsersPage(
         total=total, page=page, page_size=page_size,
-        users=[_row(u, counts, role_counts, locations.get(u.id, "")) for u in rows],
+        users=[_row(u) for u in rows],
     )
 
 
@@ -515,7 +279,7 @@ async def set_active(
         user.is_active,
         user.is_admin,
     )
-    return _row(user, _resume_counts(db), _role_counts(db))
+    return _row(user)
 
 
 @router.get("/users/export")
@@ -545,3 +309,82 @@ async def export_users(
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=oyeinterview-users.csv"},
     )
+
+
+# ------------------------------------------------------------- AI model management
+
+
+def _llm_error_stats(db: Session) -> dict[str, dict[str, int]]:
+    """Provider -> {error_category: count} for llm_usage rows. No raw tokens."""
+    rows = db.execute(
+        select(ActivityLog.provider, ActivityLog.error_category, func.count())
+        .where(ActivityLog.kind == LLM_USAGE)
+        .group_by(ActivityLog.provider, ActivityLog.error_category)
+    ).all()
+    out: dict[str, dict[str, int]] = {}
+    for provider, category, count in rows:
+        p = provider or "unknown"
+        out.setdefault(p, {})[(category or "ok")] = count
+    return out
+
+
+@router.get("/ai-models")
+async def list_ai_models_admin(
+    request: Request,
+    _admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Model catalog + provider health/error stats (no secrets)."""
+    rate_limit(request, "admin")
+    return {
+        "models": registry.list_models(),
+        "default": registry.default_model_key(),
+        "errors": _llm_error_stats(db),
+    }
+
+
+@router.patch("/ai-models/{key}")
+async def update_ai_model(
+    key: str,
+    body: AIModelUpdateRequest,
+    request: Request,
+    _admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Update admin-editable model flags. ``key`` is validated against the
+    server allowlist — arbitrary/executable config can never be injected."""
+    rate_limit(request, "admin")
+    try:
+        registry.get_model(key)  # raises ValueError for unknown keys
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    record = db.get(AIModelConfig, key)
+    if record is None:
+        record = AIModelConfig(key=key)
+        db.add(record)
+
+    if body.enabled is not None:
+        record.enabled = body.enabled
+    if body.is_default is not None:
+        record.is_default = body.is_default
+        if body.is_default:
+            # Exactly one default: clear the flag on every other model.
+            for other in db.scalars(select(AIModelConfig)).all():
+                if other.key != key:
+                    other.is_default = False
+    if body.display_name is not None:
+        record.display_name = body.display_name.strip()[:120]
+    if body.description is not None:
+        record.description = body.description.strip()[:2000]
+    if body.free_tier is not None:
+        record.free_tier = body.free_tier
+    if body.priority is not None:
+        record.priority = max(-1000, min(1000, body.priority))
+
+    db.commit()
+    # Cached overrides would otherwise hide this change for up to the TTL.
+    registry.invalidate_model_overrides()
+    logger.info("Admin updated AI model config key=%s enabled=%s default=%s",
+                key, record.enabled, record.is_default)
+    return {"models": registry.list_models(), "default": registry.default_model_key()}

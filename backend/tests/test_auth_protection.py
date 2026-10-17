@@ -94,9 +94,10 @@ def test_ws_authenticated_analyze_flow(client):
     with client.websocket_connect("/ws/interview") as ws:
         ws.receive_json()  # initial status
         ws.send_json({"type": "interviewer_question", "text": "What is a REST API?"})
-        # Expect a transcript echo then AI guidance.
+        # Expect a transcript echo then AI guidance. Streaming inserts
+        # ai_stream_start/delta frames in between, so read until guidance.
         seen = []
-        for _ in range(3):
+        for _ in range(30):
             seen.append(ws.receive_json()["type"])
             if "ai_guidance" in seen:
                 break

@@ -30,6 +30,16 @@ class QuestionBuffer:
         self._last_push: float = 0.0
 
     def push(self, fragment: str) -> str | None:
+        """Accumulate one live-transcript fragment.
+
+        Human pattern: people pause mid-question, so a fragment that merely
+        LOOKS like a question ("Can you explain the saga pattern in…")
+        must NOT fire yet — the rest is still coming. Fire immediately only
+        on a hard completion signal: text ending in "?" (a finished
+        question). Everything else accumulates until the client's pause
+        detector (~600ms of silence) asks for it via ``force_flush``, or
+        the monologue safety valve below fires.
+        """
         fragment = (fragment or "").strip()
         if not fragment:
             return None
@@ -37,7 +47,7 @@ class QuestionBuffer:
             self._buffer += " "
         self._buffer += fragment
         self._last_push = time.monotonic()
-        if is_question(self._buffer):
+        if self._buffer.endswith("?") and is_question(self._buffer):
             return self.force_flush()
         return None
 

@@ -13,6 +13,27 @@ ANSWER_POINT_TARGET: dict[str, tuple[int, int]] = {
 }
 
 
+class ComparisonTable(BaseModel):
+    """A side-by-side table for "difference / compare" questions.
+
+    ``headers`` names the columns (e.g. ``["Aspect", "X", "Y"]``) and ``rows``
+    are the aligned cell values. Rendered as a real table by the frontend so
+    the candidate can glance and answer, exactly like a comparison table in
+    ChatGPT.
+    """
+
+    headers: list[str] = Field(min_length=1)
+    rows: list[list[str]] = Field(default_factory=list)
+
+    @field_validator("headers")
+    @classmethod
+    def _clean_headers(cls, v: list[str]) -> list[str]:
+        cleaned = [h.strip() for h in v if h and h.strip()]
+        if not cleaned:
+            raise ValueError("comparison.headers must contain at least one column")
+        return cleaned
+
+
 class AIInterviewResponse(BaseModel):
     question: str
     questionType: Literal["technical", "behavioral", "coding", "general"]
@@ -23,6 +44,8 @@ class AIInterviewResponse(BaseModel):
     keyTakeaways: list[str] = Field(default_factory=list)
     followUpQuestions: list[str] = Field(default_factory=list)
     responseLength: ResponseLength = "medium"
+    #: Optional comparison table (comparison/difference questions only).
+    comparison: Optional[ComparisonTable] = None
 
     @field_validator("answerPoints")
     @classmethod
@@ -36,6 +59,17 @@ class AIInterviewResponse(BaseModel):
     @classmethod
     def _clean_takeaways(cls, v: list[str]) -> list[str]:
         return [p.strip() for p in v if p and p.strip()]
+
+    @field_validator("questionType", mode="before")
+    @classmethod
+    def _normalize_qtype(cls, v: object) -> object:
+        # Providers differ in casing ("Technical", "CODING"); normalize before
+        # Literal validation so a valid answer isn't discarded over case.
+        if isinstance(v, str):
+            low = v.strip().lower()
+            if low in ("technical", "behavioral", "coding", "general"):
+                return low
+        return v
 
     @field_validator("responseLength", mode="before")
     @classmethod

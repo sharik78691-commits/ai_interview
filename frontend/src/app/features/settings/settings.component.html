@@ -6,9 +6,24 @@
     <label class="lbl" for="model">AI model</label>
     <select id="model" [(ngModel)]="aiModel">
       <option value="auto">Auto (backend default)</option>
-      <option value="llama">Llama / local</option>
-      <option value="openai">OpenAI-compatible</option>
+      @for (m of aiModelList; track m.key) {
+        <option [value]="m.key" [disabled]="!m.available">
+          {{ m.displayName }}{{ m.isDefault ? ' (Default)' : '' }}{{ !m.available ? ' — unavailable' : '' }}
+        </option>
+      }
     </select>
+    @if (aiModelList.length) {
+      <p class="muted small" style="margin-top:-4px">
+        @for (m of aiModelList; track m.key) {
+          @if (m.key === aiModel) {
+            {{ m.provider }}@if (m.freeTier) { · Free tier } · {{ m.capabilities }}
+          }
+        }
+        @if (aiModel === 'auto') {
+          The backend picks the default model automatically.
+        }
+      </p>
+    }
     <label class="lbl" for="stt">Speech-to-text provider</label>
     <select id="stt" [(ngModel)]="sttProvider">
       <option value="browser">Browser (Web Speech API)</option>

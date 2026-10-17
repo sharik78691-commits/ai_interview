@@ -4,7 +4,6 @@ import { Subscription, filter } from 'rxjs';
 import { AuthService } from './core/auth/auth.service';
 import { InterviewWsService } from './core/services/interview-ws.service';
 import { InterviewerAudioService } from './core/services/interviewer-audio.service';
-import { ActivityService } from './core/services/activity.service';
 import { ResumeService } from './core/services/resume.service';
 import { SeoConfig, SeoService } from './core/services/seo.service';
 import { TranscriptionService } from './core/services/transcription.service';
@@ -24,15 +23,11 @@ export class App implements OnInit, OnDestroy {
   private resumeService = inject(ResumeService);
   private interviewWs = inject(InterviewWsService);
   private interviewerAudio = inject(InterviewerAudioService);
-  private activity = inject(ActivityService);
   private transcription = inject(TranscriptionService);
   private navSub?: Subscription;
   private logoutSub?: Subscription;
 
   ngOnInit(): void {
-    // Injecting ActivityService starts anonymous page-time + click tracking
-    // (its constructor wires router/listener hooks; DNT-aware, fire-and-forget).
-    void this.activity;
     // Restore the session from the HttpOnly cookie on startup so guards and
     // the navbar know the current user without storing tokens client-side.
     this.auth.checkSession().subscribe();

@@ -20,42 +20,6 @@ logger = logging.getLogger(__name__)
 # Paths that would otherwise flood the log stream with health-check noise.
 _QUIET_PATHS = {"/api/health", "/health", "/favicon.ico"}
 
-# Visit logging skips the same noise plus API documentation endpoints.
-_VISIT_SKIP = _QUIET_PATHS | {"/docs", "/openapi.json", "/redoc"}
-
-
-class VisitLogMiddleware(BaseHTTPMiddleware):
-    """Record one activity-log ``visit`` row per request for the admin panel.
-
-    Stores path + method, the signed-in user when present, and a salted
-    SHA-256 of the client IP (unique-visitor counting without keeping
-    anything that identifies a person). Logging must NEVER break a request:
-    every failure is swallowed after one warning.
-    """
-
-    async def dispatch(self, request: Request, call_next) -> Response:
-        response = await call_next(request)
-        try:
-            self._record(request)
-        except Exception as exc:
-            logger.warning("Visit logging failed (%s)", exc)
-        return response
-
-    def _record(self, request: Request) -> None:
-        from app.auth import security
-        from app.services.activity import client_ip, log_visit
-
-        path = request.url.path
-        if path in _VISIT_SKIP:
-            return
-        log_visit(
-            user_id=security.get_session_user_id(request),
-            ip=client_ip(request),
-            path=path,
-            method=request.method,
-            user_agent=request.headers.get("user-agent"),
-        )
-
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
     """Log one line per request: method, path, status, duration, origin.

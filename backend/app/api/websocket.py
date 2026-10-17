@@ -15,6 +15,8 @@ Messages to the browser:
   {type: "notice"}     {type: "error"}
 """
 import logging
+import re
+import time
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -22,11 +24,13 @@ from app.api.interview import VALID_LENGTHS, _normalize_length, get_context
 from app.auth import security
 from app.auth.service import get_user_by_id, is_session_token_revoked
 from app.db.session import SessionLocal
+from app.providers.llm.registry import get_model, validate_model_key
 from app.providers.stt.provider import (
     STTRequestError,
     STTUnavailableError,
     get_stt_provider,
 )
+from app.services.activity import log_llm_usage
 from app.services.ai_service import AIService
 from app.services.question_service import QuestionBuffer
 
@@ -74,6 +78,12 @@ MIME_BY_FORMAT = {
     "ogg": "audio/ogg",
     "mp3": "audio/mpeg",
 }
+
+
+def _substantial(text: str) -> bool:
+    """Worth answering (same threshold as push_complete): 3+ words or 25+ chars."""
+    t = (text or "").strip()
+    return len(t.split()) >= 3 or len(t) >= 25
 
 
 def _authenticate_ws(websocket: WebSocket) -> int | None:
@@ -207,22 +217,127 @@ async def ws_interview(websocket: WebSocket) -> None:
         if length in VALID_LENGTHS:
             service.response_length = length
 
+    # Per-connection AI model. Defaults to the backend default; the client may
+    # switch it mid-session via `model` on any question-bearing message.
+    model_key: str | None = None
+
+    async def _apply_model(raw: object) -> bool:
+        """Adopt a client-selected model. Returns False for an unknown key.
+
+        The user's explicit choice is respected: an invalid key is reported,
+        never silently replaced with another model.
+        """
+        nonlocal model_key
+        if raw is None:
+            return True
+        key = str(raw).strip()
+        if not key:
+            return True
+        try:
+            model_key = validate_model_key(key)
+            return True
+        except ValueError as exc:
+            await websocket.send_json(
+                {"type": "error", "message": f"Unknown AI model: {exc}"}
+            )
+            return False
+
+    # Duplicate-answer guard: the mic path (sendTranscript) and the debounced
+    # client detector (sendForce) can report the same question twice, and
+    # WebSpeech sometimes delivers the same final transcript twice.
+    last_answered: str | None = None
+    last_answered_length: str = ""
+    last_answered_at: float = 0.0
+    DEDUP_WINDOW_S = 30.0
+
+    def _norm_question(q: str) -> str:
+        return re.sub(r"\s+", " ", (q or "").strip().lower())
+
     async def _send_guidance(question: str) -> None:
         """Reuse the existing AI answer feature — same service, same UI payload."""
+        # Duplicate guard: mic fragments (sendTranscript) and the debounced
+        # client detector (sendForce) can report the SAME question twice, and
+        # WebSpeech sometimes delivers the same final transcript twice. Answer
+        # once per (question, depth) — a repeat at the SAME depth reuses the
+        # previous guidance, but a length change is a DELIBERATE re-ask and is
+        # never suppressed (the user asked for a longer/shorter answer).
+        # Recorded ONLY on success, so Retry-after-failure always goes through.
+        nonlocal last_answered, last_answered_at, last_answered_length
+        now = time.monotonic()
+        same_depth = service.response_length == last_answered_length
+        if (
+            last_answered is not None
+            and same_depth
+            and _norm_question(question) == _norm_question(last_answered)
+            and (now - last_answered_at) < DEDUP_WINDOW_S
+        ):
+            logger.info("Duplicate question suppressed (%d chars)", len(question))
+            await websocket.send_json(
+                {
+                    "type": "status",
+                    "status": "ready",
+                    "message": "Already answered — showing the previous guidance.",
+                }
+            )
+            return
+        # Tell the UI which model is generating BEFORE the first token, then
+        # forward one provisional bullet per streamed delta. The final
+        # ai_guidance below stays strictly validated (provisional != final).
         try:
-            guidance = await service.analyze(question)
+            spec = get_model(model_key)
+            await websocket.send_json(
+                {
+                    "type": "ai_stream_start",
+                    "model": spec.key,
+                    "provider": spec.provider,
+                }
+            )
+        except ValueError:
+            pass  # non-fatal: the validated answer below is what matters
+
+        async def _on_delta(point: str) -> None:
+            await websocket.send_json({"type": "ai_stream_delta", "point": point})
+
+        try:
+            guidance = await service.analyze(
+                question, model_key=model_key, on_delta=_on_delta
+            )
             if service.last_warning:
                 await websocket.send_json(
-                    {"type": "notice", "message": service.last_warning}
+                    {"type": "notice", "message": str(service.last_warning)}
                 )
+            provider = service.last_provider
+            if not isinstance(provider, str):
+                provider = str(provider) if provider else None
+            model = model_key if isinstance(model_key, str) else None
             await websocket.send_json(
-                {"type": "ai_guidance", "data": guidance.model_dump()}
+                {
+                    "type": "ai_guidance",
+                    "data": guidance.model_dump(),
+                    "model": model,
+                    "provider": provider,
+                }
             )
+            last_answered = question
+            last_answered_length = service.response_length
+            last_answered_at = time.monotonic()
         except Exception:
             logger.exception("analyze failed")
             await websocket.send_json(
                 {"type": "error", "message": "AI response unavailable. Please try again."}
             )
+            return
+        # Usage tracking: provider-reported tokens only, never estimated.
+        log_llm_usage(
+            user_id=user_id,
+            request_type="interview",
+            provider=service.last_provider,
+            model=service.last_model,
+            latency_ms=service.last_usage.get("latency_ms"),
+            input_tokens=service.last_usage.get("input_tokens"),
+            output_tokens=service.last_usage.get("output_tokens"),
+            error_category=service.last_usage.get("error_category"),
+        )
 
     async def _handle_detected_question(question: str) -> None:
         """Common path: a question was detected -> ask the existing AI service."""
@@ -408,6 +523,13 @@ async def ws_interview(websocket: WebSocket) -> None:
             if mtype == "ping":
                 await websocket.send_json({"type": "pong"})
 
+            elif mtype == "set_model":
+                # Switch the AI model for subsequent answers (mid-session).
+                await _apply_model(msg.get("model"))
+                await websocket.send_json(
+                    {"type": "status", "status": "listening", "message": "model updated"}
+                )
+
             elif mtype == "reset":
                 buffer = QuestionBuffer()
                 audio_buffer = bytearray()
@@ -453,6 +575,7 @@ async def ws_interview(websocket: WebSocket) -> None:
                 if isinstance(clip_mime, str) and clip_mime.strip():
                     audio_mime = clip_mime.strip()
                 _apply_length(msg.get("responseLength"))
+                await _apply_model(msg.get("model"))
                 await _transcribe_and_detect()
 
             elif mtype == "interviewer_question":
@@ -463,19 +586,39 @@ async def ws_interview(websocket: WebSocket) -> None:
                         {"type": "stt_transcript", "text": question, "final": True}
                     )
                     _apply_length(msg.get("responseLength"))
+                    await _apply_model(msg.get("model"))
                     await _handle_detected_question(question)
 
             elif mtype == "transcript":
                 service.resume_text = context.get("resume", service.resume_text)
                 service.job_description = context.get("job", service.job_description)
                 _apply_length(msg.get("responseLength"))
+                await _apply_model(msg.get("model"))
                 text = (msg.get("text") or "").strip()
                 if not text:
                     continue
                 question = buffer.push(text)
-                # Force: long declarative that looks complete but lacks '?'.
-                if question is None and (text.endswith("?") or len(buffer.pending) > 120):
-                    question = buffer.force_flush()
+                # push() fires only on "?"-terminated questions. The rest is
+                # decided here once per fragment:
+                # - short "?" final ("What is X?") with substance -> fire now;
+                # - "?"-terminated noise ("Okay?") -> drop, keep listening;
+                # - tiny fragments WITHOUT "?" ("Can", "tell me") -> keep
+                #   accumulating slow word-by-word speech, never drop;
+                # - very long monologue ending at a sentence boundary ->
+                #   fire (safety valve if the client detector never fires).
+                # Anything else accumulates for the client's ~600ms pause
+                # detector, which reaps the COMPLETE question via force.
+                if question is None:
+                    pending = buffer.pending
+                    if not _substantial(pending):
+                        if text.endswith("?"):
+                            buffer.force_flush()  # drop noise; keep listening
+                    elif text.endswith("?"):
+                        question = buffer.force_flush()
+                    elif len(pending) > 500 and pending.rstrip().endswith(
+                        (".", "?", "!")
+                    ):
+                        question = buffer.force_flush()
                 if question:
                     await _handle_detected_question(question)
                 else:
@@ -490,6 +633,7 @@ async def ws_interview(websocket: WebSocket) -> None:
                 if not pending and isinstance(msg.get("text"), str) and msg["text"].strip():
                     pending = msg["text"].strip()
                 _apply_length(msg.get("responseLength"))
+                await _apply_model(msg.get("model"))
                 if pending:
                     await _send_guidance(pending)
 

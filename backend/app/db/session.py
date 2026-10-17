@@ -202,123 +202,35 @@ def _ensure_resume_columns() -> None:
                 logger.warning("Could not backfill resumes.user_email (%s)", exc)
 
 
-def _migrate_to_activity_log() -> None:
-    """One-time consolidation into ``activity_log``.
+def _drop_activity_noise_columns() -> None:
+    """Drop the removed page-analytics columns from ``activity_log``.
 
-    Copies visit_logs / events / page_times / click_events rows (skipping the
-    redundant user_registered events — signups already come from users), then
-    drops the legacy tables. Only runs when activity_log is still empty;
-    counts are verified before anything is dropped, and any mismatch aborts
-    with the legacy tables left intact.
+    The business-owner lean cut stopped storing per-request visits, clicks,
+    dwell time, GeoIP and device data. Existing databases still carry those
+    columns, so this removes them idempotently (SQLite 3.35+ and PostgreSQL
+    both support ``DROP COLUMN``). Old rows are NOT deleted — their value is
+    preserved via the remaining columns, and the removed ones become NULL.
     """
     from sqlalchemy import inspect
 
     try:
-        tables = set(inspect(engine).get_table_names())
+        existing = {c["name"] for c in inspect(engine).get_columns("activity_log")}
     except Exception as exc:
-        logger.warning("Could not list tables (%s); skipping activity migration", exc)
+        logger.warning("Could not inspect activity_log (%s); skipping column cleanup", exc)
         return
-    legacy = {"visit_logs", "events", "page_times", "click_events"} & tables
-    if not legacy or "activity_log" not in tables:
-        return
-
-    def _cols(table: str) -> set[str]:
-        try:
-            return {c["name"] for c in inspect(engine).get_columns(table)}
-        except Exception:
-            return set()
-
-    def _pick(cols: set[str], name: str) -> str:
-        return name if name in cols else "NULL"
-
+    removed = [
+        "ip_hash", "country", "region", "city", "path", "method",
+        "label", "target", "seconds", "user_agent",
+    ]
     with engine.begin() as conn:
-        try:
-            existing = conn.execute(text("SELECT COUNT(*) FROM activity_log")).scalar() or 0
-        except Exception as exc:
-            logger.warning("Could not read activity_log (%s); skipping migration", exc)
-            return
-        if existing:
-            # Already live (or a previous partial run): drop only EMPTY shells.
-            for table in sorted(legacy):
-                try:
-                    n = conn.execute(text(f"SELECT COUNT(*) FROM {table}")).scalar() or 0
-                    if n == 0:
-                        conn.execute(text(f"DROP TABLE IF EXISTS {table}"))
-                        logger.info("Dropped empty legacy table %s", table)
-                except Exception as exc:
-                    logger.warning("Could not drop %s (%s)", table, exc)
-            return
-
-        stmts: list[str] = []
-        vc = _cols("visit_logs")
-        if "visit_logs" in legacy:
-            stmts.append(
-                "INSERT INTO activity_log (kind, user_id, ip_hash, country, region, "
-                f"city, path, method, user_agent, created_at) SELECT 'visit', user_id, "
-                f"{_pick(vc, 'ip_hash')}, {_pick(vc, 'country')}, {_pick(vc, 'region')}, "
-                f"{_pick(vc, 'city')}, path, {_pick(vc, 'method')}, "
-                f"{_pick(vc, 'user_agent')}, created_at FROM visit_logs"
-            )
-        if "events" in legacy:
-            stmts.append(
-                "INSERT INTO activity_log (kind, user_id, ip_hash, country, region, "
-                "city, created_at) SELECT name, user_id, "
-                f"{_pick(_cols('events'), 'ip_hash')}, "
-                f"{_pick(_cols('events'), 'country')}, "
-                f"{_pick(_cols('events'), 'region')}, "
-                f"{_pick(_cols('events'), 'city')}, created_at FROM events "
-                "WHERE name IN ('user_login', 'interview_prepared', 'question_analyzed')"
-            )
-        if "page_times" in legacy:
-            stmts.append(
-                "INSERT INTO activity_log (kind, user_id, ip_hash, path, seconds, "
-                "created_at) SELECT 'stay', user_id, ip_hash, path, seconds, "
-                "created_at FROM page_times"
-            )
-        if "click_events" in legacy:
-            stmts.append(
-                "INSERT INTO activity_log (kind, user_id, ip_hash, path, label, "
-                "target, created_at) SELECT 'click', user_id, ip_hash, path, label, "
-                "target, created_at FROM click_events"
-            )
-        moved = 0
-        try:
-            for sql in stmts:
-                result = conn.execute(text(sql))
-                moved += result.rowcount if result.rowcount and result.rowcount > 0 else 0
-        except Exception as exc:
-            # Transaction rolls back: nothing was copied, legacy tables kept,
-            # and startup continues normally.
-            logger.warning("Activity migration copy failed (%s); legacy tables kept", exc)
-            return
-        # Verify before dropping: every migratable source row must have landed.
-        try:
-            sources = 0
-            for table, extra in (
-                ("visit_logs", ""),
-                ("events", "WHERE name IN ('user_login', 'interview_prepared', 'question_analyzed')"),
-                ("page_times", ""),
-                ("click_events", ""),
-            ):
-                if table in legacy:
-                    sources += conn.execute(
-                        text(f"SELECT COUNT(*) FROM {table} {extra}")
-                    ).scalar() or 0
-            if sources != moved:
-                logger.warning(
-                    "Activity migration count mismatch (%s sources vs %s copied); "
-                    "legacy tables kept", sources, moved,
-                )
-                return
-            for table in sorted(legacy):
-                conn.execute(text(f"DROP TABLE IF EXISTS {table}"))
-            logger.info(
-                "Consolidated %s activity rows into activity_log; dropped %s",
-                moved, sorted(legacy),
-            )
-        except Exception as exc:
-            logger.warning("Activity migration finalize failed (%s); legacy tables kept", exc)
-            return
+        for name in removed:
+            if name not in existing:
+                continue
+            try:
+                logger.info("Dropping unused column activity_log.%s", name)
+                conn.execute(text(f"ALTER TABLE activity_log DROP COLUMN {name}"))
+            except Exception as exc:
+                logger.warning("Could not drop activity_log.%s (%s)", name, exc)
 
 
 def init_db() -> None:
@@ -330,13 +242,14 @@ def init_db() -> None:
     # Imported for side effects (model registration) — do not remove.
     from app.models import user as _user  # noqa: F401
     from app.models import activity_log as _activity  # noqa: F401
+    from app.models import ai_model_config as _aim  # noqa: F401
     from app.models import resume_record as _resumes  # noqa: F401
     from app.models import target_role as _roles  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
     _ensure_user_columns()
     _ensure_resume_columns()
-    _migrate_to_activity_log()
+    _drop_activity_noise_columns()
     # Seed the admin login when ADMIN_PASSWORD is configured (idempotent).
     from app.auth.service import ensure_admin
 
