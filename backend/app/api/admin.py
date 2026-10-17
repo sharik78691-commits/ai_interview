@@ -1,9 +1,12 @@
 """Admin-panel REST endpoints (admin users only).
 
-GET  /api/admin/stats          — headline counters + 14-day series + recent users
-GET  /api/admin/users          — searchable, paginated user list
-PATCH /api/admin/users/{id}    — activate/deactivate, promote/demote admin
-GET  /api/admin/users/export   — full user list as CSV download
+GET  /api/admin/stats           — business dashboard: system status, totals,
+                                   signups (last 30 days), AI usage summary
+GET  /api/admin/users           — searchable, paginated user list
+PATCH /api/admin/users/{id}     — activate/deactivate, promote/demote admin
+GET  /api/admin/users/export    — full user list as CSV download
+GET  /api/admin/ai-models       — model catalog + provider error stats
+PATCH /api/admin/ai-models/{key} — admin-editable model flags
 
 Every route requires an admin session (401 anonymous, 403 non-admin).
 Aggregations are computed in Python over small result sets so the same code
@@ -12,7 +15,7 @@ runs unchanged on SQLite and PostgreSQL.
 import csv
 import io
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
@@ -23,31 +26,30 @@ from app.auth.dependencies import require_admin
 from app.core.config import get_settings
 from app.core.ratelimit import rate_limit
 from app.db.session import get_db
-from app.models.event import (
-    INTERVIEW_PREPARED,
-    QUESTION_ANALYZED,
-    USER_LOGIN,
-    EventLog,
-)
-from app.models.resume_record import ResumeRecord
-from app.models.target_role import TargetRole
+from app.models.activity_log import ANALYZE, LLM_USAGE, PREPARE, ActivityLog
+from app.models.ai_model_config import AIModelConfig
 from app.models.user import User
-from app.models.visit import VisitLog
+from app.providers.llm import registry
 from app.schemas.admin import (
+    AIModelUpdateRequest,
     AdminStats,
     AdminUserRow,
     AdminUsersPage,
+    AiUsageRow,
     DayCount,
+    InRange,
+    RangeInfo,
     SetActiveRequest,
     SystemStatus,
-    TopPage,
+    Totals,
 )
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
-_SERIES_DAYS = 14
+_DEFAULT_DAYS = 30
+_MAX_DAYS = 365
 
 
 def _as_utc(value: datetime | None) -> datetime | None:
@@ -59,53 +61,47 @@ def _as_utc(value: datetime | None) -> datetime | None:
     return value
 
 
-def _is_today(value: datetime | None) -> bool:
-    value = _as_utc(value)
-    return value is not None and value.date() == datetime.now(timezone.utc).date()
+def _parse_range(from_s: str | None, to_s: str | None) -> tuple[date, date]:
+    """Parse ?from=&to= (YYYY-MM-DD) with a last-30-days default.
 
-
-def _empty_series(days: int = _SERIES_DAYS) -> list[DayCount]:
+    Invalid input falls back to the default; a reversed range is swapped;
+    spans longer than a year are clamped — the admin UI always gets a sane,
+    bounded window.
+    """
     today = datetime.now(timezone.utc).date()
-    return [
-        DayCount(day=(today - timedelta(days=i)).isoformat(), count=0)
-        for i in reversed(range(days))
-    ]
+    d0, d1 = today - timedelta(days=_DEFAULT_DAYS - 1), today
+    try:
+        if from_s:
+            d0 = date.fromisoformat(from_s)
+    except ValueError:
+        pass
+    try:
+        if to_s:
+            d1 = date.fromisoformat(to_s)
+    except ValueError:
+        pass
+    if d0 > d1:
+        d0, d1 = d1, d0
+    if (d1 - d0).days > _MAX_DAYS:
+        d0 = d1 - timedelta(days=_MAX_DAYS)
+    return d0, d1
 
 
-def _bucket(datetimes: list[datetime | None], days: int = _SERIES_DAYS) -> list[DayCount]:
-    series = _empty_series(days)
-    by_day = {b.day: b for b in series}
-    for value in datetimes:
-        value = _as_utc(value)
-        if value is None:
-            continue
-        bucket = by_day.get(value.date().isoformat())
-        if bucket is not None:
-            bucket.count += 1
-    return series
+def _in_range(value: datetime | None, d0: date, d1: date) -> bool:
+    value = _as_utc(value)
+    return value is not None and d0 <= value.date() <= d1
 
 
-def _resume_counts(db: Session) -> dict[int, int]:
-    """Resumes per user in ONE query (avoids N+1 on every user list)."""
-    rows = db.execute(
-        select(ResumeRecord.user_id, func.count()).group_by(ResumeRecord.user_id)
-    ).all()
-    return {user_id: count for user_id, count in rows}
+def _series_days(d0: date, d1: date) -> list[DayCount]:
+    """Zero-filled daily buckets covering exactly [d0, d1]."""
+    out, day = [], d0
+    while day <= d1:
+        out.append(DayCount(day=day.isoformat(), count=0))
+        day += timedelta(days=1)
+    return out
 
 
-def _role_counts(db: Session) -> dict[int, int]:
-    """Saved target roles per user in ONE query."""
-    rows = db.execute(
-        select(TargetRole.user_id, func.count()).group_by(TargetRole.user_id)
-    ).all()
-    return {user_id: count for user_id, count in rows}
-
-
-def _row(
-    user: User,
-    resume_counts: dict[int, int] | None = None,
-    role_counts: dict[int, int] | None = None,
-) -> AdminUserRow:
+def _row(user: User) -> AdminUserRow:
     return AdminUserRow(
         id=user.id,
         email=user.email,
@@ -115,8 +111,6 @@ def _row(
         is_admin=bool(user.is_admin),
         is_active=bool(user.is_active),
         login_count=user.login_count or 0,
-        resumes_count=(resume_counts or {}).get(user.id, 0),
-        roles_count=(role_counts or {}).get(user.id, 0),
         last_login_at=_as_utc(user.last_login_at),
         created_at=_as_utc(user.created_at),
     )
@@ -127,108 +121,97 @@ async def stats(
     request: Request,
     _admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
+    from_date: str | None = Query(default=None, alias="from", max_length=10),
+    to_date: str | None = Query(default=None, alias="to", max_length=10),
 ) -> AdminStats:
     rate_limit(request, "admin")
+    d0, d1 = _parse_range(from_date, to_date)
 
     users = db.scalars(select(User)).all()
-    counts = _resume_counts(db)
-    role_counts = _role_counts(db)
-    resumes_total = sum(counts.values())
-    roles_total = sum(role_counts.values())
-    users_total = len(users)
-    active_users = sum(1 for u in users if u.is_active)
-    admin_count = sum(1 for u in users if u.is_admin)
-    total_logins = sum(u.login_count or 0 for u in users)
-    logins_today = sum(1 for u in users if _is_today(u.last_login_at))
+    acts = db.scalars(select(ActivityLog)).all()
 
-    visits = db.scalars(select(VisitLog)).all()
-    visits_total = len(visits)
-    today_visits = [v for v in visits if _is_today(v.created_at)]
-    visits_today = len(today_visits)
-    visitors_today = len({v.ip_hash for v in today_visits if v.ip_hash})
+    # --- lifetime account counters (states, not events) ---
+    totals = Totals(
+        users_total=len(users),
+        active_users=sum(1 for u in users if u.is_active),
+        admin_count=sum(1 for u in users if u.is_admin),
+        total_logins=sum(u.login_count or 0 for u in users),
+    )
 
-    # --- Activity trends from the append-only event log ---
-    events = db.scalars(select(EventLog)).all()
-
-    def _named(name: str) -> list[datetime | None]:
-        return [e.created_at for e in events if e.name == name]
-
-    logins = _named(USER_LOGIN)
-    interviews = _named(INTERVIEW_PREPARED)
-    questions = _named(QUESTION_ANALYZED)
-    interviews_total = len(interviews)
-    interviews_today = sum(1 for t in interviews if _is_today(t))
-    questions_total = len(questions)
-
-    # Unique visitors per day (salted IP hashes, never raw IPs).
-    per_day_visitors: dict[str, set[str]] = {}
-    for v in visits:
-        day = (_as_utc(v.created_at) or datetime.now(timezone.utc)).date().isoformat()
-        if v.ip_hash:
-            per_day_visitors.setdefault(day, set()).add(v.ip_hash)
-    visitors_series = _empty_series()
-    for bucket in visitors_series:
-        bucket.count = len(per_day_visitors.get(bucket.day, ()))
-
-    # Most-visited paths with their visitor counts.
-    path_visits: dict[str, int] = {}
-    path_visitors: dict[str, set[str]] = {}
-    for v in visits:
-        path_visits[v.path] = path_visits.get(v.path, 0) + 1
-        if v.ip_hash:
-            path_visitors.setdefault(v.path, set()).add(v.ip_hash)
-    top_pages = sorted(
-        (
-            TopPage(path=path, visits=count, visitors=len(path_visitors.get(path, ())))
-            for path, count in path_visits.items()
+    # --- in-range event metrics ---
+    signups = [u for u in users if _in_range(u.created_at, d0, d1)]
+    interviews = [a for a in acts if a.kind == PREPARE and _in_range(a.created_at, d0, d1)]
+    questions = [a for a in acts if a.kind == ANALYZE and _in_range(a.created_at, d0, d1)]
+    llm = [a for a in acts if a.kind == LLM_USAGE and _in_range(a.created_at, d0, d1)]
+    in_range = InRange(
+        signups=len(signups),
+        interviews=len(interviews),
+        questions=len(questions),
+        ai_calls=len(llm),
+        ai_errors=sum(
+            1 for a in llm if a.error_category is not None and a.error_category != "ok"
         ),
-        key=lambda p: p.visits,
+    )
+
+    # --- signups per day over the selected window ---
+    buckets: dict[str, int] = {b.day: 0 for b in _series_days(d0, d1)}
+    for u in users:
+        created = _as_utc(u.created_at)
+        if created is not None:
+            key = created.date().isoformat()
+            if key in buckets:
+                buckets[key] += 1
+    signups_by_day = [DayCount(day=k, count=v) for k, v in buckets.items()]
+
+    # --- AI usage summary over the window (cost/reliability view) ---
+    by_model: dict[tuple[str, str], list[ActivityLog]] = {}
+    for a in llm:
+        by_model.setdefault((a.provider or "unknown", a.model or "unknown"), []).append(a)
+
+    def _avg_latency(rows: list[ActivityLog]) -> float | None:
+        lat = [r.latency_ms for r in rows if r.latency_ms is not None]
+        return round(sum(lat) / len(lat), 1) if lat else None
+
+    ai_usage = sorted(
+        (
+            AiUsageRow(
+                provider=p,
+                model=m,
+                calls=len(rows),
+                errors=sum(
+                    1 for r in rows if r.error_category is not None and r.error_category != "ok"
+                ),
+                avg_latency_ms=_avg_latency(rows),
+            )
+            for (p, m), rows in by_model.items()
+        ),
+        key=lambda r: r.calls,
         reverse=True,
-    )[:8]
+    )
 
-    recent_logins = [
-        _row(u, counts, role_counts)
-        for u in sorted(
-            (u for u in users if u.last_login_at is not None),
-            key=lambda u: _as_utc(u.last_login_at) or datetime.min.replace(tzinfo=timezone.utc),
-            reverse=True,
-        )[:8]
-    ]
-
-    settings = get_settings()
-    db_url = settings.database_url
     system = SystemStatus(
-        demo_mode=settings.demo_mode,
-        llm_configured=settings.llm_configured,
-        stt_configured=settings.stt_configured,
-        google_configured=settings.google_configured,
-        database="PostgreSQL" if db_url.startswith("postgres") else "SQLite",
+        demo_mode=get_settings().demo_mode,
+        llm_configured=get_settings().llm_configured,
+        stt_configured=get_settings().stt_configured,
+        google_configured=get_settings().google_configured,
+        database=(
+            "PostgreSQL"
+            if get_settings().database_url.startswith("postgres")
+            else "SQLite"
+        ),
         version="0.1.0",
     )
 
     return AdminStats(
-        users_total=users_total,
-        active_users=active_users,
-        admin_count=admin_count,
-        total_logins=total_logins,
-        logins_today=logins_today,
-        visits_total=visits_total,
-        visits_today=visits_today,
-        visitors_today=visitors_today,
-        signups_by_day=_bucket([u.created_at for u in users]),
-        visits_by_day=_bucket([v.created_at for v in visits]),
-        recent_users=[_row(u, counts, role_counts) for u in sorted(users, key=lambda u: u.id, reverse=True)[:8]],
         system=system,
-        interviews_total=interviews_total,
-        interviews_today=interviews_today,
-        questions_total=questions_total,
-        logins_by_day=_bucket(logins),
-        interviews_by_day=_bucket(interviews),
-        visitors_by_day=visitors_series,
-        top_pages=top_pages,
-        recent_logins=recent_logins,
-        resumes_total=resumes_total,
-        roles_total=roles_total,
+        range=RangeInfo(from_date=d0.isoformat(), to_date=d1.isoformat()),
+        totals=totals,
+        in_range=in_range,
+        signups_by_day=signups_by_day,
+        ai_usage=ai_usage,
+        recent_users=[
+            _row(u) for u in sorted(users, key=lambda u: u.id, reverse=True)[:8]
+        ],
     )
 
 
@@ -251,11 +234,9 @@ async def list_users(
     rows = db.scalars(
         stmt.order_by(User.id.desc()).offset((page - 1) * page_size).limit(page_size)
     ).all()
-    counts = _resume_counts(db)
-    role_counts = _role_counts(db)
     return AdminUsersPage(
         total=total, page=page, page_size=page_size,
-        users=[_row(u, counts, role_counts) for u in rows],
+        users=[_row(u) for u in rows],
     )
 
 
@@ -298,7 +279,7 @@ async def set_active(
         user.is_active,
         user.is_admin,
     )
-    return _row(user, _resume_counts(db), _role_counts(db))
+    return _row(user)
 
 
 @router.get("/users/export")
@@ -328,3 +309,82 @@ async def export_users(
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=oyeinterview-users.csv"},
     )
+
+
+# ------------------------------------------------------------- AI model management
+
+
+def _llm_error_stats(db: Session) -> dict[str, dict[str, int]]:
+    """Provider -> {error_category: count} for llm_usage rows. No raw tokens."""
+    rows = db.execute(
+        select(ActivityLog.provider, ActivityLog.error_category, func.count())
+        .where(ActivityLog.kind == LLM_USAGE)
+        .group_by(ActivityLog.provider, ActivityLog.error_category)
+    ).all()
+    out: dict[str, dict[str, int]] = {}
+    for provider, category, count in rows:
+        p = provider or "unknown"
+        out.setdefault(p, {})[(category or "ok")] = count
+    return out
+
+
+@router.get("/ai-models")
+async def list_ai_models_admin(
+    request: Request,
+    _admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Model catalog + provider health/error stats (no secrets)."""
+    rate_limit(request, "admin")
+    return {
+        "models": registry.list_models(),
+        "default": registry.default_model_key(),
+        "errors": _llm_error_stats(db),
+    }
+
+
+@router.patch("/ai-models/{key}")
+async def update_ai_model(
+    key: str,
+    body: AIModelUpdateRequest,
+    request: Request,
+    _admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Update admin-editable model flags. ``key`` is validated against the
+    server allowlist — arbitrary/executable config can never be injected."""
+    rate_limit(request, "admin")
+    try:
+        registry.get_model(key)  # raises ValueError for unknown keys
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    record = db.get(AIModelConfig, key)
+    if record is None:
+        record = AIModelConfig(key=key)
+        db.add(record)
+
+    if body.enabled is not None:
+        record.enabled = body.enabled
+    if body.is_default is not None:
+        record.is_default = body.is_default
+        if body.is_default:
+            # Exactly one default: clear the flag on every other model.
+            for other in db.scalars(select(AIModelConfig)).all():
+                if other.key != key:
+                    other.is_default = False
+    if body.display_name is not None:
+        record.display_name = body.display_name.strip()[:120]
+    if body.description is not None:
+        record.description = body.description.strip()[:2000]
+    if body.free_tier is not None:
+        record.free_tier = body.free_tier
+    if body.priority is not None:
+        record.priority = max(-1000, min(1000, body.priority))
+
+    db.commit()
+    # Cached overrides would otherwise hide this change for up to the TTL.
+    registry.invalidate_model_overrides()
+    logger.info("Admin updated AI model config key=%s enabled=%s default=%s",
+                key, record.enabled, record.is_default)
+    return {"models": registry.list_models(), "default": registry.default_model_key()}

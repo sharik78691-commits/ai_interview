@@ -2,54 +2,63 @@
 import json
 import logging
 import re
+from collections.abc import Awaitable, Callable
 
 import httpx
 
 from app.core.config import get_settings
-from app.models.ai_response import AIInterviewResponse
+from app.core.http import shared_http
+from app.models.ai_response import AIInterviewResponse, ComparisonTable
 from app.providers.llm.base import LLMProvider
 
 logger = logging.getLogger(__name__)
 
-BASE_SCHEMA = """{"question": str, "questionType": "technical|behavioral|coding|general", "answerPoints": [str, ...non-empty], "star": {"situation": str, "task": str, "action": str, "result": str} | null, "codeHint": str | null, "example": str | null, "keyTakeaways": [str], "followUpQuestions": [str], "responseLength": "short|medium|long"}"""
+BASE_SCHEMA = """{"question": str, "questionType": "technical|behavioral|coding|general", "answerPoints": [str, ...non-empty], "star": {"situation": str, "task": str, "action": str, "result": str} | null, "codeHint": str | null, "example": str | null, "keyTakeaways": [str], "followUpQuestions": [str], "responseLength": "short|medium|long", "comparison": {"headers": [str, ...], "rows": [[str, ...]]} | null}"""
 
 LENGTH_RULES: dict[str, str] = {
-    "short": """- answerPoints: 3-4 SHORT bullets (max ~12 words each). Rapid-fire mode.
+    "short": """- answerPoints: 3-4 SHORT bullets (max ~12 words each). Quick mental cue, not an essay.
 - example: null. keyTakeaways: 1-2 items. followUpQuestions: 1-2 items.
-- The candidate needs a quick mental cue, not an essay.
-- For CODING questions, codeHint MUST still contain the COMPLETE, runnable solution (see CODE RULES).""",
-    "medium": """- answerPoints: 5-7 bullets, each 1-2 sentences (15-35 words). Structure the answer clearly.
-- example: 1 short concrete example (2-3 sentences) grounded in the candidate's stack, or null.
+- CODING: codeHint still holds the COMPLETE runnable solution (see CODE RULES).""",
+    "medium": """- answerPoints: 5-7 bullets, 1-2 sentences each (15-35 words).
+- example: 1 short concrete example (2-3 sentences) from the candidate's stack, or null.
 - keyTakeaways: 2-3 items. followUpQuestions: 2-3 items.
-- For CODING questions, codeHint MUST contain the COMPLETE, runnable solution (see CODE RULES).""",
-    "long": """You are acting as a SENIOR ENGINEER / SENIOR ANALYST mentoring the candidate. Be thorough and specific.
-- answerPoints: 8-12 bullets grouped in this logical order:
-  1) Definition & core concept
-  2) How it actually works (mechanism, internals)
-  3) Trade-offs, failure modes, and when NOT to use it
-  4) Comparison with alternatives
-  5) Real production relevance tied to the candidate's resume and the job description
-- Each bullet: 20-45 words with concrete technical substance (class names, patterns, protocols, metrics). No filler like "explain it clearly".
-- example: a DETAILED real-world scenario (4-6 sentences) referencing services, scale, and outcomes.
-- keyTakeaways: 3-5 crisp one-liners.
-- followUpQuestions: 3-5 sharp interviewer probes at increasing depth.
-- For CODING questions, codeHint MUST contain the COMPLETE, runnable solution (see CODE RULES).""",
+- CODING: codeHint holds the COMPLETE runnable solution (see CODE RULES).""",
+    "long": """You are a SENIOR ENGINEER / SENIOR ANALYST mentoring the candidate. Be thorough and specific.
+- answerPoints: 8-12 bullets (20-45 words each), ordered: 1) definition & core concept 2) mechanism/internals 3) trade-offs, failure modes, when NOT to use it 4) comparison with alternatives 5) production relevance tied to resume + job description. Concrete substance (class names, patterns, protocols, metrics) — no filler.
+- example: DETAILED real-world scenario (4-6 sentences) with services, scale, outcomes.
+- keyTakeaways: 3-5 crisp one-liners. followUpQuestions: 3-5 sharp probes at increasing depth.
+- CODING: codeHint holds the COMPLETE runnable solution (see CODE RULES).""",
 }
 
+# Output token caps per depth. These are CAPS, not targets — the model stops
+# when done, so a higher cap only adds headroom for reasoning models (gpt-oss)
+# to finish their thought AND emit the JSON without getting truncated empty.
+MAX_TOKENS: dict[str, int] = {"short": 700, "medium": 2000, "long": 3000}
+
 COMMON_RULES = """RULES:
-- Respond with STRICT JSON only. No markdown fences, no preamble, no commentary.
-- Every bullet must be tailored to the candidate's ACTUAL resume experience and the target job description. Reference their real stack (languages, frameworks, cloud, domains) explicitly.
-- Include "star" only for behavioral questions. Include "codeHint" ONLY for coding questions — and for coding questions it must NEVER be null, at ANY depth level (short, medium, long).
-- Never invent facts about the candidate that are not in the resume; speak in guidance terms ("frame it around your X experience").
+- STRICT JSON only. No fences, preamble, or commentary.
+- Tailor every bullet to the candidate's ACTUAL resume + the job description; name their real stack.
+- "star" for behavioral only. "codeHint" for coding only — and for coding it is NEVER null, at ANY depth.
+- Never invent resume facts; advise ("frame it around your X experience").
 - Set responseLength to the requested level.
 
-CODE RULES (apply whenever the question is a programming/coding question, at EVERY depth level):
-- codeHint MUST contain the COMPLETE, working solution to the exact problem asked — not pseudo-code, not a one-line sketch.
-- Write real, runnable code in the language that best fits the question (default to the candidate's primary language from the resume; otherwise Python).
-- Include: the full function/class signature, the algorithm body, and a short inline comment for the key step.
-- Add the time and space complexity as a trailing comment (e.g. "# Time: O(n), Space: O(1)").
-- Keep it self-contained and copy-paste ready. Use "\\n" for line breaks inside the JSON string.
-- Even for SHORT depth, the code must be complete and correct — only the surrounding prose is shortened."""
+COMPARISON TABLE (difference / compare / contrast / vs questions, EVERY depth):
+- When the interviewer asks to compare, differentiate, or contrast two or more things, set "comparison" to a side-by-side table.
+- headers: first column a short label like "Aspect", then one column per thing compared (e.g. ["Aspect", "X", "Y"]).
+- rows: 4-6 rows, one per dimension (e.g. Definition, Key idea, Use case, Trade-offs, When to pick). Keep each cell 3-12 words, scannable.
+- Keep answerPoints as the spoken summary; the table is the visual aid. For non-comparison questions set "comparison": null.
+- Inside string values you MAY mark key terms with **double asterisks** and identifiers with `backticks` — they are plain characters and still valid JSON.
+
+HUMAN VOICE (sound like a person, not an AI):
+- Every bullet must be SAY OUT LOUD ready: plain spoken English, contractions OK, concrete verbs, real numbers/tools from the resume.
+- Vary openers; no back-to-back repetition, no listicle filler ("Firstly... Secondly... In conclusion...").
+- BANNED: "as an AI", "as a language model", "delve", "furthermore", "moreover", "in today's fast-paced", "landscape", "tapestry", "game-changer", "cutting-edge", "it's important to note", "in conclusion", "overall,". No hype adjectives ("crucial", "seamless") unless earned — name the service, metric, outcome.
+- "example" reads like a retold memory ("we hit... so I..."), not a textbook case.
+
+CODE RULES (coding questions, EVERY depth):
+- codeHint = COMPLETE working solution to the exact problem — never pseudo-code or sketches.
+- Runnable code in the best-fit language (resume's primary, else Python): full signature, algorithm body, one key-step comment, trailing time/space complexity ("# Time: O(n), Space: O(1)").
+- Self-contained, copy-paste ready ("\\n" for line breaks). SHORT still ships complete code — only prose shrinks."""
 
 
 def build_system_prompt(response_length: str = "medium") -> str:
@@ -80,6 +89,12 @@ CODING_KEYWORDS = [
     "graph", "dynamic programming", "recursion", "debug", "big o",
 ]
 
+COMPARISON_KEYWORDS = [
+    "difference", "differences", "compare", "comparison", "contrast",
+    "versus", " vs ", "distinguish", "differentiate", "pros and cons",
+    "which is better", "what is the difference",
+]
+
 
 TECHNICAL_STARTERS = (
     "who", "what", "when", "where", "why", "how", "which",
@@ -105,6 +120,48 @@ def _classify(question: str) -> str:
     return "technical"
 
 
+def _is_comparison(question: str) -> bool:
+    """True when the question asks to compare / differentiate two+ things."""
+    q = f" {question.lower().strip()} "
+    return any(k in q for k in COMPARISON_KEYWORDS)
+
+
+def _clean_term(s: str) -> str:
+    return re.sub(r"[?.,!]+$", "", (s or "").strip()).strip() or "Option"
+
+
+def _comparison_terms(question: str) -> tuple[str, str]:
+    """Best-effort split of a comparison question into its two sides."""
+    q = question.strip()
+    m = re.search(r"difference\s+between\s+(.+?)\s+and\s+(.+)", q, re.IGNORECASE)
+    if m:
+        return _clean_term(m.group(1)), _clean_term(m.group(2))
+    m = re.search(r"\b(?:compare|contrast)\s+(.+?)\s+(?:and|vs\.?|versus)\s+(.+)", q, re.IGNORECASE)
+    if m:
+        return _clean_term(m.group(1)), _clean_term(m.group(2))
+    m = re.search(r"\b(.+?)\s+(?:vs\.?|versus)\s+(.+)", q, re.IGNORECASE)
+    if m:
+        return _clean_term(m.group(1)), _clean_term(m.group(2))
+    return "Option A", "Option B"
+
+
+def _comparison_table(question: str) -> ComparisonTable | None:
+    """Build a side-by-side table for comparison questions (mock/demo)."""
+    if not _is_comparison(question):
+        return None
+    a, b = _comparison_terms(question)
+    return ComparisonTable(
+        headers=["Aspect", a, b],
+        rows=[
+            ["Definition", f"What {a} is, in one line", f"What {b} is, in one line"],
+            ["Key idea", "The core concept behind it", "The core concept behind it"],
+            ["Use case", "When it fits best", "When it fits best"],
+            ["Trade-offs", "Main cost or limitation", "Main cost or limitation"],
+            ["When to pick", f"Choose {a} when…", f"Choose {b} when…"],
+        ],
+    )
+
+
 def _extract_resume_skills(resume: str) -> list[str]:
     known = [
         "python", "java", "spring", "fastapi", "react", "angular", "typescript",
@@ -123,19 +180,93 @@ def _strip_code_fences(content: str) -> str:
     return content
 
 
+def _repair_json(text: str) -> str:
+    """Fix the most common LLM JSON slips (never drops content).
+
+    Reasoning models producing a nested structure (like the comparison table)
+    occasionally emit a missing or trailing comma, which strict ``json.loads``
+    rejects outright. These are safe, structural fixes only:
+    - trailing commas before ``}`` / ``]``
+    - a missing comma where a ``}`` or ``]`` is immediately followed by a key.
+    """
+    text = re.sub(r",\s*([}\]])", r"\1", text)  # trailing comma
+    text = re.sub(r"([}\]])\s*\"", r'\1, "', text)  # missing comma after }/]
+    return text
+
+
 def _extract_json(content: str) -> dict:
-    """Parse the model's reply into a dict, tolerating fences and preamble text."""
+    """Parse the model's reply into a dict, tolerating fences, preamble text
+    and the common missing/trailing-comma slips."""
     text = _strip_code_fences(content)
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-    # Some models prefix reasoning or a sentence before the JSON object.
     start = text.find("{")
     end = text.rfind("}")
-    if start != -1 and end > start:
-        return json.loads(text[start : end + 1])
-    raise ValueError(f"no JSON object in LLM response: {text[:120]}")
+    if start == -1 or end <= start:
+        raise ValueError(f"no JSON object in LLM response: {text[:120]}")
+    # Prefer the whole text (covers a clean object), then the substring.
+    for candidate in (text, text[start : end + 1]):
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            pass
+    # Repair common comma slips and retry both shapes.
+    for candidate in (_repair_json(text), _repair_json(text[start : end + 1])):
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            pass
+    raise ValueError(f"no valid JSON object in LLM response: {text[:160]}")
+
+
+def _extract_answer_points(buffer: str) -> list[str]:
+    """Completed `answerPoints` bullets inside a PARTIAL JSON stream.
+
+    Scans for the `"answerPoints": [...]` array and returns every fully
+    closed string element. An unterminated trailing string is ignored (more
+    deltas are still coming). Returns [] when the key/array isn't there yet,
+    so callers can simply diff by count and emit only new bullets.
+    """
+    key = '"answerPoints"'
+    idx = buffer.find(key)
+    if idx == -1:
+        return []
+    i = buffer.find("[", idx + len(key))
+    if i == -1:
+        return []
+    i += 1
+    points: list[str] = []
+    n = len(buffer)
+    while i < n:
+        while i < n and buffer[i] in " \t\r\n,":
+            i += 1
+        if i >= n or buffer[i] == "]":
+            break
+        if buffer[i] != '"':
+            i += 1  # tolerate unexpected chars; final validation is strict
+            continue
+        i += 1
+        cur: list[str] = []
+        closed = False
+        while i < n:
+            ch = buffer[i]
+            if ch == "\\" and i + 1 < n:
+                cur.append(ch)
+                cur.append(buffer[i + 1])
+                i += 2
+                continue
+            if ch == '"':
+                closed = True
+                i += 1
+                break
+            cur.append(ch)
+            i += 1
+        if not closed:
+            break  # incomplete trailing string — wait for more deltas
+        raw = '"' + "".join(cur) + '"'
+        try:
+            points.append(json.loads(raw))
+        except json.JSONDecodeError:
+            points.append("".join(cur))
+    return points
 
 
 class MockLLMProvider(LLMProvider):
@@ -156,9 +287,9 @@ class MockLLMProvider(LLMProvider):
 
         if qtype == "behavioral":
             core = [
-                f"Frame your answer with the STAR method, drawing on {skill_txt}.",
-                "Quantify impact: scope, actions you owned, measurable outcome.",
-                "Close by linking the lesson learned to this role's needs.",
+                f"Open with the STAR shape: one line of context from your {skill_txt} work, then what you personally owned.",
+                "Put a number on it — the scope, what you did, what moved because of it.",
+                "Land it by tying what you learned to what this role actually needs.",
             ]
             star = {
                 "situation": "Briefly set the context (team, project, stakes).",
@@ -167,25 +298,25 @@ class MockLLMProvider(LLMProvider):
                 "result": "Share the measurable result and what you learned.",
             }
             follows = [
-                "What would you do differently next time?",
-                "How did the team respond to your approach?",
+                "What would you do differently if it happened again?",
+                "How did the rest of the team react to your call?",
             ]
             extra = [
-                "Name the stakeholders involved and how you kept them informed.",
-                "Explain what made the situation difficult (ambiguity, scale, deadline).",
-                "Show your decision criteria: options considered and why you chose yours.",
+                "Name who was in the room and how you kept them posted — that's what makes the story believable.",
+                "Say what actually made it hard: the ambiguity, the scale, or the deadline.",
+                "Walk through the options you weighed and why you picked yours.",
             ]
             example = (
-                "Production incident on a payment service: error rate spiked after a "
-                f"config rollout in your {skill_txt} stack. You triaged with dashboards "
-                "and distributed tracing, identified the root cause, rolled back, then "
-                "added canary deploys and an SLO alert to prevent recurrence."
+                "Think of it like the time a payment service started erroring right "
+                f"after a config rollout in your {skill_txt} stack — you dug through "
+                "dashboards and traces, found it, rolled back, then added canary "
+                "deploys plus an SLO alert so it couldn't happen again."
             )
         elif qtype == "coding":
             core = [
-                "Clarify inputs, outputs, constraints, and edge cases first.",
-                "State a brute-force baseline then optimize; discuss time/space complexity.",
-                f"Leverage {skill_txt} idioms while writing clean, testable code.",
+                "Repeat the inputs, outputs, and edge cases back first — it buys thinking time and avoids wrong turns.",
+                "Start with the straightforward approach, then sharpen it; call out time and space as you go.",
+                f"Write it the way you would in your {skill_txt} day job — clean names, testable pieces.",
             ]
             star = None
             follows = [
@@ -193,9 +324,9 @@ class MockLLMProvider(LLMProvider):
                 "How would you handle very large inputs?",
             ]
             extra = [
-                "Discuss the data structure choice and why it beats the alternatives.",
-                "Handle duplicate/edge inputs explicitly before optimizing.",
-                "Mention how you would unit test this and what you'd assert.",
+                "Say why this data structure beats the obvious alternatives.",
+                "Call out duplicates and empty inputs before anyone has to ask.",
+                "Mention the one unit test you'd write first and what it would assert.",
             ]
             example = None
             # A complete, runnable solution — not pseudo-code. The exact problem
@@ -216,26 +347,26 @@ class MockLLMProvider(LLMProvider):
             )
         elif qtype == "general":
             core = [
-                "Give a concise 30-60 second answer tied to the role.",
-                f"Reference relevant strengths from {skill_txt}.",
-                "End with enthusiasm for the position.",
+                "Keep it to 30-60 seconds and aim it squarely at this role.",
+                f"Borrow one genuine strength from your {skill_txt} background.",
+                "Finish with why this position honestly interests you.",
             ]
             star = None
             follows = ["What interests you most about this role?"]
             extra = [
-                "Bridge your background to the job's core requirement in one line.",
-                "Mention one measurable outcome that proves the skill.",
+                "Bridge your background to the job's core need in a single line.",
+                "Back one claim with a real number or outcome.",
             ]
             example = None
             code_hint = None
         else:  # technical
             core = [
-                "Start with a one-sentence definition, then go one level deeper.",
-                f"Ground your answer in hands-on experience with {skill_txt}.",
+                "Give the one-line definition first, then go one level deeper — that's the whole opener.",
+                f"Tie each claim to something you've actually built with {skill_txt}.",
                 (
-                    f"Relate your answer to the job: {job_snippet}..."
+                    f"Close the loop to the role: {job_snippet}..."
                     if job_snippet
-                    else "Mention trade-offs and when you would choose alternatives."
+                    else "Say where this breaks down and what you'd pick instead."
                 ),
             ]
             star = None
@@ -244,15 +375,15 @@ class MockLLMProvider(LLMProvider):
                 "What are the trade-offs of this approach?",
             ]
             extra = [
-                "Explain the mechanism: components involved and the data flow.",
-                "Call out failure modes, trade-offs, and when NOT to pick this.",
-                "Compare against the most common alternative the interviewer has in mind.",
-                f"Weave in your {skill_txt} experience so it sounds practiced, not recited.",
+                "Explain the moving parts and how data flows between them.",
+                "Name the failure modes, and where you'd refuse to use this.",
+                "Stack it against the alternative the interviewer is probably thinking of.",
+                f"Drop in your {skill_txt} experience so it sounds lived-in, not rehearsed.",
             ]
             example = (
-                f"In a {skill_txt} based platform you applied this to a real workload, "
-                "measured the outcome, and improved reliability or throughput. Describe "
-                "the scale you handled and the numbers you moved."
+                f"Picture the {skill_txt} platform where you used this on a real workload, "
+                "measured it, and moved reliability or throughput — tell them the scale "
+                "you were at and the numbers that changed."
             )
             code_hint = None
 
@@ -295,6 +426,7 @@ class MockLLMProvider(LLMProvider):
             keyTakeaways=takeaways,
             followUpQuestions=follow_ups,
             responseLength=level,
+            comparison=_comparison_table(question),
         )
 
 
@@ -308,12 +440,60 @@ class OpenAICompatibleLLMProvider(LLMProvider):
     # Retry 429/5xx a couple of times before falling back to templates.
     max_retries = 2
 
-    def __init__(self, api_key: str = "", base_url: str = "", model: str = "") -> None:
+    @staticmethod
+    def _categorize_status(status: int, body: str = "") -> str:
+        """Map an HTTP status (+body) to a stable, reportable error category."""
+        low = body.lower()
+        if "insufficient_quota" in low or "billing" in low:
+            return "quota"
+        if status == 429:
+            return "rate_limit"
+        if status in (401, 403):
+            return "auth"
+        if status == 404:
+            return "not_found"
+        if status == 408:
+            return "timeout"
+        if status >= 500:
+            return "server"
+        return f"http_{status}"
+
+    def __init__(
+        self,
+        api_key: str = "",
+        base_url: str = "",
+        model: str = "",
+        name: str = "openai-compatible",
+    ) -> None:
         settings = get_settings()
         self.api_key = api_key or settings.llm_api_key
         self.base_url = (base_url or settings.llm_base_url).rstrip("/")
         self.model = model or settings.llm_model
+        self.name = name
         self._mock = MockLLMProvider()
+        # Usage telemetry (filled after each call; read by AIService for tracking).
+        self.last_latency_ms: float = 0.0
+        self.last_input_tokens: int | None = None
+        self.last_output_tokens: int | None = None
+        self.last_error_category: str | None = None
+        # True when the latest streaming call emitted at least one delta
+        # before finishing/failing (lets the caller pick single-shot retry).
+        self.stream_had_deltas: bool = False
+
+    def _headers(self) -> dict[str, str]:
+        """Auth (+ attribution OpenRouter asks for on its endpoint only)."""
+        headers = {"Authorization": f"Bearer {self.api_key}"}
+        if "openrouter" in self.base_url.lower():
+            # OpenRouter credits/requests ranking uses these; other providers
+            # ignore them, so they are sent only here.
+            try:
+                referer = get_settings().frontend_url
+            except Exception:
+                referer = ""
+            if referer:
+                headers["HTTP-Referer"] = referer
+            headers["X-Title"] = "OyeInterview"
+        return headers
 
     @staticmethod
     def _friendly_error(status: int, body: str, model: str = "") -> str:
@@ -343,17 +523,10 @@ class OpenAICompatibleLLMProvider(LLMProvider):
             )
         return f"LLM request failed (HTTP {status}). {detail}"
 
-    async def analyze_question(
-        self,
-        resume: str,
-        job_description: str,
-        question: str,
-        response_length: str = "medium",
-    ) -> AIInterviewResponse:
-        import asyncio
-        import time
-
-        level = response_length if response_length in LENGTH_RULES else "medium"
+    def _request_payload(
+        self, level: str, resume: str, job_description: str, question: str
+    ) -> tuple[dict, int]:
+        """Chat-completions body + token budget shared by single-shot/stream."""
         payload = {
             "model": self.model,
             # Longer answers benefit from a bit more creativity in phrasing.
@@ -371,9 +544,187 @@ class OpenAICompatibleLLMProvider(LLMProvider):
                 },
             ],
         }
-        # Token budgets — lowered so "long" still answers deeply but completes
-        # in a reasonable time on real providers (Groq, OpenAI, etc.).
-        max_tokens = {"short": 700, "medium": 1400, "long": 2000}.get(level, 1400)
+        # Shared caps (short answers never need a long tail).
+        max_tokens = MAX_TOKENS.get(level, 1400)
+        return payload, max_tokens
+
+    async def analyze_question_stream(
+        self,
+        resume: str,
+        job_description: str,
+        question: str,
+        response_length: str = "medium",
+        on_delta: Callable[[str], Awaitable[None]] | None = None,
+    ) -> AIInterviewResponse:
+        """SSE streaming variant: provisional bullets via ``on_delta``.
+
+        Emits one completed ``answerPoints`` bullet per callback as the JSON
+        streams in, then returns the same strictly-validated response as
+        :meth:`analyze_question`. Retries only while nothing was emitted yet
+        (a started stream can never resume) — after the first delta, any
+        failure raises so the caller can single-shot retry or fall back.
+        """
+        import asyncio
+        import time
+
+        if on_delta is None:
+            return await self.analyze_question(
+                resume, job_description, question, response_length
+            )
+        level = response_length if response_length in LENGTH_RULES else "medium"
+        payload, max_tokens = self._request_payload(
+            level, resume, job_description, question
+        )
+        body = {**payload, "max_tokens": max_tokens, "stream": True}
+        # NOTE: no stream_options.include_usage — tolerance on Gemini's
+        # OpenAI-compatible endpoint is unverified, so streamed token counts
+        # stay None (never estimated) instead of risking a rejected request.
+        logger.info(
+            "LLM stream request: model=%s level=%s max_tokens=%d qlen=%d",
+            self.model, level, max_tokens, len(question)
+        )
+        t0 = time.perf_counter()
+        self.stream_had_deltas = False
+        self.last_input_tokens = None
+        self.last_output_tokens = None
+        timeout = httpx.Timeout(connect=15.0, read=60.0, write=15.0, pool=15.0)
+        try:
+            async with shared_http() as client:
+                last_exc: Exception | None = None
+                for attempt in range(self.max_retries + 1):
+                    # A started stream can never resume — retry pre-delta only.
+                    if attempt > 0 and self.stream_had_deltas:
+                        break
+                    try:
+                        async with client.stream(
+                            "POST",
+                            f"{self.base_url}/chat/completions",
+                            headers=self._headers(),
+                            json=body,
+                            timeout=timeout,
+                        ) as resp:
+                            if resp.status_code >= 400:
+                                await resp.aread()
+                                raise httpx.HTTPStatusError(
+                                    f"HTTP {resp.status_code}",
+                                    request=resp.request,
+                                    response=resp,
+                                )
+                            buffer = ""
+                            sent = 0
+                            async for line in resp.aiter_lines():
+                                if not line.startswith("data:"):
+                                    continue
+                                data = line[5:].strip()
+                                if not data or data == "[DONE]":
+                                    continue
+                                try:
+                                    chunk = json.loads(data)
+                                except json.JSONDecodeError:
+                                    continue
+                                try:
+                                    choices = chunk.get("choices") or [{}]
+                                    delta = (
+                                        choices[0].get("delta", {}).get("content")
+                                        or ""
+                                    )
+                                except (AttributeError, IndexError, TypeError):
+                                    continue
+                                if not delta:
+                                    continue
+                                buffer += delta
+                                for point in _extract_answer_points(buffer)[sent:]:
+                                    sent += 1
+                                    self.stream_had_deltas = True
+                                    await on_delta(point)
+                            content = buffer.strip()
+                            self.last_latency_ms = (time.perf_counter() - t0) * 1000
+                            self.last_error_category = "ok"
+                            if not content:
+                                raise ValueError("LLM returned an empty response")
+                            data = _extract_json(content)
+                            data.setdefault("question", question)
+                            data["responseLength"] = level
+                            logger.info(
+                                "LLM stream ok: %.2fs, %d points",
+                                time.perf_counter() - t0,
+                                len(data.get("answerPoints", [])),
+                            )
+                            return AIInterviewResponse(**data)
+                    except httpx.HTTPStatusError as exc:
+                        last_exc = exc
+                        status = exc.response.status_code
+                        try:
+                            err_body = exc.response.text or ""
+                        except Exception:
+                            err_body = ""
+                        self.last_error_category = self._categorize_status(
+                            status, err_body
+                        )
+                        self.last_latency_ms = (time.perf_counter() - t0) * 1000
+                        if (
+                            status in (429, 500, 502, 503, 504)
+                            and attempt < self.max_retries
+                            and not self.stream_had_deltas
+                        ):
+                            wait = 1.5 * (2**attempt)
+                            logger.warning(
+                                "LLM stream %s — retrying in %.1fs (attempt %d/%d)",
+                                status, wait, attempt + 1, self.max_retries,
+                            )
+                            await asyncio.sleep(wait)
+                            continue
+                        raise LLMQuotaError(
+                            self._friendly_error(status, err_body, self.model)
+                        ) from exc
+                    except (httpx.TimeoutException, httpx.RequestError) as exc:
+                        last_exc = exc
+                        self.last_error_category = (
+                            "timeout"
+                            if isinstance(exc, httpx.TimeoutException)
+                            else "network"
+                        )
+                        self.last_latency_ms = (time.perf_counter() - t0) * 1000
+                        if attempt < self.max_retries and not self.stream_had_deltas:
+                            await asyncio.sleep(1.5 * (2**attempt))
+                            continue
+                        raise LLMQuotaError(
+                            "Unable to reach the AI service."
+                        ) from exc
+                raise LLMQuotaError(
+                    self._friendly_error(429, str(last_exc), self.model)
+                )
+        except LLMQuotaError:
+            raise  # caller decides: single-shot retry or template fallback
+        except Exception as exc:
+            # Unusable stream content (empty or malformed JSON). One single-shot
+            # retry often salvages a valid answer (the repair path in
+            # _extract_json fixes common comma slips) — only then templates.
+            self.last_error_category = "bad_response"
+            self.last_latency_ms = (time.perf_counter() - t0) * 1000
+            logger.warning(
+                "LLM stream unusable (%.2fs), retrying single-shot: %s",
+                time.perf_counter() - t0, exc,
+            )
+            try:
+                return await self.analyze_question(
+                    resume, job_description, question, response_length
+                )
+            except Exception:
+                return await self._mock.analyze_question(resume, job_description, question)
+
+    async def analyze_question(
+        self,
+        resume: str,
+        job_description: str,
+        question: str,
+        response_length: str = "medium",
+    ) -> AIInterviewResponse:
+        import asyncio
+        import time
+
+        level = response_length if response_length in LENGTH_RULES else "medium"
+        payload, max_tokens = self._request_payload(level, resume, job_description, question)
         logger.info(
             "LLM request: model=%s level=%s max_tokens=%d timeout=15s qlen=%d",
             self.model, level, max_tokens, len(question)
@@ -381,15 +732,17 @@ class OpenAICompatibleLLMProvider(LLMProvider):
         t0 = time.perf_counter()
         try:
             # Total per-attempt timeout. 30s felt like "stuck UI"; 15s keeps it
-            # snappy while still allowing big completions.
-            async with httpx.AsyncClient(timeout=15.0) as client:
+            # snappy while still allowing big completions. Connection reused
+            # via the shared pool (no per-call TLS handshake).
+            async with shared_http() as client:
                 last_exc: Exception | None = None
                 for attempt in range(self.max_retries + 1):
                     try:
                         resp = await client.post(
                             f"{self.base_url}/chat/completions",
-                            headers={"Authorization": f"Bearer {self.api_key}"},
+                            headers=self._headers(),
                             json={**payload, "max_tokens": max_tokens},
+                            timeout=15.0,
                         )
                         if resp.status_code >= 400:
                             raise httpx.HTTPStatusError(
@@ -397,9 +750,17 @@ class OpenAICompatibleLLMProvider(LLMProvider):
                                 request=resp.request,
                                 response=resp,
                             )
-                        choice = resp.json()["choices"][0]
+                        body_json = resp.json()
+                        choice = body_json["choices"][0]
                         message = choice.get("message") or {}
                         content = (message.get("content") or "").strip()
+                        # Capture provider-reported usage (never fabricated —
+                        # absent values stay None).
+                        usage = (body_json.get("usage") or {})
+                        self.last_input_tokens = usage.get("prompt_tokens")
+                        self.last_output_tokens = usage.get("completion_tokens")
+                        self.last_latency_ms = (time.perf_counter() - t0) * 1000
+                        self.last_error_category = "ok"
                         # Reasoning-capable models can return empty content
                         # when they spend the whole budget thinking.
                         if not content:
@@ -415,6 +776,9 @@ class OpenAICompatibleLLMProvider(LLMProvider):
                                 continue
                             raise ValueError("LLM returned an empty response")
                         data = _extract_json(content)
+                        # The backend asked the question, so it is the authority
+                        # when the model doesn't echo it back verbatim.
+                        data.setdefault("question", question)
                         # Trust our request over the model's self-report so the
                         # UI always reflects the level the user actually chose.
                         data["responseLength"] = level
@@ -425,6 +789,8 @@ class OpenAICompatibleLLMProvider(LLMProvider):
                         last_exc = exc
                         status = exc.response.status_code
                         body = exc.response.text or ""
+                        self.last_error_category = self._categorize_status(status, body)
+                        self.last_latency_ms = (time.perf_counter() - t0) * 1000
                         # Retry transient limits/server errors only.
                         if status in (429, 500, 502, 503, 504) and attempt < self.max_retries:
                             wait = 1.5 * (2**attempt)
@@ -442,6 +808,10 @@ class OpenAICompatibleLLMProvider(LLMProvider):
                         ) from exc
                     except (httpx.TimeoutException, httpx.RequestError) as exc:
                         last_exc = exc
+                        self.last_error_category = (
+                            "timeout" if isinstance(exc, httpx.TimeoutException) else "network"
+                        )
+                        self.last_latency_ms = (time.perf_counter() - t0) * 1000
                         if attempt < self.max_retries:
                             logger.warning("LLM network error (%s) — retrying", exc)
                             await asyncio.sleep(1.5 * (2**attempt))
@@ -453,7 +823,10 @@ class OpenAICompatibleLLMProvider(LLMProvider):
         except LLMQuotaError:
             raise  # caller decides: surface a message or fall back
         except Exception as exc:
-            # Malformed JSON / schema mismatch: safe to fall back silently.
+            # Malformed JSON / schema mismatch: safe to fall back to templates,
+            # but record WHY so usage stats distinguish it from quota errors.
+            self.last_error_category = "bad_response"
+            self.last_latency_ms = (time.perf_counter() - t0) * 1000
             logger.warning("LLM response unusable (%.2fs), falling back to mock: %s",
                            time.perf_counter() - t0, exc)
             return await self._mock.analyze_question(resume, job_description, question)

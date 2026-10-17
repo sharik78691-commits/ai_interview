@@ -1,0 +1,72 @@
+<div class="container pricing">
+  <header class="pricing-head">
+    <h1>Simple, honest pricing</h1>
+    <p class="muted lead">
+      Real-time AI interview guidance for as long as you need it. Pick a plan,
+      cancel anytime. All prices are in Indian Rupees (₹) and include GST where
+      applicable.
+    </p>
+  </header>
+
+  <div class="plans">
+    @for (p of plans; track p.key) {
+      <article class="plan" [class.highlight]="p.highlight">
+        @if (p.badge) {
+          <span class="plan-badge">{{ p.badge }}</span>
+        }
+        <h2>{{ p.name }}</h2>
+        <div class="price">
+          <span class="amount">{{ inr(p.price) }}</span>
+          <span class="per">/ {{ p.perLabel }}</span>
+        </div>
+        <p class="tagline muted">{{ p.tagline }}</p>
+        <ul class="feats">
+          @for (f of p.features; track f) {
+            <li>✓ {{ f }}</li>
+          }
+        </ul>
+        <p class="renew muted small">↻ {{ p.renews }}</p>
+        <a routerLink="/register" class="cta" [class.primary]="p.highlight">
+          {{ p.highlight ? 'Choose ' + p.name : 'Get ' + p.name }}
+        </a>
+      </article>
+    }
+  </div>
+
+  <section class="billing-note banner info">
+    <strong>Automatic renewal:</strong> every plan renews automatically for the
+    same duration at the same price so your coverage never lapses mid-interview.
+    You can cancel the renewal anytime from your account settings, and your
+    current period stays active until its end date.
+  </section>
+
+  <section class="include">
+    <h2>Every plan includes</h2>
+    <div class="grid3">
+      <div class="card"><h3>⚡ Real-time guidance</h3><p class="muted">Answers appear while the interviewer is asking — not after.</p></div>
+      <div class="card"><h3>📄 Resume-aware</h3><p class="muted">Every suggestion is grounded in your resume and target role.</p></div>
+      <div class="card"><h3>🎙 Live transcription</h3><p class="muted">Meeting or tab audio is transcribed to detect questions automatically.</p></div>
+      <div class="card"><h3>🧠 Multiple AI models</h3><p class="muted">Choose between Groq, Gemini, Qwen and OpenRouter free models.</p></div>
+      <div class="card"><h3>🔒 Private by design</h3><p class="muted">Mic audio is transcribed in your browser; only question text is sent.</p></div>
+      <div class="card"><h3>🔄 Cancel anytime</h3><p class="muted">No lock-in — stop auto-renewal whenever you want.</p></div>
+    </div>
+  </section>
+
+  <section class="faqs">
+    <h2>Billing questions</h2>
+    <details class="card faq"><summary>How does auto-renewal work?</summary><p class="muted">When your current period ends, the same plan renews automatically at the same price. We send a reminder before each renewal and you can cancel it anytime.</p></details>
+    <details class="card faq"><summary>Can I cancel auto-renewal?</summary><p class="muted">Yes. Go to your account settings and turn off auto-renewal. You keep access until the end of the current period — no partial-day charges.</p></details>
+    <details class="card faq"><summary>What payment methods do you accept?</summary><p class="muted">UPI, debit and credit cards, and net banking, processed securely by Razorpay and Cashfree. We never store your full card details.</p></details>
+    <details class="card faq"><summary>Can I get a refund?</summary><p class="muted">OyeInterview is a digital service delivered instantly, so refunds follow our Refund &amp; Cancellation Policy. Please review it before purchasing.</p></details>
+    <details class="card faq"><summary>Do prices include taxes?</summary><p class="muted">Yes — listed prices include GST where applicable. The final amount shown at checkout is the amount you pay.</p></details>
+  </section>
+
+  <footer class="pricing-foot muted small">
+    <p>
+      By subscribing you agree to our
+      <a routerLink="/terms-and-conditions">Terms and Conditions</a>,
+      <a routerLink="/privacy-policy">Privacy Policy</a>, and
+      <a routerLink="/refund-policy">Refund &amp; Cancellation Policy</a>.
+    </p>
+  </footer>
+</div>

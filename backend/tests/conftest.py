@@ -23,9 +23,12 @@ from app.main import app  # noqa: E402
 @pytest.fixture(autouse=True)
 def _fresh_db():
     """Recreate the schema and clear rate-limit buckets for every test."""
+    from app.providers.llm import registry as _llm_registry
+
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     reset_rate_limits()
+    _llm_registry.invalidate_model_overrides()
     yield
     Base.metadata.drop_all(bind=engine)
 

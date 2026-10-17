@@ -23,6 +23,12 @@ export interface StarBreakdown {
 
 export type ResponseLength = 'short' | 'medium' | 'long';
 
+/** Side-by-side comparison table for "difference / compare" questions. */
+export interface ComparisonTable {
+  headers: string[];
+  rows: string[][];
+}
+
 export interface AIInterviewResponse {
   question: string;
   questionType: string;
@@ -33,6 +39,7 @@ export interface AIInterviewResponse {
   keyTakeaways?: string[];
   followUpQuestions: string[];
   responseLength?: ResponseLength;
+  comparison?: ComparisonTable | null;
 }
 
 export interface TranscriptEntry {

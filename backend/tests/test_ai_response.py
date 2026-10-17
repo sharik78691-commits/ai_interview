@@ -74,7 +74,7 @@ async def test_quota_error_falls_back_with_warning() -> None:
     import app.services.ai_service as svc_mod
 
     original = svc_mod.get_llm_provider
-    svc_mod.get_llm_provider = lambda: Boom()
+    svc_mod.get_llm_provider = lambda model_key=None: Boom()
     try:
         service = AIService(resume_text="Java dev", job_description="Java role")
         resp = await service.analyze("What is a Saga pattern?")
@@ -147,3 +147,87 @@ async def test_short_factual_is_technical() -> None:
     for q in ("what is Java", "what is AWS", "is Java free"):
         resp = await provider.analyze_question("Java AWS resume", "Java role", q)
         assert resp.questionType == "technical", q
+
+
+def test_prompt_requires_human_voice() -> None:
+    """The shared system prompt must carry the human-voice rules (all 4
+    live providers use it)."""
+    from app.providers.llm.provider import build_system_prompt
+
+    prompt = build_system_prompt("medium")
+    assert "HUMAN VOICE" in prompt
+    assert "SAY OUT LOUD" in prompt
+    assert "BANNED" in prompt
+
+
+def test_prompt_requires_comparison_table() -> None:
+    """The system prompt must instruct a side-by-side table for comparisons."""
+    from app.providers.llm.provider import build_system_prompt
+
+    prompt = build_system_prompt("medium")
+    assert "COMPARISON TABLE" in prompt
+    assert '"comparison"' in prompt
+
+
+async def test_mock_comparison_question_has_table() -> None:
+    provider = MockLLMProvider()
+    resp = await provider.analyze_question(
+        "resume", "job", "What is the difference between SQL and NoSQL?"
+    )
+    assert resp.comparison is not None
+    assert resp.comparison.headers == ["Aspect", "SQL", "NoSQL"]
+    assert len(resp.comparison.rows) >= 3
+
+
+async def test_mock_non_comparison_has_no_table() -> None:
+    provider = MockLLMProvider()
+    resp = await provider.analyze_question(
+        "resume", "job", "Can you explain the Saga pattern in microservices?"
+    )
+    assert resp.comparison is None
+
+
+async def test_comparison_schema_roundtrip() -> None:
+    """comparison serializes/deserializes cleanly through Pydantic."""
+    from app.models.ai_response import ComparisonTable
+
+    t = ComparisonTable(headers=["Aspect", "A", "B"], rows=[["X", "1", "2"]])
+    data = t.model_dump()
+    assert ComparisonTable(**data) == t
+
+
+async def test_mock_has_no_ai_tells() -> None:
+    """Mock/demo guidance must read human — no robotic AI-tell phrases in
+    any branch or depth level."""
+    provider = MockLLMProvider()
+    banned = [
+        "as an ai", "as a language model", "delve", "furthermore", "moreover",
+        "in today's fast-paced", "landscape", "tapestry", "game-changer",
+        "cutting-edge", "it's important to note", "in conclusion",
+    ]
+    questions = [
+        "Can you explain the Saga pattern in microservices?",  # technical
+        "Tell me about a time you faced a difficult challenge?",  # behavioral
+        "Write a function to reverse a binary tree?",  # coding
+        "What is your greatest strength?",  # general
+    ]
+    for q in questions:
+        for level in ("short", "medium", "long"):
+            resp = await provider.analyze_question(
+                "Python AWS developer", "Backend role", q, level
+            )
+            blob = " ".join(
+                [
+                    *resp.answerPoints,
+                    resp.example or "",
+                    *(resp.keyTakeaways or []),
+                    *(resp.followUpQuestions or []),
+                ]
+            ).lower()
+            for phrase in banned:
+                assert phrase not in blob, f"{phrase!r} in {resp.questionType}/{level}"
+            # No two bullets opening the same way (listicle monotony).
+            openers = [p.split()[0].lower().strip(",;:") for p in resp.answerPoints]
+            assert len(set(openers)) == len(openers), (
+                resp.questionType, level, resp.answerPoints
+            )

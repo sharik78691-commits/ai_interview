@@ -5,6 +5,47 @@
 .demo-badge { font-size: .65rem; font-weight: 800; letter-spacing: .08em; background: rgba(110,139,255,.15); border: 1px solid rgba(110,139,255,.4); color: #b9c6ff; padding: 2px 8px; border-radius: 999px; }
 .live-badge { font-size: .65rem; font-weight: 800; letter-spacing: .08em; background: rgba(52,211,153,.15); border: 1px solid rgba(52,211,153,.5); color: #6ee7b7; padding: 2px 8px; border-radius: 999px; }
 .off-badge { font-size: .65rem; font-weight: 800; letter-spacing: .08em; background: rgba(248,113,113,.12); border: 1px solid rgba(248,113,113,.5); color: #fca5a5; padding: 2px 8px; border-radius: 999px; }
+/* Desktop-only auto-invisible notice: soft pulsing pill (calm glow, not a harsh blink). */
+.invis-flash {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: .65rem; font-weight: 800; letter-spacing: .06em;
+  color: #c4b5fd; background: rgba(139,92,246,.12);
+  border: 1px solid rgba(139,92,246,.45); border-radius: 999px;
+  padding: 3px 10px; white-space: nowrap;
+  animation: invis-glow 2.4s ease-in-out infinite;
+}
+.invis-dot {
+  width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
+  background: #a78bfa;
+  animation: invis-dot-pulse 2.4s ease-in-out infinite;
+}
+@keyframes invis-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(139,92,246,0); border-color: rgba(139,92,246,.45); }
+  50% { box-shadow: 0 0 12px 1px rgba(139,92,246,.35); border-color: rgba(139,92,246,.8); }
+}
+@keyframes invis-dot-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: .45; transform: scale(.8); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .invis-flash, .invis-dot { animation: none; }
+}
+/* Desktop-only hotkey hint: muted kbd keys + action label. Static (no flash)
+   so it reads as a helper next to the glowing invisibility badge. */
+.hotkey-hint {
+  display: inline-flex; align-items: center; gap: 3px;
+  font-size: .65rem; font-weight: 600;
+  color: var(--muted); white-space: nowrap;
+}
+.hotkey-hint kbd {
+  font-family: inherit; font-size: .62rem; font-weight: 700;
+  color: var(--text);
+  background: rgba(255,255,255,.07);
+  border: 1px solid var(--border-strong);
+  border-bottom-width: 2px; border-radius: 5px;
+  padding: 1px 5px; line-height: 1.4;
+}
+.hotkey-action { margin-left: 3px; letter-spacing: .02em; }
 .links { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }.links a { padding: 8px 14px; border-radius: 8px; font-size: .9rem; font-weight: 600; color: var(--muted); }
 .links a:hover { background: rgba(255,255,255,.06); color: var(--text); }
 .links a.active { background: rgba(110,139,255,.14); color: #c9d4ff; }
@@ -36,6 +77,8 @@
 .signin-link { padding: 8px 14px; border-radius: 8px; font-size: .9rem; font-weight: 600; color: var(--accent); }
 @media (max-width: 560px) {
   .brand { font-size: .85rem; }
+  .invis-flash { font-size: .58rem; padding: 2px 8px; }
+  .hotkey-action { display: none; }
   .links a { padding: 8px 7px; font-size: .78rem; }
   .theme-btn { width: 32px; height: 32px; margin-left: 2px; font-size: .95rem; }
   .nav-inner { flex-wrap: wrap; height: auto; min-height: 62px; padding-top: 8px; padding-bottom: 8px; row-gap: 4px; }

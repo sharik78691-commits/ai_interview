@@ -103,6 +103,10 @@
   flex-wrap: wrap;
 }
 .desktop-head h3 { margin-bottom: 0; }
+/* Compact updater placeholder (desktop build only). */
+.update-card { padding: 16px 20px; }
+.update-card .dl-row { margin-top: 0; }
+.update-card button[disabled] { cursor: not-allowed; opacity: .55; }
 .ver {
   font-size: 0.7rem;
   font-weight: 700;

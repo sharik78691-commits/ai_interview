@@ -1,17 +1,20 @@
 import { Routes } from '@angular/router';
 import { adminGuard, authGuard, guestGuard } from './core/auth/auth.guard';
 import { interviewGuard } from './core/guards/interview.guard';
-import { AdminComponent } from './features/admin/admin.component';
 import { DashboardComponent } from './features/dashboard/dashboard.component';
 import { InterviewComponent } from './features/interview/interview.component';
 import { LandingComponent } from './features/landing/landing.component';
-import { SettingsComponent } from './features/settings/settings.component';
-import { ForgotPasswordComponent } from './features/auth/forgot-password/forgot-password.component';
 import { LoginComponent } from './features/auth/login/login.component';
 import { RegisterComponent } from './features/auth/register/register.component';
-import { ResetPasswordComponent } from './features/auth/reset-password/reset-password.component';
-import { TermsComponent } from './features/legal/terms/terms.component';
 
+/**
+ * Route map.
+ *
+ * The landing, auth, dashboard and interview routes stay eagerly loaded —
+ * they sit on the critical path (first paint + the core flow). Everything
+ * else (admin, settings, legal, pricing, contact, password-recovery) is
+ * lazy-loaded so the initial bundle stays small and the app starts fast.
+ */
 export const routes: Routes = [
   {
     path: '',
@@ -55,7 +58,10 @@ export const routes: Routes = [
   },
   {
     path: 'forgot-password',
-    component: ForgotPasswordComponent,
+    loadComponent: () =>
+      import('./features/auth/forgot-password/forgot-password.component').then(
+        (m) => m.ForgotPasswordComponent,
+      ),
     canActivate: [guestGuard],
     data: {
       seo: {
@@ -68,7 +74,10 @@ export const routes: Routes = [
   },
   {
     path: 'reset-password',
-    component: ResetPasswordComponent,
+    loadComponent: () =>
+      import('./features/auth/reset-password/reset-password.component').then(
+        (m) => m.ResetPasswordComponent,
+      ),
     data: {
       seo: {
         title: 'Set a new password — OyeInterview',
@@ -107,7 +116,8 @@ export const routes: Routes = [
   },
   {
     path: 'settings',
-    component: SettingsComponent,
+    loadComponent: () =>
+      import('./features/settings/settings.component').then((m) => m.SettingsComponent),
     canActivate: [authGuard],
     data: {
       seo: {
@@ -122,7 +132,8 @@ export const routes: Routes = [
   // non-admins to /dashboard. Kept out of the search index.
   {
     path: 'admin',
-    component: AdminComponent,
+    loadComponent: () =>
+      import('./features/admin/admin.component').then((m) => m.AdminComponent),
     canActivate: [authGuard, adminGuard],
     data: {
       seo: {
@@ -133,16 +144,69 @@ export const routes: Routes = [
       },
     },
   },
-  // Public legal page — indexed for SEO.
+  // Public legal pages — indexed for SEO.
   {
     path: 'terms-and-conditions',
-    component: TermsComponent,
+    loadComponent: () =>
+      import('./features/legal/terms/terms.component').then((m) => m.TermsComponent),
     data: {
       seo: {
         title: 'Terms and Conditions — OyeInterview',
         description:
           'The terms and conditions for OyeInterview, the real-time AI interview assistant: account eligibility, licence, responsible use, and liability.',
         path: '/terms-and-conditions',
+      },
+    },
+  },
+  {
+    path: 'privacy-policy',
+    loadComponent: () =>
+      import('./features/legal/privacy/privacy.component').then((m) => m.PrivacyComponent),
+    data: {
+      seo: {
+        title: 'Privacy Policy — OyeInterview',
+        description:
+          'How OyeInterview collects, uses, and protects your data — including payment processing by Razorpay and Cashfree.',
+        path: '/privacy-policy',
+      },
+    },
+  },
+  {
+    path: 'refund-policy',
+    loadComponent: () =>
+      import('./features/legal/refund/refund.component').then((m) => m.RefundComponent),
+    data: {
+      seo: {
+        title: 'Refund & Cancellation Policy — OyeInterview',
+        description:
+          'How cancellations, auto-renewal, and refunds work for OyeInterview subscriptions.',
+        path: '/refund-policy',
+      },
+    },
+  },
+  {
+    path: 'pricing',
+    loadComponent: () =>
+      import('./features/pricing/pricing.component').then((m) => m.PricingComponent),
+    data: {
+      seo: {
+        title: 'Pricing — OyeInterview AI Interview Assistant',
+        description:
+          'Simple OyeInterview pricing: 3 days ₹150, 7 days ₹300, 1 month ₹900, 3 months ₹2000. Auto-renewing, cancel anytime.',
+        path: '/pricing',
+      },
+    },
+  },
+  {
+    path: 'contact',
+    loadComponent: () =>
+      import('./features/contact/contact.component').then((m) => m.ContactComponent),
+    data: {
+      seo: {
+        title: 'Contact Us — OyeInterview',
+        description:
+          'Contact OyeInterview support for billing, subscription, and product questions.',
+        path: '/contact',
       },
     },
   },

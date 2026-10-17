@@ -118,7 +118,7 @@ class TestSTTProviders:
                 assert url == "https://x/v1/audio/transcriptions"
                 return response
 
-        with patch("httpx.AsyncClient", return_value=FakeClient()):
+        with patch("app.providers.stt.provider.shared_http", return_value=FakeClient()):
             text = await p.transcribe(b"fake-audio", mime_type="audio/webm")
         assert text == "Can you explain the Saga pattern?"
 
@@ -281,7 +281,7 @@ class TestSTTReliability:
                 _response(200),
             ]
         )
-        with patch("httpx.AsyncClient", new=client):
+        with patch("app.providers.stt.provider.shared_http", new=client):
             text = await p.transcribe(b"wav-bytes")
         assert text == "Can you explain the Saga pattern?"
         assert client.calls == 2  # retried once, then succeeded
@@ -291,7 +291,7 @@ class TestSTTReliability:
         client = _ClientFactory(
             [_response(429, "slow down", {"Retry-After": "7"})] * 3
         )
-        with patch("httpx.AsyncClient", new=client), patch(
+        with patch("app.providers.stt.provider.shared_http", new=client), patch(
             "app.providers.stt.provider.asyncio.sleep", new=AsyncMock()
         ) as sleep:
             with pytest.raises(STTRequestError):
@@ -301,7 +301,7 @@ class TestSTTReliability:
     async def test_retries_server_error_then_succeeds(self) -> None:
         p = GroqWhisperSTTProvider(api_key="k", base_url="https://x/v1", model="whisper")
         client = _ClientFactory([_response(503, "overloaded"), _response(200)])
-        with patch("httpx.AsyncClient", new=client), patch(
+        with patch("app.providers.stt.provider.shared_http", new=client), patch(
             "app.providers.stt.provider.asyncio.sleep", new=AsyncMock()
         ):
             assert await p.transcribe(b"wav") == "Can you explain the Saga pattern?"
@@ -310,7 +310,7 @@ class TestSTTReliability:
     async def test_gives_up_after_max_attempts(self) -> None:
         p = GroqWhisperSTTProvider(api_key="k", base_url="https://x/v1", model="whisper")
         client = _ClientFactory([_response(429, "rate limited"), _response(429), _response(429)])
-        with patch("httpx.AsyncClient", new=client), patch(
+        with patch("app.providers.stt.provider.shared_http", new=client), patch(
             "app.providers.stt.provider.asyncio.sleep", new=AsyncMock()
         ):
             with pytest.raises(STTRequestError):
@@ -323,7 +323,7 @@ class TestSTTReliability:
         client = _ClientFactory(
             [_response(400, '{"error":{"message":"could not process file - is it a valid media file?"}}')]
         )
-        with patch("httpx.AsyncClient", new=client):
+        with patch("app.providers.stt.provider.shared_http", new=client):
             with pytest.raises(STTRequestError) as exc:
                 await p.transcribe(b"bad-bytes")
         assert client.calls == 1

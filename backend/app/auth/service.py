@@ -15,7 +15,6 @@ from sqlalchemy.orm import Session
 from app.auth.password import dummy_verify, hash_password, needs_rehash, verify_password
 from app.core.config import get_settings
 from app.models.user import PasswordResetToken, RevokedSession, User
-from app.services.activity import log_event
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +109,6 @@ def register_user(db: Session, email: str, password: str, name: str = "") -> Use
     db.add(user)
     db.commit()
     db.refresh(user)
-    log_event("user_registered", user.id)
     return user
 
 
@@ -135,7 +133,6 @@ def authenticate_local(db: Session, identifier: str, password: str) -> User | No
     user.login_count = (user.login_count or 0) + 1
     db.commit()
     db.refresh(user)
-    log_event("user_login", user.id)
     return user
 
 
@@ -165,7 +162,6 @@ def upsert_google_user(
             user.name = name
         db.commit()
         db.refresh(user)
-        log_event("user_login", user.id)
         return user
 
     existing = get_user_by_email(db, email)
@@ -179,7 +175,6 @@ def upsert_google_user(
         existing.login_count = (existing.login_count or 0) + 1
         db.commit()
         db.refresh(existing)
-        log_event("user_login", existing.id)
         return existing
 
     user = User(
@@ -196,7 +191,6 @@ def upsert_google_user(
     db.add(user)
     db.commit()
     db.refresh(user)
-    log_event("user_login", user.id)
     return user
 
 

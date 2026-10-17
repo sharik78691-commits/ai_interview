@@ -202,6 +202,37 @@ def _ensure_resume_columns() -> None:
                 logger.warning("Could not backfill resumes.user_email (%s)", exc)
 
 
+def _drop_activity_noise_columns() -> None:
+    """Drop the removed page-analytics columns from ``activity_log``.
+
+    The business-owner lean cut stopped storing per-request visits, clicks,
+    dwell time, GeoIP and device data. Existing databases still carry those
+    columns, so this removes them idempotently (SQLite 3.35+ and PostgreSQL
+    both support ``DROP COLUMN``). Old rows are NOT deleted — their value is
+    preserved via the remaining columns, and the removed ones become NULL.
+    """
+    from sqlalchemy import inspect
+
+    try:
+        existing = {c["name"] for c in inspect(engine).get_columns("activity_log")}
+    except Exception as exc:
+        logger.warning("Could not inspect activity_log (%s); skipping column cleanup", exc)
+        return
+    removed = [
+        "ip_hash", "country", "region", "city", "path", "method",
+        "label", "target", "seconds", "user_agent",
+    ]
+    with engine.begin() as conn:
+        for name in removed:
+            if name not in existing:
+                continue
+            try:
+                logger.info("Dropping unused column activity_log.%s", name)
+                conn.execute(text(f"ALTER TABLE activity_log DROP COLUMN {name}"))
+            except Exception as exc:
+                logger.warning("Could not drop activity_log.%s (%s)", name, exc)
+
+
 def init_db() -> None:
     """Create the database (when missing), all tables, and missing columns.
 
@@ -210,14 +241,15 @@ def init_db() -> None:
     _ensure_postgres_database(settings.database_url)
     # Imported for side effects (model registration) — do not remove.
     from app.models import user as _user  # noqa: F401
-    from app.models import visit as _visit  # noqa: F401
-    from app.models import event as _event  # noqa: F401
+    from app.models import activity_log as _activity  # noqa: F401
+    from app.models import ai_model_config as _aim  # noqa: F401
     from app.models import resume_record as _resumes  # noqa: F401
     from app.models import target_role as _roles  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
     _ensure_user_columns()
     _ensure_resume_columns()
+    _drop_activity_noise_columns()
     # Seed the admin login when ADMIN_PASSWORD is configured (idempotent).
     from app.auth.service import ensure_admin
 

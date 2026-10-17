@@ -18,15 +18,17 @@ import { InterviewWsService } from '../../core/services/interview-ws.service';
 import { QuestionDetectorService } from '../../core/services/question-detector.service';
 import { ResumeService } from '../../core/services/resume.service';
 import { SettingsService } from '../../core/services/settings.service';
+import { AiModelsService } from '../../core/services/ai-models.service';
+import { AiModel } from '../../core/models/ai-models';
 import { TranscriptionService } from '../../core/services/transcription.service';
 import { ErrorBannerComponent } from '../../shared/components/error-banner/error-banner.component';
 import { TimeFormatPipe } from '../../shared/pipes/time-format.pipe';
-import type { CopilotPayload } from '../../core/services/electron-bridge';
+import { RichTextPipe } from '../../shared/pipes/rich-text.pipe';
 
 @Component({
   selector: 'app-interview',
   standalone: true,
-  imports: [FormsModule, ErrorBannerComponent, TimeFormatPipe],
+  imports: [FormsModule, ErrorBannerComponent, TimeFormatPipe, RichTextPipe],
   templateUrl: './interview.component.html',
   styleUrl: './interview.component.css',
 })
@@ -39,8 +41,9 @@ export class InterviewComponent implements OnInit, OnDestroy {
   sttReady = false;
   private demo = inject(DemoService);
   private settings = inject(SettingsService);
+  private aiModels = inject(AiModelsService);
   private route = inject(ActivatedRoute);
-  /** True in the packaged desktop build (Auto Select + Invisible mode). */
+  /** True in the packaged desktop build (Auto Select + transparency slider). */
   readonly isDesktop = environment.electron;
 
   entries: TranscriptEntry[] = [];
@@ -58,6 +61,19 @@ export class InterviewComponent implements OnInit, OnDestroy {
     ResponseLength,
     string,
   ]>;
+
+  // ------------------------------------------------------------- AI model selection
+  /** Model catalog from the backend (names, providers, availability). */
+  aiModelList: AiModel[] = [];
+  /** Currently selected model key (persisted; default from backend). */
+  selectedModel = '';
+  /** Model/provider that produced the latest guidance (display only). */
+  lastUsedModel = '';
+  lastUsedProvider = '';
+  /** Provisional streamed bullets (preview only — final card replaces them). */
+  provisionalPoints: string[] = [];
+  /** True while a streamed answer is in flight. */
+  isStreaming = false;
   /** Loading indicator while the AI composes a long answer. */
   thinking = false;
 
@@ -94,8 +110,8 @@ export class InterviewComponent implements OnInit, OnDestroy {
   systemAudioDevices: string[] | null = null;
   /** Info popup shown before "Auto Select Meeting Audio" starts capturing. */
   autoSelectInfoOpen = false;
-  /** True while the capture-protected copilot window ("invisible mode") is open. */
-  invisibleModeActive = false;
+  /** Window transparency in percent (desktop top-bar slider, 0 = solid). */
+  windowTransparency = 0;
 
   /** Answer text used by the "Copy Answer" button. */
   get answerText(): string {
@@ -139,6 +155,11 @@ export class InterviewComponent implements OnInit, OnDestroy {
     }
     this.responseLength = this.settings.value.responseLength;
     this.guidanceFontSize = this.settings.value.guidanceFontSize;
+    // Load the AI model catalog and adopt the persisted (or default) model.
+    this.aiModels.listModels().subscribe((models) => {
+      this.aiModelList = models;
+      this.selectedModel = this.resolveModel(models);
+    });
     this.ws.connect();
     this.transcription.connect();
     this.micSupported = this.transcription.isSupported();
@@ -216,6 +237,11 @@ export class InterviewComponent implements OnInit, OnDestroy {
             // Backchannel or silence — back to listening, spinner off.
             this.audioStatus = "Listening for the interviewer's question…";
             this.thinking = false;
+          } else if (/Already answered/i.test(msg)) {
+            // Duplicate suppressed server-side: no new answer is coming, so
+            // clear the "composing" spinner and stay on the existing answer.
+            this.audioStatus = 'Answer ready';
+            this.thinking = false;
           } else if (/Generating|processing/i.test(msg)) {
             this.audioStatus = 'Generating answer…';
           } else if (/listening|connected|reset/i.test(msg)) {
@@ -232,16 +258,18 @@ export class InterviewComponent implements OnInit, OnDestroy {
           this.thinking = false;
         }
       }),
-      // --- Invisible mode (Electron copilot window) ---
-      // Push fresh transcript + guidance to the copilot window whenever either
-      // changes. These run after the subscriptions above, so the fields they
-      // read (guidance / lastInterviewerText) are already updated.
-      this.ws.guidance$.subscribe(() => this.pushToCopilot()),
-      this.ws.interviewerTranscript$.subscribe(() => this.pushToCopilot()),
+      // Track which model/provider produced the latest guidance.
+      this.ws.lastModel$.subscribe((m) => (this.lastUsedModel = m ?? '')),
+      this.ws.lastProvider$.subscribe((p) => (this.lastUsedProvider = p ?? '')),
+      // Provisional streamed bullets (preview only, never the final answer).
+      this.ws.streamPoints$.subscribe((pts) => (this.provisionalPoints = pts)),
+      this.ws.streaming$.subscribe((s) => (this.isStreaming = s)),
     );
 
-    // If the user closes the copilot window directly, reset the toggle button.
-    window.electronAPI?.invisible.onClosed(() => (this.invisibleModeActive = false));
+    // --- Window transparency (Electron top-bar slider) ---
+    // Restore the user's last choice so a restart keeps the same look.
+    this.windowTransparency = this.readTransparency();
+    this.applyTransparency(this.windowTransparency);
   }
 
   /**
@@ -262,7 +290,7 @@ export class InterviewComponent implements OnInit, OnDestroy {
     // Transcription first, AI second — do not claim "Question detected" yet.
     this.audioStatus = 'Transcribing interviewer audio…';
     this.thinking = true;
-    this.ws.sendAudioClip(clip.data, clip.mimeType, this.responseLength);
+    this.ws.sendAudioClip(clip.data, clip.mimeType, this.responseLength, this.activeModel());
     // Safety valve: never stall the queue if the backend stays silent.
     setTimeout(() => this.releaseClipSlot(), 10000);
   }
@@ -278,9 +306,9 @@ export class InterviewComponent implements OnInit, OnDestroy {
     return this.history.slice(0, -1).reverse();
   }
 
-  /** Only the latest two transcript entries are shown in the Transcript panel. */
+  /** Latest three transcript entries are shown in the Transcript panel. */
   get recentEntries(): TranscriptEntry[] {
-    return this.entries.slice(-2);
+    return this.entries.slice(-3);
   }
 
   ngOnDestroy(): void {
@@ -288,7 +316,6 @@ export class InterviewComponent implements OnInit, OnDestroy {
     this.stopTimer();
     this.transcription.stop();
     void this.interviewerAudio.stop();
-    if (this.invisibleModeActive) void window.electronAPI?.invisible.stop();
     this.ws.disconnect();
   }
 
@@ -329,43 +356,51 @@ export class InterviewComponent implements OnInit, OnDestroy {
     });
   }
 
-  // ------------------------------------------------ invisible mode (Electron)
+  // --------------------------------- window transparency (Electron)
 
-  /** True when running inside the Electron wrapper (the feature needs it). */
-  get inElectron(): boolean {
-    // Primary: the preload bridge. Fallback: Electron stamps the user-agent, so
-    // even if the bridge isn't ready at first paint we still detect the shell.
-    return (
-      !!window.electronAPI?.isElectron ||
-      (typeof navigator !== 'undefined' && /Electron/i.test(navigator.userAgent))
+  /** Slider value (0–88). 0% = solid window, 88% = almost fully see-through. */
+  private static readonly MAX_TRANSPARENCY = 88;
+  private static readonly TRANSPARENCY_KEY = 'aia_window_transparency';
+
+  private clampTransparency(value: number): number {
+    if (!Number.isFinite(value)) return 0;
+    return Math.min(
+      InterviewComponent.MAX_TRANSPARENCY,
+      Math.max(0, Math.round(value)),
     );
   }
 
-  /**
-   * Toggle the capture-protected copilot window. Only works in the Electron
-   * wrapper: `setContentProtection` hides the window from screen capture
-   * (Zoom / Meet / Teams / OBS see it black).
-   */
-  toggleInvisibleMode(): void {
-    if (!this.inElectron) return;
-    if (this.invisibleModeActive) {
-      this.invisibleModeActive = false;
-      void window.electronAPI?.invisible.stop();
-    } else {
-      this.invisibleModeActive = true;
-      void window.electronAPI?.invisible.start();
-      this.pushToCopilot();
+  private readTransparency(): number {
+    try {
+      const raw = localStorage.getItem(InterviewComponent.TRANSPARENCY_KEY);
+      // Older versions allowed up to 100 — clamp into the current range.
+      return this.clampTransparency(raw === null ? 0 : Number(raw));
+    } catch {
+      return 0;
     }
   }
 
-  /** Send the current transcript + guidance to the copilot window (no-op off). */
-  private pushToCopilot(): void {
-    if (!this.invisibleModeActive || !window.electronAPI) return;
-    const payload: CopilotPayload = {
-      transcript: this.lastInterviewerText,
-      guidance: this.guidance,
-    };
-    window.electronAPI.invisible.update(payload);
+  /** Slider moved: live update + remember the choice. */
+  setWindowTransparency(event: Event): void {
+    const input = event.target as HTMLInputElement | null;
+    this.windowTransparency = this.clampTransparency(
+      input ? Number(input.value) : 0,
+    );
+    try {
+      localStorage.setItem(
+        InterviewComponent.TRANSPARENCY_KEY,
+        String(this.windowTransparency),
+      );
+    } catch {
+      // Private mode / blocked storage — the slider still works this session.
+    }
+    this.applyTransparency(this.windowTransparency);
+  }
+
+  /** Send 0–88% transparency to the Electron shell as 1.0–0.12 opacity. */
+  private applyTransparency(percent: number): void {
+    const opacity = 1 - this.clampTransparency(percent) / 100;
+    void window.electronAPI?.setOpacity?.(opacity);
   }
 
   // ------------------------------------------------ interviewer audio controls
@@ -477,10 +512,11 @@ export class InterviewComponent implements OnInit, OnDestroy {
     this.audioStatus = 'Generating answer…';
     this.thinking = true;
     this.lastInterviewerText = question;
+    this.lastQuestion = question;
     if (this.ws.isConnected()) {
-      this.ws.sendInterviewerQuestion(question, this.responseLength);
+      this.ws.sendInterviewerQuestion(question, this.responseLength, this.activeModel());
     } else {
-      this.resumeService.analyzeQuestion(question, this.responseLength).subscribe({
+      this.resumeService.analyzeQuestion(question, this.responseLength, this.activeModel()).subscribe({
         next: (g) => {
           this.thinking = false;
           this.audioStatus = 'Answer ready';
@@ -539,15 +575,63 @@ export class InterviewComponent implements OnInit, OnDestroy {
     }
   }
 
+  /** Last question asked (enables the Retry button after failures). */
+  lastQuestion = '';
+
   /** Changing depth persists it and refreshes the current answer immediately. */
-  onLengthChange(level: ResponseLength): void {
-    const previous = this.responseLength;
+  onLengthChange(level: ResponseLength): void {    const previous = this.responseLength;
     this.responseLength = level;
     this.settings.save({ responseLength: level });
     if (previous !== level && this.guidance) {
       // Re-ask the current question at the new depth so the user sees a diff.
       this.onQuestion(this.guidance.question);
     }
+  }
+
+  // ---------------------------------------------------------- AI model select
+
+  /** Pick the persisted model when it is still offered, else the default. */
+  private resolveModel(models: AiModel[]): string {
+    const saved = (this.settings.value.aiModel || '').trim();
+    if (saved && saved !== 'auto' && models.some((m) => m.key === saved)) {
+      return saved;
+    }
+    return models.find((m) => m.isDefault)?.key ?? '';
+  }
+
+  /** Resolve the model key to send: '' means "backend default". */
+  private activeModel(): string | undefined {
+    const key = (this.selectedModel || '').trim();
+    return key ? key : undefined;
+  }
+
+  /** Detail row for the currently selected model (capabilities + status). */
+  selectedModelDetail(): AiModel | null {
+    return this.aiModelList.find((m) => m.key === this.selectedModel) ?? null;
+  }
+
+  /** Label for the currently selected model (selector + status line). */
+  selectedModelLabel(): string {
+    return (
+      this.aiModelList.find((m) => m.key === this.selectedModel)?.displayName ||
+      this.selectedModel ||
+      'Default'
+    );
+  }
+
+  /** Switch the AI model for subsequent answers (mid-session, persisted). */
+  onModelChange(key: string): void {
+    this.selectedModel = key;
+    this.settings.save({ aiModel: key });
+    this.ws.sendSetModel(key);
+  }
+
+  /** Re-ask the last question (e.g. after a rate-limit error) with the current model. */
+  retryGuidance(): void {
+    const q = (this.lastQuestion || this.guidance?.question || '').trim();
+    if (!q) return;
+    this.error = '';
+    this.onQuestion(q);
   }
 
   // ------------------------------------------------------- guidance text size
@@ -590,21 +674,27 @@ export class InterviewComponent implements OnInit, OnDestroy {
     if (!isFinal) return;
     this.entries.push({ speaker: 'interviewer', text, timestamp: new Date(), isQuestion: QuestionDetectorService.detect(text) });
     this.detector.pushFragment(text);
-    if (this.ws.isConnected()) this.ws.sendTranscript(text, this.responseLength);
+    // Demo mode is fully on-device: never forward demo speech to the server,
+    // or every demo question gets TWO answers (demo + live AI).
+    if (this.ws.isConnected() && !this.live) this.ws.sendTranscript(text, this.responseLength, this.activeModel());
   }
 
   private onQuestion(q: string): void {
+    // Same demo guard as onTranscript: the demo sequence drives guidance via
+    // onGuidance, so a detector emission must not also fire server AI.
+    if (this.live) return;
+    this.lastQuestion = q;
     this.ws.setStatus('thinking');
     this.thinking = true;
     if (this.ws.isConnected()) {
       // Transcript fragments were already streamed by onTranscript, so ask the
       // server to analyze its buffer instead of re-sending the same text
       // (re-sending duplicated the question and short questions never fired).
-      this.ws.sendForce(q, this.responseLength);
+      this.ws.sendForce(q, this.responseLength, this.activeModel());
       return;
     }
     // HTTP fallback when WS unavailable
-    this.resumeService.analyzeQuestion(q, this.responseLength).subscribe({
+    this.resumeService.analyzeQuestion(q, this.responseLength, this.activeModel()).subscribe({
       next: (g) => {
         this.thinking = false;
         this.ws.pushLocalGuidance({ ...g, question: q });

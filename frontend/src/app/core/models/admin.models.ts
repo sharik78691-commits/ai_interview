@@ -14,8 +14,6 @@ export interface AdminUserRow {
   is_admin: boolean;
   is_active: boolean;
   login_count: number;
-  resumes_count?: number;
-  roles_count?: number;
   last_login_at: string | null;
   created_at: string | null;
 }
@@ -36,33 +34,40 @@ export interface SystemStatus {
   version: string;
 }
 
-export interface TopPage {
-  path: string;
-  visits: number;
-  visitors: number;
-}
-
-export interface AdminStats {
+export interface Totals {
   users_total: number;
   active_users: number;
   admin_count: number;
   total_logins: number;
-  logins_today: number;
-  visits_total: number;
-  visits_today: number;
-  visitors_today: number;
+}
+
+export interface RangeInfo {
+  from_date: string;
+  to_date: string;
+}
+
+export interface InRange {
+  signups: number;
+  interviews: number;
+  questions: number;
+  ai_calls: number;
+  ai_errors: number;
+}
+
+export interface AiUsageRow {
+  provider: string;
+  model: string;
+  calls: number;
+  errors: number;
+  avg_latency_ms: number | null;
+}
+
+export interface AdminStats {
+  system: SystemStatus;
+  range: RangeInfo;
+  totals: Totals;
+  in_range: InRange;
   signups_by_day: DayCount[];
-  visits_by_day: DayCount[];
+  ai_usage: AiUsageRow[];
   recent_users: AdminUserRow[];
-  system?: SystemStatus | null;
-  interviews_total?: number;
-  interviews_today?: number;
-  questions_total?: number;
-  resumes_total?: number;
-  roles_total?: number;
-  logins_by_day?: DayCount[];
-  interviews_by_day?: DayCount[];
-  visitors_by_day?: DayCount[];
-  top_pages?: TopPage[];
-  recent_logins?: AdminUserRow[];
 }

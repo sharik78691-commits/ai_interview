@@ -145,12 +145,13 @@ export class ResumeService {
     });
   }
 
-  analyzeQuestion(question: string, responseLength: string = 'medium'): Observable<AIInterviewResponse> {
+  analyzeQuestion(question: string, responseLength: string = 'medium', model?: string): Observable<AIInterviewResponse> {
     return this.http.post<AIInterviewResponse>(`${BASE}/api/interview/analyze`, {
       question,
       resumeText: this.resumeText,
       jobDescription: this.jobDescription,
       responseLength,
+      model,
     });
   }
 

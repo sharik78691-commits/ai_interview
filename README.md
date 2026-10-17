@@ -72,6 +72,51 @@ settings; the health endpoint stays public.
    with a strict-JSON system prompt, falling back to the mock provider on failure.
 3. Keys never leave the backend — Angular only talks to `/api/*` and `/ws/interview`.
 
+## AI model selection
+
+Users can choose among four text-generation models; transcription (Whisper) is
+unaffected and has no selector. The default is **GPT-OSS 120B through Groq**.
+
+| Selector key | Provider | Model ID | Endpoint |
+|---|---|---|---|
+| `groq-gpt-oss` (default) | Groq | `openai/gpt-oss-120b` | `https://api.groq.com/openai/v1` |
+| `gemini-flash` | Google | `gemini-2.5-flash` | `https://generativelanguage.googleapis.com/v1beta/openai` |
+| `qwen-coder` | OpenRouter · Qwen | `qwen/qwen3-coder:free` | `https://openrouter.ai/api/v1` |
+| `openrouter-free` | OpenRouter | `meta-llama/llama-3.3-70b-instruct:free` | `https://openrouter.ai/api/v1` |
+
+Model IDs verified Oct 2026 against: Groq console model docs
+(`console.groq.com/docs/models`, `openai/gpt-oss-120b` featured), Google AI
+OpenAI-compatibility docs (`ai.google.dev/gemini-api/docs/openai`, base URL
+`.../v1beta/openai`), and OpenRouter's free-model collection (`:free`-suffixed
+models such as `qwen/qwen3-coder:free`). Free-model availability rotates — if a
+`:free` model is retired, set `QWEN_MODEL` / `OPENROUTER_MODEL` in `backend/.env`
+to another `:free` model from `openrouter.ai/models` (no code change needed).
+
+Setup:
+
+```env
+GROQ_API_KEY=        # optional: falls back to LLM_API_KEY
+GEMINI_API_KEY=      # Google AI Studio key for Gemini Flash
+OPENROUTER_API_KEY=  # serves both Qwen and the OpenRouter fallback
+```
+
+- A model is selectable only when its provider key is set AND an admin has not
+  disabled it. Keys without configuration show as "unavailable" in the UI.
+- `GET /api/ai/models` exposes names, providers, availability, free-tier flags
+  and capabilities — never keys or endpoints.
+- The choice is sent per request (`model` on REST + every WS question message)
+  and persisted in browser settings; admins manage enable/default/labels at
+  `GET/PATCH /api/admin/ai-models` (admin panel → AI models).
+- Usage (provider, model, latency, provider-reported tokens, error category) is
+  logged per call to the existing `activity_log` table (`kind = llm_usage`).
+
+Known free-tier limits (approx, provider-enforced, subject to change):
+Groq ~30 req/min + daily caps; Google AI Studio free tier has per-minute/per-day
+quotas per model; OpenRouter `:free` models are rate-limited (tens of
+req/min) and may be slower. The backend retries 429/5xx briefly with backoff,
+then shows template guidance with a notice and a **Retry** button — it never
+silently switches models.
+
 ## Interviewer audio detection (meeting / browser tab)
 
 The app is used by the **interviewee**, so questions must come from the
@@ -211,6 +256,29 @@ a signed, `HttpOnly` cookie — no token is ever stored in `localStorage` or
 | GET | `/api/auth/csrf` | session | — | refreshes the CSRF cookie |
 
 Responses never include password hashes, OAuth tokens or internal security data.
+
+### Password reset emails
+
+Forgot-password actually **sends** the reset link by email (1-hour, single-use
+token). Any SMTP host works — configure in `backend/.env` (local) and Render
+env vars (production):
+
+```env
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=you@gmail.com
+SMTP_PASSWORD=<app-password>
+SMTP_FROM=you@gmail.com   # defaults to SMTP_USER when empty
+SMTP_USE_TLS=true
+```
+
+For Gmail, create an **App Password** (Google Account > Security > 2-Step
+Verification > App passwords) — a normal login password is rejected. With no
+`SMTP_HOST` set, mail is disabled and the link goes to the server log only
+(local-dev fallback); the API response is identical either way, and a mail
+failure never breaks the endpoint. The emailed link points at `FRONTEND_URL`,
+so it opens the website's reset page — desktop-app users reset there and sign
+back into the app, no installer change needed.
 
 ### Protected endpoints
 
@@ -364,19 +432,28 @@ Admin endpoints (all require an admin session — 401 anonymous, 403 non-admin):
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/admin/stats` | System status (live/demo, AI/STT/Google, DB), headline counters, 14-day series (signups, logins, visits, interviews, visitors), top pages, recent logins |
+| GET | `/api/admin/stats?from=&to=` | Business dashboard: system status, lifetime totals (users/active/admins/logins), in-range metrics (signups/interviews/questions/AI calls/AI errors), signups chart + AI usage over the selected window (default: last 30 days) |
 | GET | `/api/admin/users?q=&page=&page_size=` | Searchable, paginated user list (newest first) |
 | PATCH | `/api/admin/users/{id}` | `{is_active?, is_admin?}` — activate/deactivate, promote/demote (self-changes refused) |
 | GET | `/api/admin/users/export` | Whole user list as CSV download |
+| GET | `/api/admin/ai-models` | Model catalog + provider error stats (no secrets) |
+| PATCH | `/api/admin/ai-models/{key}` | `{enabled?, is_default?, display_name?, description?, free_tier?, priority?}` |
 
-Every request is counted into `visit_logs` (path + salted IP hash, never raw
-IPs) by middleware, excluding only health/docs noise — this powers the "how
-many people visit" counters. Key actions append to the `events` table
-(`user_registered`, `user_login`, `interview_prepared`, `question_analyzed`)
-via a never-failing helper, which powers the login/interview trends. The
-Angular `/admin` page (guarded by `adminGuard`, hidden from search engines)
-renders system status, counters, charts, top pages, recent logins and the user
-table; the navbar shows the Admin link only to admins.
+Key business events (`user_login`, `user_registered`, `interview_prepared`,
+`question_analyzed`) and every AI call (`llm_usage`: provider, model, latency,
+provider-reported tokens, error category) append to the single `activity_log`
+table via never-failing helpers. The Angular `/admin` page (guarded by
+`adminGuard`, hidden from search engines) shows a lean business dashboard —
+system health, business totals, a 30-day signup chart, an AI usage table
+(calls/errors/latency per model), AI model management, and the user table.
+The navbar shows the Admin link only to admins.
+
+### What is deliberately NOT tracked
+
+The previous per-request visit logging, button-click tracking, dwell-time
+heartbeats, GeoIP labels, device/user-agent capture and raw-IP hashing were
+removed as high-volume noise with no business value — they're neither stored
+nor shown anymore.
 
 ## API
 
@@ -387,8 +464,31 @@ table; the navbar shows the Admin link only to admins.
 | POST | `/api/resumes/from-text` | `{filename?, raw_text}` (editor text, ≤500KB) | stored + made active; a downloadable `.txt` is synthesized |
 | POST | `/api/interview/prepare` | `{resumeText, jobDescription, responseLength?}` (≥50 chars each) | `{status:"ready", message, resumeChars, jobChars, responseLength}` |
 | GET | `/api/interview/context` | — | `{hasContext, resumeChars, jobChars, responseLength, resume, job}` (resume/job truncated to 500 chars) |
-| POST | `/api/interview/analyze` | `{question, resumeText?, jobDescription?, responseLength?}` | `AIInterviewResponse` |
-| WS | `/ws/interview` | `{type:"transcript",text,responseLength?}` / `{type:"force",text,responseLength?}` / `{type:"interviewer_question",text,responseLength?}` / `{type:"interviewer_audio_start",mimeType?}` / `{type:"interviewer_audio_stop"}` / binary audio frame + `{type:"audio_flush",mimeType?,responseLength?}` / `{type:"reset"}` / `{type:"ping"}` | `{type:"ai_guidance",data}` / `{type:"stt_transcript",text,final}` / `{type:"status",status,message}` / `{type:"notice",scope?,message}` / `{type:"error",message}` / `{type:"pong"}` |
+| POST | `/api/interview/analyze` | `{question, resumeText?, jobDescription?, responseLength?, model?}` | `AIInterviewResponse` |
+| GET | `/api/ai/models` | — | `{models: [{key, provider, displayName, modelId, available, enabled, freeTier, capabilities, isDefault, priority}], default}` (no secrets) |
+| GET | `/api/admin/ai-models` | admin only | catalog + default + provider error stats |
+| PATCH | `/api/admin/ai-models/{key}` | admin only, `{enabled?, is_default?, display_name?, description?, free_tier?, priority?}` | updated catalog + default |
+| WS | `/ws/interview` | `{type:"transcript",text,responseLength?,model?}` / `{type:"force",text,responseLength?,model?}` / `{type:"interviewer_question",text,responseLength?,model?}` / `{type:"set_model",model}` / `{type:"interviewer_audio_start",mimeType?}` / `{type:"interviewer_audio_stop"}` / binary audio frame + `{type:"audio_flush",mimeType?,responseLength?,model?}` / `{type:"reset"}` / `{type:"ping"}` | `{type:"ai_guidance",data,model?,provider?}` / `{type:"ai_stream_start",model,provider}` / `{type:"ai_stream_delta",point}` / `{type:"stt_transcript",text,final}` / `{type:"status",status,message}` / `{type:"notice",scope?,message}` / `{type:"error",message}` / `{type:"pong"}` |
+
+### Streaming answers (WebSocket only)
+
+Live answers stream token-by-token over the existing socket — no new
+connection, no client change required to benefit (old clients ignore the two
+new frames and just get `ai_guidance` as before):
+
+1. `{type:"ai_stream_start", model, provider}` — which model is generating, live.
+2. `{type:"ai_stream_delta", point}` — one completed answer bullet at a time
+   (incrementally parsed from the streaming `answerPoints` array).
+3. `{type:"ai_guidance", data, ...}` — the final answer, validated by the same
+   strict Pydantic schema as the REST endpoint. The preview is provisional and
+   is always replaced by this card.
+
+Notes: REST `/api/interview/analyze` stays single-shot (same contract).
+If the stream drops mid-answer, the backend makes one single-shot attempt
+before template fallback, so users get the real card or a clear error + Retry.
+Streamed token counts are not reported by providers mid-stream, so usage rows
+for streamed calls carry latency + error category with `NULL` tokens (never
+estimated). Same-question duplicates are suppressed before streaming starts.
 
 ### WebSocket message flow for interviewer audio
 

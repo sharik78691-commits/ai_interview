@@ -20,6 +20,8 @@ export class DashboardComponent implements OnInit {
   private router = inject(Router);
   /** Desktop installer links + version for the download card (empty URL = coming soon). */
   readonly desktopApp = environment.desktopApp;
+  /** Packaged desktop build: download card becomes an (updater) placeholder. */
+  readonly isDesktop = environment.electron;
 
   resumeText = this.resumeService.resumeText;
   jobDescription = this.resumeService.jobDescription;

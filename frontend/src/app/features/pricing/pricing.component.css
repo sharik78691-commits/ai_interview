@@ -1,0 +1,51 @@
+.pricing { max-width: 1160px; padding: 56px 24px 72px; }
+.pricing-head { text-align: center; margin-bottom: 40px; }
+.pricing-head h1 { font-size: clamp(1.9rem, 4.5vw, 2.8rem); font-weight: 800; letter-spacing: -0.02em; margin-bottom: 12px; }
+.pricing-head .lead { max-width: 640px; margin: 0 auto; }
+
+.plans { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+.plan {
+  position: relative; display: flex; flex-direction: column;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 26px 22px;
+}
+.plan.highlight { border-color: var(--accent); box-shadow: 0 12px 40px rgba(110,139,255,.18); }
+.plan-badge {
+  position: absolute; top: -11px; left: 50%; transform: translateX(-50%);
+  font-size: .65rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase;
+  color: #fff; background: var(--accent-grad); padding: 4px 12px; border-radius: 999px; white-space: nowrap;
+}
+.plan h2 { font-size: 1.1rem; font-weight: 700; margin-bottom: 14px; }
+.price { display: flex; align-items: baseline; gap: 6px; margin-bottom: 8px; }
+.amount { font-size: 2rem; font-weight: 800; letter-spacing: -0.02em; }
+.per { color: var(--muted); font-size: .8rem; }
+.tagline { margin-bottom: 16px; }
+.feats { list-style: none; display: grid; gap: 9px; margin-bottom: 18px; flex: 1; }
+.feats li { line-height: 1.45; font-size: .87rem; color: var(--text); }
+.renew { margin-bottom: 16px; }
+.cta {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 11px 18px; border-radius: 10px; font-weight: 700; font-size: .85rem;
+  background: rgba(255,255,255,.06); border: 1px solid var(--border-strong); transition: background .15s, transform .15s;
+}
+.cta:hover { background: rgba(255,255,255,.1); }
+.cta.primary { background: var(--accent-grad); border-color: transparent; color: #fff; box-shadow: 0 8px 24px rgba(110,139,255,.35); }
+.cta.primary:hover { transform: translateY(-1px); }
+
+.billing-note { margin: 28px 0 8px; }
+.include { padding-top: 40px; }
+.include h2, .faqs h2 { font-size: 1.4rem; font-weight: 800; margin-bottom: 18px; }
+.grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.faqs { padding-top: 40px; }
+.faq { margin-bottom: 10px; }
+.faq summary { cursor: pointer; font-weight: 700; }
+.faq p { margin-top: 8px; }
+.pricing-foot { text-align: center; padding: 30px 0 10px; line-height: 1.9; }
+.pricing-foot a { color: var(--accent); }
+.pricing-foot a:hover { text-decoration: underline; }
+
+@media (max-width: 1080px) { .plans { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 720px) {
+  .plans { grid-template-columns: 1fr; }
+  .grid3 { grid-template-columns: 1fr; }
+}

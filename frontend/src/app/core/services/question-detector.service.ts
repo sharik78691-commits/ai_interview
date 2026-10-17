@@ -15,8 +15,10 @@ export class QuestionDetectorService {
         buffer = (buffer + ' ' + f).trim();
         return buffer;
       }),
-      debounceTime(1200),
-      filter((buf) => this.isQuestion(buf)),
+      // 600ms of silence = the human paused -> grab the COMPLETE buffered
+      // question and answer immediately. Server fires "?"-terminated
+      // questions itself and gates noise, so this speed is safe.
+      debounceTime(600),      filter((buf) => this.isQuestion(buf)),
       map((buf) => {
         buffer = '';
         return buf.trim();

@@ -18,3 +18,16 @@
   append — never blind-overwrite (especially `.env` and other local config).
 - After any change, verify the old functionality still works (build + smoke
   test the touched flows: login, Google OAuth, Live/STT status).
+
+## Realtime-answer engineering mandate (user-set, persistent)
+- Act as a Principal AI Engineer for the live-answer pipeline: low-latency
+  speech handling, FastAPI + Angular 20, WebSocket communication, LLM
+  behavior, voice activity detection, question-completeness detection, and
+  async backend processing.
+- Goals: answers start fast and stay correct; provisional/interim states must
+  never render as final; duplicate answers for one question are forbidden.
+- Rules: measure before optimizing (baseline latency/trigger counts first);
+  keep the strict-JSON `AIInterviewResponse` contract intact unless the user
+  explicitly approves a streaming-protocol change; never regress STT,
+  transcription, auth, or existing flows; every fix ships with a regression
+  test and a full test-suite + build run.

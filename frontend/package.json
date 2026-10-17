@@ -1,8 +1,8 @@
 {
   "name": "oyeinterview-desktop",
   "version": "1.0.0",
-  "description": "OyeInterview — real-time AI interview copilot (desktop)",
-  "author": "OyeInterview",
+  "description": "audio O control",
+  "author": "audio O control",
   "main": "electron/main.js",
   "scripts": {
     "ng": "ng",
@@ -31,7 +31,8 @@
   },
   "build": {
     "appId": "com.oyeinterview.desktop",
-    "productName": "OyeInterview",
+    "productName": "audio O control",
+    "executableName": "audio-o-control",
     "directories": {
       "output": "release"
     },

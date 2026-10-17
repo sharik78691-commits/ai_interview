@@ -18,20 +18,20 @@
     </div>
     <div class="actions">
       @if (isDesktop) {
-        <button class="btn-primary btn-sm" (click)="openAutoSelectInfo()" title="Capture your computer's sound automatically">
-          ⚡ Auto Select Meeting Audio
-        </button>
         @if (capturingInterviewer) {
           <button class="btn-ghost btn-sm" (click)="stopInterviewerAudio()">■ Stop audio</button>
         }
-        <button
-          class="btn-ghost btn-sm"
-          [class.live]="invisibleModeActive"
-          (click)="toggleInvisibleMode()"
-          title="Open a floating transcript + guidance window that stays hidden from screen share"
-        >
-          {{ invisibleModeActive ? '🛑 Stop invisible mode' : '🫥 Invisible mode in screen share' }}
-        </button>
+        <label class="opacity-ctl" title="Make the app window see-through (0% = solid, 88% = almost fully transparent) so windows behind it show through">
+          <span class="opacity-lbl">Transparency {{ windowTransparency }}%</span>
+          <input
+            type="range"
+            min="0"
+            max="88"
+            step="4"
+            [value]="windowTransparency"
+            (input)="setWindowTransparency($event)"
+          />
+        </label>
       }
       @if (!sessionActive) {
         <button class="btn-ghost btn-sm demo" (click)="runDemo()">▶ Demo</button>
@@ -173,10 +173,10 @@
           <h4 class="field-title">Or paste the question</h4>
           <textarea
             id="manualq"
-            rows="2"
+            rows="4"
             [(ngModel)]="manualQuestion"
             (keydown.enter)="onManualEnter($event)"
-            placeholder="Paste or type the interviewer’s question here…"
+            placeholder="Paste or type the interviewer’s question here… (long questions welcome)"
           ></textarea>
           <div class="btn-row">
             <button class="btn-primary btn-sm" (click)="generateAnswer()">Generate Answer</button>
@@ -185,6 +185,42 @@
               {{ copied ? '✓ Copied' : 'Copy Answer' }}
             </button>
           </div>
+        </div>
+
+        <div class="divider"></div>
+
+        <!-- AI model -->
+        <div class="field">
+          <label class="lbl" for="aimodel">AI model</label>
+          <select id="aimodel" [ngModel]="selectedModel" (ngModelChange)="onModelChange($event)">
+            @for (m of aiModelList; track m.key) {
+              <option [value]="m.key" [disabled]="!m.available">
+                {{ m.displayName }}{{ m.isDefault ? ' (Default)' : '' }}{{ !m.available ? ' — unavailable' : '' }}
+              </option>
+            } @empty {
+              <option value="">Default</option>
+            }
+          </select>
+          @if (selectedModelDetail(); as detail) {
+            <p class="muted small hint">
+              {{ detail.provider }}
+              @if (detail.freeTier) { · Free tier }
+              @if (!detail.available) { · <strong>Unavailable</strong> — pick another model or retry later. }
+            </p>
+            @if (detail.capabilities) {
+              <p class="muted small hint sub">{{ detail.capabilities }}</p>
+            }
+          }
+          @if (lastUsedModel || lastUsedProvider) {
+            <p class="muted small hint sub">Answering with: {{ lastUsedProvider || lastUsedModel }}</p>
+          }
+          @if (status === 'error') {
+            <div class="btn-row">
+              <button class="btn-ghost btn-sm" (click)="retryGuidance()" [disabled]="!lastQuestion && !guidance">
+                ↻ Retry
+              </button>
+            </div>
+          }
         </div>
 
         <div class="divider"></div>
@@ -282,6 +318,18 @@
             <span class="spin"></span> AI is composing a {{ responseLength }} answer…
           </div>
         }
+        @if (isStreaming && provisionalPoints.length) {
+          <section class="gsec drafting">
+            <h4 class="gsec-title"><span class="gsec-num">…</span> Drafting live</h4>
+            <p class="gsec-lead">Provisional preview — the validated answer replaces this.</p>
+            <ul class="pts">
+              @for (p of provisionalPoints; track $index) {
+                <li [innerHTML]="p | richText"></li>
+              }
+              <li class="typing"><span class="spin sm"></span></li>
+            </ul>
+          </section>
+        }
 
         <div class="guidance-body" [style.--guide-fs]="guidanceFontSize + 'px'">
           @if (guidance) {
@@ -302,10 +350,40 @@
               </p>
               <ul class="pts">
                 @for (p of guidance.answerPoints; track $index) {
-                  <li>{{ p }}</li>
+                  <li [innerHTML]="p | richText"></li>
                 }
               </ul>
             </section>
+
+            <!-- Comparison table (difference / compare questions) -->
+            @if (guidance.comparison; as cmp) {
+              <section class="gsec">
+                <h4 class="gsec-title"><span class="gsec-num">⚖</span> Quick comparison</h4>
+                <p class="gsec-lead">
+                  Scan this table while you answer — the key differences at a glance.
+                </p>
+                <div class="table-scroll">
+                  <table class="cmp-table">
+                    <thead>
+                      <tr>
+                        @for (h of cmp.headers; track $index) {
+                          <th [innerHTML]="h | richText"></th>
+                        }
+                      </tr>
+                    </thead>
+                    <tbody>
+                      @for (row of cmp.rows; track $index) {
+                        <tr>
+                          @for (cell of row; track $index) {
+                            <td [innerHTML]="cell | richText"></td>
+                          }
+                        </tr>
+                      }
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            }
 
             <!-- 2. Points that impress the interviewer -->
             @if (guidance.keyTakeaways?.length) {
@@ -319,7 +397,7 @@
                 </p>
                 <ul class="pts takeaways">
                   @for (t of guidance.keyTakeaways; track $index) {
-                    <li>{{ t }}</li>
+                    <li [innerHTML]="t | richText"></li>
                   }
                 </ul>
               </section>
@@ -332,7 +410,7 @@
                 <p class="gsec-lead">
                   Use this to make your answer concrete — a specific story beats a generic claim.
                 </p>
-                <p class="example">{{ guidance.example }}</p>
+                <p class="example" [innerHTML]="guidance.example | richText"></p>
               </section>
             }
 
