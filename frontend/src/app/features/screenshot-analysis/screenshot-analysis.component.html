@@ -1,0 +1,180 @@
+<div class="container page">
+  <div class="title-row">
+    <div>
+      <h1>Screenshot analysis</h1>
+      <p class="muted">Turn screenshots of interview questions into clear answer guidance for practice and preparation.</p>
+    </div>
+    <span class="model-badge" title="Active AI model" data-testid="active-model">
+      <span class="dot" aria-hidden="true"></span>{{ config.activeModel().displayName }}
+    </span>
+  </div>
+
+  <div class="notice" role="note">
+    <strong>Use responsibly.</strong> This tool is for mock interviews, preparation, and content you own.
+    Do not use it to misrepresent your work or to bypass the rules of an interview or assessment.
+  </div>
+
+  <app-error-banner [message]="error()" (dismiss)="error.set('')"></app-error-banner>
+
+  <div class="grid">
+    <div class="col">
+      <!-- AI Model settings -->
+      <div class="card" data-testid="model-settings">
+        <h3>AI Model</h3>
+        <label class="lbl" for="model">Model</label>
+        <select id="model" [ngModel]="config.selectedKey()" (ngModelChange)="onModelChange($event)">
+          @for (m of config.models(); track m.key) {
+            <option [value]="m.key">{{ m.displayName }}{{ m.key === defaultKey ? ' (Default)' : '' }}</option>
+          }
+        </select>
+        <p class="muted small">
+          Up to {{ config.activeModel().limits.maxImages }} screenshots per analysis ·
+          {{ (config.activeModel().limits.maxTotalBytes / 1048576).toFixed(0) }} MB total.
+        </p>
+
+        <label class="lbl" for="apikey">{{ config.activeModel().provider === 'google' ? 'Google AI Studio' : config.activeModel().provider }} API key</label>
+        @if (config.hasKey()) {
+          <div class="key-ok" data-testid="key-status">
+            @if (config.keySource() === 'env') {
+              <span>🔑 Key loaded automatically from .env</span>
+            } @else {
+              <span>🔒 Key saved (encrypted on this device)</span>
+              <button class="btn-ghost sm" (click)="removeKey()">Remove</button>
+            }
+          </div>
+        } @else {
+          <div class="key-row">
+            <input id="apikey" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your API key" [(ngModel)]="keyInput" (keydown.enter)="saveKey()" />
+            <button class="btn-primary sm" (click)="saveKey()" [disabled]="keyBusy() || keyInput.length < 8">Save</button>
+          </div>
+        }
+        @if (!config.hasKey() && config.envHint()) {
+          <p class="muted small">Tip: put <code>GEMINI_API_KEY=…</code> in <code>{{ config.envHint() }}</code> and reopen the app to load it automatically.</p>
+        }
+        @if (keyError()) { <p class="err small">{{ keyError() }}</p> }
+        @if (!config.encryptionAvailable()) {
+          <p class="err small">Secure storage is unavailable on this system, so a key cannot be saved.</p>
+        }
+        <p class="muted small">
+          Your key is encrypted with your operating system's secure storage and is only used by the desktop app to call the model.
+          It is never shown again, logged, or included in screenshots.
+        </p>
+      </div>
+
+      <!-- Capture -->
+      <div class="card">
+        <div class="sec-head">
+          <h3>Screenshots <span class="muted small">({{ shots().length }}/{{ config.activeModel().limits.maxImages }})</span></h3>
+          @if (shots().length) { <button class="btn-ghost sm" (click)="clearAll()">Clear all</button> }
+        </div>
+        <button class="btn-primary wide" (click)="openPicker({ kind: 'add' })" [disabled]="atLimit() || analyzing()" data-testid="capture-btn">
+          📸 Capture Screen
+        </button>
+        <p class="muted small">You choose exactly which screen or window to capture. Nothing is captured in the background, and the screen flashes briefly each time a capture is taken.</p>
+        @if (captureNotice()) { <p class="ok small" role="status">✓ {{ captureNotice() }}</p> }
+
+        @if (shots().length) {
+          <ol class="thumbs">
+            @for (s of shots(); track s.id; let i = $index) {
+              <li class="thumb">
+                <span class="idx">{{ i + 1 }}</span>
+                <img [src]="dataUrl(s.image)" [alt]="'Screenshot ' + (i + 1)" />
+                <div class="meta">
+                  <span class="name" [title]="s.image.sourceName">{{ s.image.sourceName }}</span>
+                  <span class="muted small">{{ s.image.width }}×{{ s.image.height }}</span>
+                </div>
+                <div class="ctl">
+                  <button class="btn-ghost sm" (click)="move(i, -1)" [disabled]="i === 0" aria-label="Move up">↑</button>
+                  <button class="btn-ghost sm" (click)="move(i, 1)" [disabled]="i === shots().length - 1" aria-label="Move down">↓</button>
+                  <button class="btn-ghost sm" (click)="openPicker({ kind: 'replace', index: i })" aria-label="Replace screenshot">Replace</button>
+                  <button class="btn-ghost sm" (click)="remove(i)" aria-label="Remove screenshot">✕</button>
+                </div>
+              </li>
+            }
+          </ol>
+          <p class="muted small">Total {{ totalMb() }} MB</p>
+        }
+        @if (validation() && !validation()!.ok) {
+          <ul class="issues" data-testid="validation-errors">
+            @for (e of validation()!.errors; track $index) { <li>{{ e.message }}</li> }
+          </ul>
+        }
+
+        <button class="btn-primary wide" (click)="analyze()" [disabled]="!canAnalyze()" data-testid="analyze-btn">
+          {{ analyzing() ? 'Analyzing…' : 'Analyze screenshots' }}
+        </button>
+        @if (!config.hasKey()) { <p class="muted small">Add your API key above to enable analysis.</p> }
+        @if (analyzing()) {
+          <div class="progress" role="status" aria-live="polite">
+            <div class="bar"><div class="bar-fill"></div></div>
+            <span class="muted small">Sending {{ shots().length }} screenshot{{ shots().length === 1 ? '' : 's' }} to {{ config.activeModel().displayName }} · {{ elapsed() }}s</span>
+          </div>
+        }
+      </div>
+    </div>
+
+    <div class="col">
+      <div class="card result-card">
+        @if (result(); as r) {
+          <div class="sec-head">
+            <h3>Guidance</h3>
+            <span class="muted small">via {{ resultModel() }}</span>
+          </div>
+          <app-analysis-result [result]="r"></app-analysis-result>
+        } @else {
+          <div class="empty">
+            <p>📋</p>
+            <strong>No analysis yet</strong>
+            <p class="muted small">Capture one or more screenshots, then press “Analyze screenshots”.</p>
+          </div>
+        }
+      </div>
+
+      <div class="card">
+        <div class="sec-head">
+          <h3>Session history</h3>
+          @if (history.entries().length) { <button class="btn-ghost sm" (click)="history.clear()">Clear</button> }
+        </div>
+        <p class="muted small">🔒 Stored only on this device (text results, never your screenshots). Cloud sync is off and not available in this version.</p>
+        @for (h of history.entries(); track h.id) {
+          <div class="hist">
+            <button class="hist-open" (click)="openHistory(h)">
+              <strong>{{ h.result.topic || h.result.questions[0] || 'Analysis' }}</strong>
+              <span class="muted small">{{ h.createdAt | date: 'MMM d, h:mm a' }} · {{ h.imageCount }} screenshot{{ h.imageCount === 1 ? '' : 's' }} · {{ h.model }}</span>
+            </button>
+            <button class="btn-ghost sm" (click)="history.remove(h.id)" aria-label="Delete history entry">✕</button>
+          </div>
+        } @empty {
+          <p class="muted small">No analyses yet.</p>
+        }
+      </div>
+    </div>
+  </div>
+</div>
+
+@if (picker()) {
+  <div class="backdrop" (click)="closePicker()" role="presentation">
+    <div class="modal" role="dialog" aria-modal="true" aria-label="Choose what to capture" (click)="$event.stopPropagation()" data-testid="source-picker">
+      <div class="sec-head">
+        <h3>Choose what to capture</h3>
+        <button class="btn-ghost sm" (click)="closePicker()" [disabled]="capturing()">Cancel</button>
+      </div>
+      <p class="muted small">Clicking a screen or window captures it immediately.</p>
+      @if (loadingSources()) {
+        <p class="muted">Looking for screens and windows…</p>
+      } @else {
+        <div class="sources">
+          @for (s of sources(); track s.id) {
+            <button class="source" (click)="takeCapture(s)" [disabled]="capturing()">
+              <img [src]="s.thumbnail" [alt]="s.name" />
+              <span>{{ s.kind === 'screen' ? '🖥️' : '🗔' }} {{ s.name }}</span>
+            </button>
+          } @empty {
+            <p class="muted">No screens or windows were found.</p>
+          }
+        </div>
+      }
+      @if (capturing()) { <p class="muted small" role="status">Capturing…</p> }
+    </div>
+  </div>
+}

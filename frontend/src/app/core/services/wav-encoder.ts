@@ -57,19 +57,78 @@ export async function toWav(data: ArrayBuffer): Promise<ArrayBuffer | null> {
  * Concatenate raw PCM chunks captured from the shared stream and encode them
  * directly as WAV. This is the primary path: it never touches a container.
  */
-export function pcmToWav(chunks: Float32Array[], sourceRate: number, targetRate = WAV_RATE): ArrayBuffer {
+export function pcmToWav(
+  chunks: Float32Array[],
+  sourceRate: number,
+  targetRate = WAV_RATE,
+  silenceThreshold = 0,
+): ArrayBuffer {
   if (!chunks.length || !sourceRate) return new ArrayBuffer(0);
   let total = 0;
   for (const chunk of chunks) total += chunk.length;
   if (!total) return new ArrayBuffer(0);
 
-  const merged = new Float32Array(total);
+  let merged: Float32Array = new Float32Array(total);
   let offset = 0;
   for (const chunk of chunks) {
     merged.set(chunk, offset);
     offset += chunk.length;
   }
-  return samplesToWav(merged, sourceRate, targetRate);
+  if (silenceThreshold > 0) merged = trimSilence(merged, sourceRate, silenceThreshold);
+  return samplesToWav(normalizePeak(merged), sourceRate, targetRate);
+}
+
+/** Quiet kept before the first / after the last voiced frame (ms). */
+const TRIM_LEAD_MS = 250;
+const TRIM_TAIL_MS = 300;
+const FRAME_MS = 20;
+
+/**
+ * Cut leading and trailing silence off a clip.
+ *
+ * Every clip ends with >= 1 s of quiet (that is what ends it) and often starts
+ * with some too. Uploading and transcribing that dead air costs bandwidth and
+ * STT time on EVERY question, and it is what makes Whisper hallucinate
+ * "Thank you." on the tail. A short pad is kept so word onsets/ends survive.
+ * A clip with no voiced frame is returned untouched.
+ */
+export function trimSilence(samples: Float32Array, rate: number, threshold: number): Float32Array {
+  const frame = Math.max(1, Math.round((rate * FRAME_MS) / 1000));
+  const frames = Math.floor(samples.length / frame);
+  let first = -1;
+  let last = -1;
+  for (let f = 0; f < frames; f++) {
+    let sum = 0;
+    const base = f * frame;
+    for (let i = 0; i < frame; i++) sum += samples[base + i] * samples[base + i];
+    if (Math.sqrt(sum / frame) >= threshold) {
+      if (first < 0) first = f;
+      last = f;
+    }
+  }
+  if (first < 0) return samples;
+  const start = Math.max(0, first * frame - Math.round((rate * TRIM_LEAD_MS) / 1000));
+  const end = Math.min(samples.length, (last + 1) * frame + Math.round((rate * TRIM_TAIL_MS) / 1000));
+  return start === 0 && end === samples.length ? samples : samples.subarray(start, end);
+}
+
+/**
+ * Bring a quiet clip up towards full scale (tab/loopback audio is often far
+ * below mic level, which hurts recognition). Gain is capped so background
+ * noise is never blown up, and loud clips are left alone.
+ */
+export function normalizePeak(samples: Float32Array, target = 0.9, maxGain = 6): Float32Array {
+  let peak = 0;
+  for (let i = 0; i < samples.length; i++) {
+    const a = Math.abs(samples[i]);
+    if (a > peak) peak = a;
+  }
+  if (peak <= 0) return samples;
+  const gain = Math.min(maxGain, target / peak);
+  if (gain <= 1.05) return samples;
+  const out = new Float32Array(samples.length);
+  for (let i = 0; i < samples.length; i++) out[i] = samples[i] * gain;
+  return out;
 }
 
 /** True when a byte buffer really is a RIFF/WAVE file. */
@@ -119,10 +178,22 @@ function samplesToWav(samples: Float32Array, sourceRate: number, targetRate: num
   let offset = 44;
   for (let i = 0; i < frames; i++) {
     const position = i * ratio;
-    const i0 = Math.min(Math.floor(position), last);
-    const i1 = Math.min(i0 + 1, last);
-    const frac = position - Math.floor(position);
-    const value = samples[i0] * (1 - frac) + samples[i1] * frac;
+    let value: number;
+    if (ratio >= 1.5) {
+      // Downsampling: average every source sample under this output frame
+      // (a box low-pass). Plain interpolation aliases 8-24 kHz content back
+      // into the speech band at 48 -> 16 kHz and smears consonants.
+      const from = Math.min(Math.floor(position), last);
+      const to = Math.min(Math.max(from + 1, Math.floor(position + ratio)), samples.length);
+      let acc = 0;
+      for (let j = from; j < to; j++) acc += samples[j];
+      value = acc / (to - from);
+    } else {
+      const i0 = Math.min(Math.floor(position), last);
+      const i1 = Math.min(i0 + 1, last);
+      const frac = position - Math.floor(position);
+      value = samples[i0] * (1 - frac) + samples[i1] * frac;
+    }
     const clamped = Math.max(-1, Math.min(1, value));
     view.setInt16(offset, clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff, true);
     offset += 2;

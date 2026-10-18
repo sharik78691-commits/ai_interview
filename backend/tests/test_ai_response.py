@@ -100,7 +100,8 @@ async def test_response_length_controls_depth() -> None:
     assert len(short.answerPoints) < len(medium.answerPoints) < len(long.answerPoints)
     assert short.example is None
     assert long.example and len(long.example) > 40
-    assert len(long.keyTakeaways) >= len(medium.keyTakeaways) >= len(short.keyTakeaways)
+    assert len(long.keyDetails) >= len(medium.keyDetails) >= len(short.keyDetails)
+    assert len(long.followUps) > len(medium.followUps) > len(short.followUps)
     # Long answers must be actionable, not filler.
     assert all(len(p) > 20 for p in long.answerPoints)
 
@@ -126,8 +127,8 @@ def test_prompt_mentions_requested_level() -> None:
     long_prompt = build_system_prompt("long").upper()
     assert "LONG" in long_prompt
     assert "SENIOR" in long_prompt  # senior-level mentoring framing
-    assert "8-12" in long_prompt
-    assert "3-4" in build_system_prompt("short").upper()
+    assert "5-8 SPOKEN SENTENCES" in long_prompt
+    assert "2-3 SHORT SPOKEN SENTENCES" in build_system_prompt("short").upper()
 
 
 def test_friendly_error_messages() -> None:
@@ -160,31 +161,96 @@ def test_prompt_requires_human_voice() -> None:
     assert "BANNED" in prompt
 
 
-def test_prompt_requires_comparison_table() -> None:
-    """The system prompt must instruct a side-by-side table for comparisons."""
-    from app.providers.llm.provider import build_system_prompt
+def test_prompt_is_adaptive_answer_card() -> None:
+    """The prompt asks for ONE adaptive Interview Answer Card, not the old
+    fixed sections (opener / comparison table / takeaways / code hint)."""
+    from app.providers.llm.provider import BASE_SCHEMA, build_system_prompt
 
     prompt = build_system_prompt("medium")
-    assert "COMPARISON TABLE" in prompt
-    assert '"comparison"' in prompt
+    assert "INTERVIEW ANSWER CARD" in prompt
+    for section in ("BEST ANSWER", "EXPLAIN IT SIMPLY", "WHAT THE INTERVIEWER EXPECTS",
+                    "PRACTICAL EXAMPLE", "IF THEY ASK FURTHER", "CODING CARD"):
+        assert section in prompt, section
+    assert "Do NOT force every section" in prompt
+    for qtype in ("HR", "THEORY", "SCENARIO", "CODING"):
+        assert qtype in prompt, qtype
+    # Old fixed sections are no longer requested.
+    assert "COMPARISON TABLE" not in prompt
+    assert '"comparison"' not in BASE_SCHEMA
+    assert '"keyTakeaways"' not in BASE_SCHEMA
+    # answerPoints must stay the first content key so streaming latency
+    # (first provisional sentence) is unchanged.
+    assert BASE_SCHEMA.index('"answerPoints"') < BASE_SCHEMA.index('"simpleExplanation"')
 
 
-async def test_mock_comparison_question_has_table() -> None:
+async def test_mock_comparison_question_contrasts_in_key_details() -> None:
     provider = MockLLMProvider()
     resp = await provider.analyze_question(
         "resume", "job", "What is the difference between SQL and NoSQL?"
     )
-    assert resp.comparison is not None
-    assert resp.comparison.headers == ["Aspect", "SQL", "NoSQL"]
-    assert len(resp.comparison.rows) >= 3
+    assert resp.comparison is None  # no separate "Quick comparison" table
+    assert any("SQL" in d and "NoSQL" in d for d in resp.keyDetails)
 
 
-async def test_mock_non_comparison_has_no_table() -> None:
+async def test_mock_coding_card_has_approach_complexity_edge_cases() -> None:
+    provider = MockLLMProvider()
+    for level in ("short", "medium", "long"):
+        resp = await provider.analyze_question(
+            "Python resume", "Python role", "Write a function to solve two-sum?", level
+        )
+        assert resp.approach and resp.codeHint and resp.complexity, level
+        # Two programs: the AI solution and a human-style rewrite.
+        assert resp.humanCode and "def " in resp.humanCode, level
+        assert resp.humanCode != resp.codeHint
+        assert "#" in resp.humanCode  # carries plain-language comments
+        assert "O(" in resp.complexity
+        assert len(resp.edgeCases) >= 2
+
+
+async def test_mock_behavioral_card_is_story_not_theory() -> None:
     provider = MockLLMProvider()
     resp = await provider.analyze_question(
-        "resume", "job", "Can you explain the Saga pattern in microservices?"
+        "resume", "job", "Tell me about a time you faced a difficult challenge?"
     )
-    assert resp.comparison is None
+    assert resp.star is not None
+    assert resp.simpleExplanation is None  # HR/scenario: no "explain it simply"
+    assert resp.approach is None and resp.codeHint is None and resp.humanCode is None
+    assert all(f.answer for f in resp.followUps)
+
+
+def test_card_tolerates_model_slips_and_keeps_legacy_fields() -> None:
+    """Blank sections become null, string follow-ups are coerced, and the
+    legacy followUpQuestions list stays filled for older clients."""
+    resp = AIInterviewResponse(
+        question="q",
+        questionType="technical",
+        answerPoints=["It's a queue."],
+        simpleExplanation="   ",
+        example="",
+        keyDetails=["  ", "**FIFO** order"],
+        followUps=["Why a queue? - It decouples producers from consumers.", {"question": "", "answer": "x"}],
+    )
+    assert resp.simpleExplanation is None
+    assert resp.example is None
+    assert resp.keyDetails == ["**FIFO** order"]
+    assert [f.question for f in resp.followUps] == ["Why a queue?"]
+    assert resp.followUps[0].answer == "It decouples producers from consumers."
+    assert resp.followUpQuestions == ["Why a queue?"]
+
+
+def test_legacy_payload_still_validates() -> None:
+    """Answers stored in the old shape (comparison/keyTakeaways) still load."""
+    resp = AIInterviewResponse(
+        question="q",
+        questionType="technical",
+        answerPoints=["a"],
+        keyTakeaways=["t"],
+        followUpQuestions=["f - hint"],
+        comparison={"headers": ["Aspect", "A", "B"], "rows": [["x", "1", "2"]]},
+    )
+    assert resp.followUps == []
+    assert resp.followUpQuestions == ["f - hint"]
+    assert resp.comparison is not None
 
 
 async def test_comparison_schema_roundtrip() -> None:
@@ -220,8 +286,9 @@ async def test_mock_has_no_ai_tells() -> None:
                 [
                     *resp.answerPoints,
                     resp.example or "",
-                    *(resp.keyTakeaways or []),
-                    *(resp.followUpQuestions or []),
+                    resp.simpleExplanation or "",
+                    *resp.keyDetails,
+                    *(f.question + " " + f.answer for f in resp.followUps),
                 ]
             ).lower()
             for phrase in banned:
@@ -231,3 +298,31 @@ async def test_mock_has_no_ai_tells() -> None:
             assert len(set(openers)) == len(openers), (
                 resp.questionType, level, resp.answerPoints
             )
+
+
+def test_prompt_requires_two_programs_for_coding() -> None:
+    """Coding answers must ship program 1 (AI) AND program 2 (human-style)."""
+    from app.providers.llm.provider import BASE_SCHEMA, build_system_prompt
+
+    assert '"humanCode"' in BASE_SCHEMA
+    for level in ("short", "medium", "long"):
+        prompt = build_system_prompt(level)
+        assert "PROGRAM 1" in prompt and "PROGRAM 2" in prompt, level
+        assert "humanCode" in prompt, level
+
+
+def test_default_level_covers_everything_interviewer_expects():
+    from app.api.interview import VALID_LENGTHS, _normalize_length
+    from app.models.ai_response import AIInterviewResponse
+    from app.providers.llm.provider import MAX_TOKENS, build_system_prompt
+
+    assert "default" in VALID_LENGTHS
+    assert _normalize_length("default") == "default"
+    prompt = build_system_prompt("default").upper()
+    assert "DEPTH LEVEL: DEFAULT" in prompt
+    assert "EVERY POINT THEY EXPECT" in prompt
+    assert MAX_TOKENS["default"] >= MAX_TOKENS["medium"]
+    resp = AIInterviewResponse(
+        question="q", questionType="technical", answerPoints=["a"], responseLength="default"
+    )
+    assert resp.responseLength == "default"

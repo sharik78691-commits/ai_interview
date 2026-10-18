@@ -16,58 +16,108 @@ export class DemoService {
       question: 'Can you explain the Saga pattern in microservices?',
       questionType: 'technical',
       answerPoints: [
-        'Define Saga: sequence of local transactions where each step publishes an event triggering the next.',
-        'Contrast choreography (event-driven, no central controller) vs orchestration (central coordinator).',
-        'Explain compensating transactions for rollback since 2PC is impractical across services.',
-        'Give example: order → payment → inventory, with compensation if payment fails.',
+        "A **Saga** is how you keep data consistent across microservices without a distributed transaction.",
+        'Each service commits its own local transaction and publishes an event that triggers the next step.',
+        'If a step fails, we run **compensating actions** to undo the earlier steps — refund the payment, release the stock.',
+        "I'd pick orchestration when the flow has many steps, because one coordinator makes it easier to trace and debug.",
       ],
-      star: undefined,
-      codeHint: undefined,
-      followUpQuestions: ['How do you handle a failing compensating action?', 'Choreography vs orchestration — when would you pick each?'],
+      simpleExplanation:
+        "Think of booking a trip: flight, hotel, car. If the car fails, you cancel the hotel and flight — you don't lock all three systems at once.",
+      keyDetails: [
+        '**Choreography** — services react to events, no central controller',
+        '**Orchestration** — one coordinator drives each step',
+        '**Compensation** — undo logic replaces rollback; must be idempotent',
+        '**Trade-off** — eventual consistency, more moving parts than 2PC',
+      ],
+      example:
+        'On our order platform, order → payment → inventory ran as an orchestrated saga. When inventory failed, the orchestrator refunded payment automatically, and stuck orders dropped to near zero.',
+      followUps: [
+        { question: 'What if a compensating action fails?', answer: 'Retry with backoff, keep it idempotent, and park it in a dead-letter queue for manual review.' },
+        { question: 'Choreography or orchestration — when would you pick each?', answer: 'Choreography for 2–3 simple steps; orchestration once the flow branches or needs visibility.' },
+      ],
+      followUpQuestions: [],
     },
     {
       question: 'How does a hash map differ from a balanced tree?',
       questionType: 'technical',
       answerPoints: [
-        'HashMap: average O(1) get/put via hashing; unordered; needs good hash + load-factor resizing.',
-        'Balanced tree (e.g. red-black): O(log n) ops but keeps keys sorted, supports range queries.',
-        'Memory: hash tables use more space; trees have pointer overhead per node.',
-        'Mention use cases: caches/dedup → hash map; leaderboards/range scans → tree.',
+        'The key difference is **ordering versus speed**.',
+        'A hash map gives average O(1) lookups but keeps no order; a balanced tree is O(log n) but keeps keys sorted, so it supports range queries.',
+        'So I use a hash map for caches and dedup, and a tree for leaderboards or anything that needs "between X and Y".',
       ],
-      followUpQuestions: ['What happens during hash collisions?', 'How would you implement an LRU cache?'],
+      simpleExplanation:
+        'A hash map is a coat check — your ticket takes you straight to the coat. A tree is a sorted shelf — slower to find one item, but easy to scan in order.',
+      keyDetails: [
+        '**Lookup** — hash map: O(1) average vs tree: O(log n) guaranteed',
+        '**Order** — hash map: none vs tree: sorted, range scans',
+        '**Worst case** — hash map degrades with collisions; tree stays O(log n)',
+        '**When to pick** — hash map for point lookups, tree for ordered queries',
+      ],
+      followUps: [
+        { question: 'What happens during hash collisions?', answer: 'Entries share a bucket; Java switches a crowded bucket to a tree after 8 entries.' },
+        { question: 'How would you build an LRU cache?', answer: 'Hash map for O(1) lookup plus a doubly linked list for recency order.' },
+      ],
+      followUpQuestions: [],
     },
     {
       question: 'Tell me about a time you resolved a production incident.',
       questionType: 'behavioral',
       answerPoints: [
-        'Set the scene: service, impact, and your on-call role.',
-        'Describe triage: dashboards, logs, narrowing the blast radius.',
-        'Highlight communication: status updates, stakeholder alignment.',
-        'Close with prevention: postmortem, runbook, alert fix.',
+        'During a peak sale, checkout latency spiked and I was the incident commander.',
+        'I narrowed it to a deploy from that morning, rolled it back, and added a missing database index.',
+        'p99 latency recovered in **25 minutes**, and afterwards I added canary deploys and an SLO alert so we catch it before customers do.',
       ],
-      star: 'S: Checkout latency spiked during peak. T: I was incident commander. A: Rolled back the deploy, added DB index, paged correctly. R: p99 recovered in 25 min; added canary + SLO alert follow-up.',
-      followUpQuestions: ['What was the hardest disagreement during the incident?', 'What would you do differently next time?'],
+      star: {
+        situation: 'Checkout latency spiked during peak traffic.',
+        task: 'I was incident commander, owning recovery and comms.',
+        action: 'Rolled back the deploy, added a DB index, kept stakeholders updated every 15 minutes.',
+        result: 'p99 recovered in 25 min; canary + SLO alert added.',
+      },
+      followUps: [
+        { question: 'What was the hardest part?', answer: 'Holding off a risky hotfix — rollback first, root cause second.' },
+        { question: 'What would you do differently?', answer: 'Ship the canary earlier; it would have caught this before peak.' },
+      ],
+      followUpQuestions: [],
     },
     {
       question: 'How would you solve two-sum with optimal complexity?',
       questionType: 'coding',
       answerPoints: [
-        'Brute force O(n²) first, then optimize with a hash map to O(n) time / O(n) space.',
-        'Single pass: for each x, check if (target − x) is in the map before inserting x.',
-        'Handle duplicates and return indices, not values.',
-        'State complexity tradeoff and edge cases: no solution, negative numbers.',
+        "I'd start by mentioning the brute force — check every pair, O(n²).",
+        'Then I store each number I have seen in a hash map, so for each x I just check whether target − x is already there.',
+        "That's one pass, O(n) time, trading O(n) memory for speed.",
       ],
+      approach:
+        'Brute force checks all pairs in O(n²). The insight: for each x we only need to know whether target − x appeared earlier — a hash map answers that in O(1).',
       codeHint:
         'def two_sum(nums, target):\n' +
         '    """Return indices of the two numbers that add up to target."""\n' +
         '    seen = {}  # value -> index\n' +
         '    for i, x in enumerate(nums):\n' +
-        '        if target - x in seen:\n' +
+        '        if target - x in seen:  # complement found\n' +
         '            return [seen[target - x], i]\n' +
         '        seen[x] = i\n' +
-        '    return []  # no valid pair\n\n' +
-        '# Time: O(n)  Space: O(n)',
-      followUpQuestions: ['What if the array is sorted?', 'How would you handle all-pairs variants?'],
+        '    return []  # no valid pair',
+      humanCode:
+        'def two_sum(nums, target):\n' +
+        '    # number -> where I saw it\n' +
+        '    seen = {}\n' +
+        '\n' +
+        '    for i in range(len(nums)):\n' +
+        '        needed = target - nums[i]\n' +
+        '        if needed in seen:\n' +
+        '            # found the other half, done\n' +
+        '            return [seen[needed], i]\n' +
+        '        seen[nums[i]] = i\n' +
+        '\n' +
+        '    return []  # nothing adds up',
+      complexity: 'Time: O(n) — single pass. Space: O(n) — the hash map.',
+      edgeCases: ['No valid pair', 'Duplicates like [3, 3]', 'Negative numbers'],
+      followUps: [
+        { question: 'What if the array is sorted?', answer: 'Two pointers from both ends — O(n) time, O(1) space.' },
+        { question: 'What about returning all pairs?', answer: 'Keep scanning instead of returning, and dedupe with a set.' },
+      ],
+      followUpQuestions: [],
     },
   ];
 
@@ -86,7 +136,11 @@ export class DemoService {
         'Quantify impact where possible (latency, scale, revenue).',
         'Close by tying it back to this role.',
       ],
-      followUpQuestions: ['Can you go deeper on the tradeoff?', 'What would you do with more time?'],
+      followUps: [
+        { question: 'Can you go deeper on the trade-off?', answer: 'Name the cost you accepted and why it was worth it.' },
+        { question: 'What would you do with more time?', answer: 'Pick one concrete improvement and the result you expect.' },
+      ],
+      followUpQuestions: [],
     };
   }
 

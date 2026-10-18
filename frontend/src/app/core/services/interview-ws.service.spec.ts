@@ -1,0 +1,156 @@
+import { InterviewWsService } from './interview-ws.service';
+
+/**
+ * Keepalive regression.
+ *
+ * A silent WebSocket looks dead to proxies/NAT (which drop it) and to free-tier
+ * hosts (Render spins the instance down), so the NEXT question paid a 30s+ cold
+ * start — users saw this as "the AI answers very late". The socket must send an
+ * application-level `ping` on a timer while it is open, and must stop the timer
+ * once the socket closes so a reconnect starts exactly one keepalive.
+ */
+class FakeWebSocket {
+  static readonly CONNECTING = 0;
+  static readonly OPEN = 1;
+  static readonly CLOSING = 2;
+  static readonly CLOSED = 3;
+
+  readyState = FakeWebSocket.OPEN;
+  onopen: (() => void) | null = null;
+  onmessage: ((ev: { data: string }) => void) | null = null;
+  onclose: ((ev: { code: number; reason: string; wasClean: boolean }) => void) | null = null;
+  onerror: ((ev: unknown) => void) | null = null;
+  readonly sent: string[] = [];
+
+  constructor(readonly url: string) {}
+
+  send(data: unknown): void {
+    this.sent.push(typeof data === 'string' ? data : '[binary]');
+  }
+
+  close(): void {
+    this.readyState = FakeWebSocket.CLOSED;
+  }
+
+  /** Frames the service queued that are application-level pings. */
+  pings(): string[] {
+    return this.sent.filter((f) => f.includes('"type":"ping"'));
+  }
+}
+
+/** `globalThis` narrowed so test-only globals can be swapped and restored. */
+interface SwapGlobal {
+  WebSocket: unknown;
+  fetch: unknown;
+}
+
+const g = globalThis as unknown as SwapGlobal;
+
+describe('InterviewWsService keepalive', () => {
+  let realWebSocket: unknown;
+  let realFetch: unknown;
+  let sockets: FakeWebSocket[];
+  let intervals: Array<{ id: number; delay: number; cb: () => void }>;
+  let cleared: number[];
+  let nextId: number;
+
+  /** Let the async ticket fetch + socket construction settle. */
+  const flush = async (): Promise<void> => {
+    for (let i = 0; i < 6; i++) await Promise.resolve();
+  };
+
+  beforeEach(() => {
+    sockets = [];
+    intervals = [];
+    cleared = [];
+    nextId = 1;
+
+    realWebSocket = g.WebSocket;
+    realFetch = g.fetch;
+
+    const FakeCtor = function (this: unknown, url: string): FakeWebSocket {
+      const s = new FakeWebSocket(url);
+      sockets.push(s);
+      return s;
+    } as unknown as { new (url: string): FakeWebSocket; OPEN: number };
+    FakeCtor.OPEN = FakeWebSocket.OPEN;
+    g.WebSocket = FakeCtor;
+
+    // Ticket endpoint down => fall back to cookie auth, i.e. open `this.url`
+    // unchanged. Keeps the spec off the network without touching the service.
+    spyOn(globalThis, 'fetch').and.returnValue(
+      Promise.resolve({ ok: false, status: 401 } as Response),
+    );
+
+    // Deterministic keepalive: capture the interval instead of waiting 30s.
+    spyOn(window, 'setInterval').and.callFake(((cb: () => void, delay?: number) => {
+      const id = nextId++;
+      intervals.push({ id, delay: delay ?? 0, cb });
+      return id as unknown as ReturnType<typeof setInterval>;
+    }) as unknown as typeof setInterval);
+    spyOn(window, 'clearInterval').and.callFake((id?: unknown) => {
+      cleared.push(Number(id));
+    });
+  });
+
+  afterEach(() => {
+    g.WebSocket = realWebSocket;
+    g.fetch = realFetch;
+  });
+
+  const connect = async (svc: InterviewWsService): Promise<FakeWebSocket> => {
+    svc.connect('ws://test/ws/interview');
+    await flush();
+    expect(sockets.length).toBe(1);
+    return sockets[0];
+  };
+
+  it('pings on a ~30s cadence while the socket is open', async () => {
+    const svc = new InterviewWsService();
+    const ws = await connect(svc);
+
+    // No keepalive before the handshake completes.
+    expect(intervals.length).toBe(0);
+
+    ws.onopen!();
+    expect(intervals.length).toBe(1);
+    expect(intervals[0].delay).toBe(30_000);
+
+    // Idle for two cadences -> two pings, nothing else.
+    intervals[0].cb();
+    intervals[0].cb();
+    expect(ws.pings().length).toBe(2);
+
+    svc.disconnect();
+  });
+
+  it('does not ping once the socket has closed', async () => {
+    const svc = new InterviewWsService();
+    const ws = await connect(svc);
+
+    ws.onopen!();
+    const timer = intervals[0];
+    ws.onclose!({ code: 1000, reason: '', wasClean: true });
+
+    expect(cleared).toContain(timer.id);
+
+    // Even if the now-stale callback fires, a closed socket must not be sent.
+    ws.readyState = FakeWebSocket.CLOSED;
+    timer.cb();
+    expect(ws.pings().length).toBe(0);
+
+    svc.disconnect();
+  });
+
+  it('stops keepalive on disconnect', async () => {
+    const svc = new InterviewWsService();
+    const ws = await connect(svc);
+
+    ws.onopen!();
+    const timer = intervals[0];
+    svc.disconnect();
+
+    expect(cleared).toContain(timer.id);
+    expect(svc.isConnected()).toBeFalse();
+  });
+});

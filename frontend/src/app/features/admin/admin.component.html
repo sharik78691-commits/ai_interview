@@ -1,8 +1,8 @@
 <div class="container page">
   <div class="admin-head">
     <div>
-      <h1>Admin panel</h1>
-      <p class="muted">Your business at a glance — users, signups, and AI usage.</p>
+      <h1>OyeInterview — Business dashboard</h1>
+      <p class="muted">What's happening in your product, who your customers are, and what to do next to grow.</p>
     </div>
     <button class="btn-ghost btn-sm" type="button" (click)="refresh()">↻ Refresh</button>
   </div>
@@ -39,10 +39,435 @@
       <p class="muted small">Your account does not have admin access. If you just signed in as admin, sign out and back in.</p>
     </div>
   } @else {
-    @if (loadingStats && !stats) {
+    <nav class="tabs" role="tablist" aria-label="Admin sections">
+      <button type="button" role="tab" class="tab" [class.on]="tab === 'overview'" [attr.aria-selected]="tab === 'overview'" (click)="setTab('overview')">📊 Business overview</button>
+      <button type="button" role="tab" class="tab" [class.on]="tab === 'costs'" [attr.aria-selected]="tab === 'costs'" (click)="setTab('costs')">💸 AI costs &amp; usage</button>
+      <button type="button" role="tab" class="tab" [class.on]="tab === 'users'" [attr.aria-selected]="tab === 'users'" (click)="setTab('users')">👥 Users &amp; access</button>
+      <button type="button" role="tab" class="tab" [class.on]="tab === 'system'" [attr.aria-selected]="tab === 'system'" (click)="setTab('system')">⚙️ AI &amp; system</button>
+    </nav>
+
+    @if (tab === 'overview') {
+      @if (loadingBiz && !biz) {
+        <p class="muted">Building your business report…</p>
+      }
+      @if (biz) {
+        <!-- ------------------------- KPI cards ------------------------- -->
+        <p class="muted small cmp-note">
+          {{ biz.range.from_date }} → {{ biz.range.to_date }} ({{ biz.range.days }} days) compared with the previous
+          {{ biz.range.days }} days. Admin accounts are excluded.
+        </p>
+        <div class="kpi-grid">
+          @for (k of [
+            { lbl: 'New users', kpi: biz.kpis.new_users, spark: 'signups' },
+            { lbl: 'Active users', kpi: biz.kpis.active_users, spark: 'active' },
+            { lbl: 'Interviews started', kpi: biz.kpis.interviews, spark: 'active' },
+            { lbl: 'Questions answered', kpi: biz.kpis.questions, spark: 'questions' }
+          ]; track k.lbl) {
+            <div class="card kpi">
+              <div class="kpi-lbl">{{ k.lbl }}</div>
+              <div class="kpi-row">
+                <div class="kpi-num">{{ num(k.kpi.value) }}</div>
+                <span class="delta" [class]="'delta ' + deltaClass(k.kpi.delta_pct)">{{ deltaLabel(k.kpi.delta_pct, k.kpi.value) }}</span>
+              </div>
+              <div class="kpi-prev muted small">was {{ num(k.kpi.previous) }}</div>
+              <svg class="spark" viewBox="0 0 110 34" preserveAspectRatio="none" aria-hidden="true">
+                <polyline [attr.points]="sparkPoints($any(k.spark))" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round" />
+              </svg>
+            </div>
+          }
+        </div>
+
+        <!-- ------------------------- What to do next ------------------------- -->
+        <div class="card">
+          <h3>What to do next <span class="muted small">(auto-generated from your numbers)</span></h3>
+          <div class="insights">
+            @for (i of biz.insights; track i.title) {
+              <div class="insight" [class]="'insight ' + i.level">
+                <div class="ins-ico" aria-hidden="true">{{ levelIcon(i.level) }}</div>
+                <div>
+                  <div class="ins-title">{{ i.title }}</div>
+                  <div class="muted small">{{ i.detail }}</div>
+                  <div class="ins-action"><strong>Do this:</strong> {{ i.action }}</div>
+                </div>
+              </div>
+            }
+          </div>
+        </div>
+
+        <!-- ------------------------- Trend ------------------------- -->
+        <div class="card">
+          <div class="users-head">
+            <h3>Growth trend <span class="muted small">— {{ num(trendTotal()) }} total in range</span></h3>
+            <div class="seg-switch" role="group" aria-label="Metric">
+              <button type="button" [class.on]="trendMetric === 'active'" (click)="trendMetric = 'active'">Active users</button>
+              <button type="button" [class.on]="trendMetric === 'signups'" (click)="trendMetric = 'signups'">Signups</button>
+              <button type="button" [class.on]="trendMetric === 'questions'" (click)="trendMetric = 'questions'">Questions</button>
+            </div>
+          </div>
+          <svg class="trend" viewBox="0 0 600 150" preserveAspectRatio="none" role="img" [attr.aria-label]="'Daily ' + trendMetric + ' trend'">
+            <path [attr.d]="trendPaths().area" class="trend-area" />
+            <path [attr.d]="trendPaths().line" class="trend-line" fill="none" />
+          </svg>
+          <div class="trend-axis muted small">
+            <span>{{ trendEnds()[0] }}</span><span>peak/day: {{ trendPaths().max }}</span><span>{{ trendEnds()[1] }}</span>
+          </div>
+        </div>
+
+        <!-- ------------------------- Funnel + segments ------------------------- -->
+        <div class="chart-grid">
+          <div class="card">
+            <h3>Customer journey <span class="muted small">(users who signed up in this range)</span></h3>
+            <div class="funnel">
+              @for (f of biz.funnel; track f.key; let i = $index) {
+                <div class="f-row">
+                  <div class="f-head">
+                    <span>{{ f.label }}</span>
+                    <span><strong>{{ num(f.count) }}</strong> <span class="muted small">{{ f.pct_of_signups ?? 0 }}%</span></span>
+                  </div>
+                  <div class="f-track"><div class="f-fill" [style.width.%]="f.pct_of_signups ?? 0"></div></div>
+                  @if (funnelDrop(i) !== null && funnelDrop(i)! > 0) {
+                    <div class="f-drop small">▼ {{ funnelDrop(i) }}% drop from previous step</div>
+                  }
+                </div>
+              }
+            </div>
+            <div class="mini-stats">
+              <div><strong>{{ biz.activation_rate_pct ?? '—' }}{{ biz.activation_rate_pct === null ? '' : '%' }}</strong><span class="muted small">activation</span></div>
+              <div><strong>{{ biz.retention_rate_pct ?? '—' }}{{ biz.retention_rate_pct === null ? '' : '%' }}</strong><span class="muted small">came back</span></div>
+            </div>
+          </div>
+
+          <div class="card">
+            <h3>Who your users are <span class="muted small">(all {{ num(biz.totals.members) }} customers)</span></h3>
+            <div class="stack" role="img" aria-label="User segments">
+              @for (s of biz.segments; track s.key) {
+                <div class="stack-seg" [class]="'stack-seg seg-' + s.key" [style.width.%]="segmentWidth(s.count)" [title]="s.label + ': ' + s.count"></div>
+              }
+            </div>
+            <ul class="seg-list">
+              @for (s of biz.segments; track s.key) {
+                <li>
+                  <span class="dot" [class]="'dot seg-' + s.key"></span>
+                  <div>
+                    <div><strong>{{ s.count }}</strong> {{ s.label }}</div>
+                    <div class="muted small">{{ s.hint }}</div>
+                  </div>
+                </li>
+              }
+            </ul>
+          </div>
+        </div>
+
+        <!-- ------------------------- Engagement + heatmap ------------------------- -->
+        <div class="card">
+          <h3>Engagement</h3>
+          <div class="eng-grid">
+            <div class="eng"><div class="eng-num">{{ num(biz.engagement.dau) }}</div><div class="eng-lbl">Daily active</div></div>
+            <div class="eng"><div class="eng-num">{{ num(biz.engagement.wau) }}</div><div class="eng-lbl">Weekly active</div></div>
+            <div class="eng"><div class="eng-num">{{ num(biz.engagement.mau) }}</div><div class="eng-lbl">Monthly active</div></div>
+            <div class="eng"><div class="eng-num">{{ biz.engagement.stickiness_pct ?? '—' }}{{ biz.engagement.stickiness_pct === null ? '' : '%' }}</div><div class="eng-lbl">Stickiness (DAU/MAU)</div></div>
+            <div class="eng"><div class="eng-num">{{ biz.engagement.questions_per_active_user ?? '—' }}</div><div class="eng-lbl">Questions / active user</div></div>
+          </div>
+          <h4 class="sub">When do people practise? <span class="muted small">IST · busiest: {{ peakSlot() || 'no data yet' }} — best time to send campaigns</span></h4>
+          <div class="heat-wrap">
+            <div class="heat">
+              <div class="heat-hrs">
+                <span class="heat-day"></span>
+                @for (h of hours; track h) {
+                  <span class="heat-hr">{{ h % 3 === 0 ? hourLabel(h) : '' }}</span>
+                }
+              </div>
+              @for (row of biz.heatmap; track $index; let d = $index) {
+                <div class="heat-row">
+                  <span class="heat-day">{{ weekdays[d] }}</span>
+                  @for (v of row; track $index; let hr = $index) {
+                    <span class="heat-cell" [style.background]="heatStyle(v)" [title]="weekdays[d] + ' ' + hourLabel(hr) + ': ' + v + ' questions'"></span>
+                  }
+                </div>
+              }
+            </div>
+          </div>
+        </div>
+
+        <!-- ------------------------- Revenue potential ------------------------- -->
+        <div class="card rev">
+          <h3>Revenue potential <span class="pill-proj">PROJECTION</span></h3>
+          <p class="muted small">
+            Payments are not tracked inside the app yet, so this is a what-if on your real active users —
+            not recorded revenue. Move the sliders to see what a small conversion rate is worth.
+          </p>
+          <div class="rev-grid">
+            <div class="rev-ctl">
+              <label class="lbl" for="planSel">If they buy this plan</label>
+              <select id="planSel" [(ngModel)]="planKey">
+                @for (p of plans; track p.key) {
+                  <option [value]="p.key">{{ p.name }} — {{ inr(p.price) }}</option>
+                }
+              </select>
+              <label class="lbl" for="convSel">Conversion of active users: <strong>{{ conversionPct }}%</strong></label>
+              <input id="convSel" type="range" min="1" max="30" step="1" [(ngModel)]="conversionPct" />
+            </div>
+            <div class="rev-out">
+              <div class="rev-num">{{ inr(projectedRevenue()) }}</div>
+              <div class="muted small">
+                from {{ projectedBuyers() }} paying customers out of {{ num(biz.kpis.active_users.value) }} active users
+                in this {{ biz.range.days }}-day window
+              </div>
+              <div class="muted small">Annualised at this pace ≈ <strong>{{ inr(projectedRevenue() * 365 / biz.range.days) }}</strong></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ------------------------- People to contact ------------------------- -->
+        <div class="chart-grid three">
+          <div class="card">
+            <div class="users-head">
+              <h3>⭐ Top users</h3>
+            </div>
+            <p class="muted small">Most questions in range — ask for a testimonial or referral.</p>
+            @if (!biz.top_users.length) { <p class="muted small">No activity in this range yet.</p> }
+            <ul class="people">
+              @for (p of biz.top_users; track p.id) {
+                <li><div><strong>{{ p.name || p.email }}</strong><span class="muted small block">{{ p.email }}</span></div>
+                  <span class="tag">{{ p.questions }} Q</span></li>
+              }
+            </ul>
+            @if (biz.top_users.length) {
+              <div class="people-actions">
+                <a class="btn-ghost btn-sm" [href]="mailtoAll(biz.top_users, 'Thank you for using OyeInterview')">✉ Email all</a>
+                <button type="button" class="btn-ghost btn-sm" (click)="copyEmails('top', biz.top_users)">{{ copiedKey === 'top' ? 'Copied ✓' : 'Copy emails' }}</button>
+              </div>
+            }
+          </div>
+
+          <div class="card">
+            <div class="users-head"><h3>💤 Win-back list</h3></div>
+            <p class="muted small">Used it before, silent for 7+ days. Most valuable first.</p>
+            @if (!biz.win_back.length) { <p class="muted small">Nobody has lapsed — nice.</p> }
+            <ul class="people">
+              @for (p of biz.win_back; track p.id) {
+                <li><div><strong>{{ p.name || p.email }}</strong><span class="muted small block">{{ p.questions_total }} questions · quiet {{ p.days_inactive }}d</span></div>
+                  <span class="tag warn-tag">{{ p.days_inactive }}d</span></li>
+              }
+            </ul>
+            @if (biz.win_back.length) {
+              <div class="people-actions">
+                <a class="btn-ghost btn-sm" [href]="mailtoAll(biz.win_back, 'We improved OyeInterview — come back for your next interview')">✉ Email all</a>
+                <button type="button" class="btn-ghost btn-sm" (click)="copyEmails('wb', biz.win_back)">{{ copiedKey === 'wb' ? 'Copied ✓' : 'Copy emails' }}</button>
+              </div>
+            }
+          </div>
+
+          <div class="card">
+            <div class="users-head"><h3>🚪 Never started</h3></div>
+            <p class="muted small">Signed up but never asked a question. Newest first — warmest leads.</p>
+            @if (!biz.never_started.length) { <p class="muted small">Everyone has tried it.</p> }
+            <ul class="people">
+              @for (p of biz.never_started; track p.id) {
+                <li><div><strong>{{ p.name || p.email }}</strong><span class="muted small block">{{ p.email }}</span></div>
+                  <span class="tag">{{ p.provider }}</span></li>
+              }
+            </ul>
+            @if (biz.never_started.length) {
+              <div class="people-actions">
+                <a class="btn-ghost btn-sm" [href]="mailtoAll(biz.never_started, 'Your first AI answer is 60 seconds away')">✉ Email all</a>
+                <button type="button" class="btn-ghost btn-sm" (click)="copyEmails('ns', biz.never_started)">{{ copiedKey === 'ns' ? 'Copied ✓' : 'Copy emails' }}</button>
+              </div>
+            }
+          </div>
+        </div>
+
+        <!-- ------------------------- Product health ------------------------- -->
+        <div class="chart-grid">
+          <div class="card">
+            <h3>How people sign up</h3>
+            @for (m of biz.auth_mix; track m.provider) {
+              <div class="f-row">
+                <div class="f-head"><span>{{ m.provider === 'google' ? 'Google' : 'Email & password' }}</span><span><strong>{{ m.count }}</strong> <span class="muted small">{{ m.pct }}%</span></span></div>
+                <div class="f-track"><div class="f-fill alt" [style.width.%]="m.pct ?? 0"></div></div>
+              </div>
+            }
+            @if (!biz.auth_mix.length) { <p class="muted small">No customers yet.</p> }
+          </div>
+          <div class="card">
+            <h3>AI answer quality <span class="muted small">(what customers feel)</span></h3>
+            <div class="eng-grid compact">
+              <div class="eng"><div class="eng-num" [class.bad]="biz.ai.success_rate_pct !== null && biz.ai.success_rate_pct < 95">{{ biz.ai.success_rate_pct ?? '—' }}{{ biz.ai.success_rate_pct === null ? '' : '%' }}</div><div class="eng-lbl">Success rate</div></div>
+              <div class="eng"><div class="eng-num">{{ biz.ai.p50_latency_ms === null ? '—' : (biz.ai.p50_latency_ms / 1000).toFixed(1) + 's' }}</div><div class="eng-lbl">Typical speed</div></div>
+              <div class="eng"><div class="eng-num" [class.bad]="(biz.ai.p95_latency_ms ?? 0) > 6000">{{ biz.ai.p95_latency_ms === null ? '—' : (biz.ai.p95_latency_ms / 1000).toFixed(1) + 's' }}</div><div class="eng-lbl">Slowest 5%</div></div>
+              <div class="eng"><div class="eng-num">{{ num(biz.ai.calls) }}</div><div class="eng-lbl">AI calls</div></div>
+              <div class="eng"><div class="eng-num">{{ tokensK(biz.ai.input_tokens + biz.ai.output_tokens) }}</div><div class="eng-lbl">Tokens used</div></div>
+            </div>
+          </div>
+        </div>
+      }
+    }
+
+    @if (tab === 'costs') {
+      @if (loadingCosts && !costs) {
+        <p class="muted">Loading AI usage…</p>
+      }
+      @if (costs && costWin(); as w) {
+        <div class="card cost-head">
+          <div class="cost-head-row">
+            <div class="seg-switch" role="group" aria-label="Time window">
+              @for (k of costWindows; track k) {
+                <button type="button" [class.on]="costWindow === k" (click)="costWindow = k">{{ k }}</button>
+              }
+            </div>
+            <div class="live-note muted small">
+              <span class="live-dot" aria-hidden="true"></span> Live · refreshes every 30s · updated {{ updatedLabel() }}
+              <label class="demo-toggle"><input type="checkbox" [checked]="includeDemo" (change)="toggleDemoCosts()" /> include demo data</label>
+            </div>
+          </div>
+          <p class="muted small cmp-note">{{ windowLabel(costWindow) }} · rolling window ending now · rupee values use ₹{{ costs.usd_to_inr }} per US$.</p>
+        </div>
+
+        <div class="kpi-grid">
+          <div class="card kpi">
+            <div class="kpi-lbl">AI cost (list price)</div>
+            <div class="kpi-num">{{ inr2(w.totals.cost_inr) }}</div>
+            <div class="kpi-prev muted small">≈ US$ {{ w.totals.cost_usd.toFixed(3) }} at provider list prices</div>
+          </div>
+          <div class="card kpi">
+            <div class="kpi-lbl">You actually pay now</div>
+            <div class="kpi-num">{{ inr2(w.totals.billed_inr) }}</div>
+            <div class="kpi-prev muted small">free-tier models cost ₹0 today</div>
+          </div>
+          <div class="card kpi">
+            <div class="kpi-lbl">AI calls</div>
+            <div class="kpi-num">{{ num(w.totals.calls) }}</div>
+            <div class="kpi-prev muted small">{{ w.totals.errors }} failed · {{ w.totals.unique_users }} users</div>
+          </div>
+          <div class="card kpi">
+            <div class="kpi-lbl">Cost per answer</div>
+            <div class="kpi-num">{{ inr2(w.totals.cost_per_call_inr) }}</div>
+            <div class="kpi-prev muted small">{{ tokensK(w.totals.input_tokens + w.totals.output_tokens) }} tokens total</div>
+          </div>
+          <div class="card kpi">
+            <div class="kpi-lbl">Monthly run-rate</div>
+            <div class="kpi-num">{{ inr2(costs.run_rate.monthly_cost_inr) }}</div>
+            <div class="kpi-prev muted small">list price · billed today {{ inr2(costs.run_rate.monthly_billed_inr) }} · {{ costs.run_rate.based_on }}</div>
+          </div>
+        </div>
+
+        @if (w.totals.estimated_share_pct !== null && w.totals.estimated_share_pct > 0) {
+          <div class="note-warn">
+            <strong>{{ w.totals.estimated_share_pct }}% of these calls are estimated.</strong>
+            Live streamed answers don't report token counts, so tokens (and cost) for those calls are estimated from each
+            model's own average (or a 3,000 in / 700 out fallback). Only {{ costs.token_coverage_pct }}% of all successful
+            calls have provider-reported tokens — treat cost as a close estimate, and check your provider invoice for exact spend.
+          </div>
+        }
+
+        <div class="card">
+          <div class="users-head">
+            <h3>{{ costMetric === 'cost' ? 'Cost' : 'Calls' }} over time <span class="muted small">— stacked by model · {{ costWindow === '24h' ? 'per hour (IST)' : 'per day (IST)' }}</span></h3>
+            <div class="seg-switch" role="group" aria-label="Metric">
+              <button type="button" [class.on]="costMetric === 'cost'" (click)="costMetric = 'cost'">Cost ₹</button>
+              <button type="button" [class.on]="costMetric === 'calls'" (click)="costMetric = 'calls'">Calls</button>
+            </div>
+          </div>
+          <div class="cbars" [class.dense]="costBars().length > 31">
+            @for (b of costBars(); track $index) {
+              <div class="cbar-col" [title]="costBarTitle(b)">
+                <div class="cbar" [style.height.%]="b.heightPct">
+                  @for (p of b.parts; track p.key) {
+                    <div class="cseg" [style.height.%]="p.pct" [style.background]="modelColor(p.key)"></div>
+                  }
+                </div>
+                <span class="cbar-lbl">{{ ($index % (costBars().length > 31 ? 10 : costBars().length > 8 ? 4 : 1)) === 0 ? b.label : '' }}</span>
+              </div>
+            }
+          </div>
+          <div class="legend">
+            @for (l of costLegend(); track l.key) {
+              <span class="legend-i"><span class="legend-dot" [style.background]="modelColor(l.key)"></span>{{ l.name }}</span>
+            }
+            @if (!costLegend().length) { <span class="muted small">No AI calls in this window.</span> }
+          </div>
+        </div>
+
+        <div class="card users-card">
+          <div class="users-head">
+            <h3>Per-model usage &amp; cost <span class="muted small">({{ windowLabel(costWindow) }})</span></h3>
+          </div>
+          <div class="table-wrap">
+            <table class="users-table cost-table">
+              <thead>
+                <tr>
+                  <th>Model</th><th class="num">Calls</th><th class="num">Success</th>
+                  <th class="num">Tokens in / out</th><th class="num">Cost (list)</th><th class="num">You pay</th>
+                  <th class="num">Per answer</th><th class="num">Avg / p95 speed</th><th class="num">Users</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (m of w.models; track m.key) {
+                  <tr [class.idle]="m.calls === 0">
+                    <td>
+                      <span class="legend-dot" [style.background]="modelColor(m.key)"></span>
+                      <strong>{{ m.display_name }}</strong>
+                      <span class="muted small block">{{ m.key }} · {{ m.model_id }}</span>
+                      @if (m.free_tier) { <span class="tag">free tier</span> }
+                      @if (m.estimated_calls > 0) { <span class="tag warn-tag" title="Some tokens are estimated, not provider-reported">{{ m.estimated_calls }} est.</span> }
+                    </td>
+                    <td class="num">{{ num(m.calls) }}@if (m.errors) { <span class="muted small block bad-txt">{{ m.errors }} failed</span> }</td>
+                    <td class="num">{{ m.success_rate_pct === null ? '—' : m.success_rate_pct + '%' }}</td>
+                    <td class="num">{{ tokensK(m.input_tokens) }} / {{ tokensK(m.output_tokens) }}</td>
+                    <td class="num">
+                      <strong>{{ inr2(m.cost_inr) }}</strong>
+                      <div class="share"><div class="share-fill" [style.width.%]="costShare(m)" [style.background]="modelColor(m.key)"></div></div>
+                    </td>
+                    <td class="num"><strong>{{ inr2(m.billed_inr) }}</strong></td>
+                    <td class="num">{{ inr2(m.cost_per_call_inr) }}</td>
+                    <td class="num">{{ m.avg_latency_ms === null ? '—' : (m.avg_latency_ms / 1000).toFixed(1) + 's' }} / {{ m.p95_latency_ms === null ? '—' : (m.p95_latency_ms / 1000).toFixed(1) + 's' }}</td>
+                    <td class="num">{{ m.unique_users }}</td>
+                  </tr>
+                }
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td><strong>Total</strong></td>
+                  <td class="num"><strong>{{ num(w.totals.calls) }}</strong></td>
+                  <td class="num">{{ w.totals.calls ? ((w.totals.ok * 100) / w.totals.calls).toFixed(1) + '%' : '—' }}</td>
+                  <td class="num">{{ tokensK(w.totals.input_tokens) }} / {{ tokensK(w.totals.output_tokens) }}</td>
+                  <td class="num"><strong>{{ inr2(w.totals.cost_inr) }}</strong></td>
+                  <td class="num"><strong>{{ inr2(w.totals.billed_inr) }}</strong></td>
+                  <td class="num">{{ inr2(w.totals.cost_per_call_inr) }}</td>
+                  <td class="num"></td>
+                  <td class="num">{{ w.totals.unique_users }}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Price assumptions <span class="muted small">(US$ per 1M tokens — edit via MODEL_PRICING_JSON / USD_TO_INR in backend env)</span></h3>
+          <div class="table-wrap">
+            <table class="mini-table">
+              <thead><tr><th>Model</th><th>Input</th><th>Output</th><th>Tier</th></tr></thead>
+              <tbody>
+                @for (p of costs.pricing; track p.key) {
+                  <tr>
+                    <td>{{ p.display_name }} @if (!p.known_price) { <span class="tag warn-tag">no price set</span> }</td>
+                    <td>{{ p.input_per_m_usd }}</td><td>{{ p.output_per_m_usd }}</td>
+                    <td>{{ p.free_tier ? 'free tier (list price shown for scale planning)' : 'paid' }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+          <p class="muted small">Prices are default list-price estimates — verify them against your provider invoices. Failed calls are counted but not charged.</p>
+        </div>
+      }
+    }
+
+    @if (tab !== 'overview' && tab !== 'costs' && loadingStats && !stats) {
       <p class="muted">Loading…</p>
     }
-    @if (stats) {
+    @if (stats && tab !== 'overview' && tab !== 'costs') {
+      @if (tab === 'system') {
       <!-- ------------------------- System status ------------------------- -->
       <div class="card sys-card">
         <div class="sys-head">
@@ -212,11 +637,68 @@
         }
       </div>
 
+      <!-- --------------------------- STT model management --------------------------- -->
+      <div class="card users-card">
+        <div class="users-head">
+          <h3>Speech-to-text <span class="muted small">(meeting/tab audio transcription)</span></h3>
+          <button class="btn-ghost btn-sm" type="button" (click)="loadSttModels()">↻ Reload</button>
+        </div>
+        @if (loadingStt && !sttModels.length) {
+          <p class="muted">Loading…</p>
+        } @else if (!sttModels.length) {
+          <p class="muted">No speech-to-text models configured.</p>
+        } @else {
+          <p class="muted small">
+            Active: <strong>{{ sttActive ?? 'none (transcription off)' }}</strong>
+          </p>
+          <div class="table-wrap">
+            <table class="users-table">
+              <thead>
+                <tr><th>Model</th><th>Provider</th><th>Status</th><th></th></tr>
+              </thead>
+              <tbody>
+                @for (m of sttModels; track m.key) {
+                  <tr>
+                    <td>
+                      <strong>{{ m.displayName }}</strong>
+                      <span class="muted small block">{{ m.modelId }}</span>
+                    </td>
+                    <td><span class="tag">{{ m.provider }}</span></td>
+                    <td>
+                      @if (m.key === sttDefault) {
+                        <span class="pill-ok">Default</span>
+                      }
+                      @if (m.available && m.enabled) {
+                        <span class="pill-ok">Available</span>
+                      } @else {
+                        <span class="pill-off">{{ m.enabled ? 'No key' : 'Disabled' }}</span>
+                      }
+                    </td>
+                    <td class="actions-cell">
+                      <button class="btn-ghost btn-sm" (click)="toggleSttModel(m)" [disabled]="savingStt[m.key]">
+                        {{ m.enabled ? 'Disable' : 'Enable' }}
+                      </button>
+                      @if (m.key !== sttDefault) {
+                        <button class="btn-ghost btn-sm" (click)="setDefaultSttModel(m)" [disabled]="savingStt[m.key]" title="Make this the default STT model">
+                          Make default
+                        </button>
+                      }
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        }
+      </div>
+
+      }
+
+      @if (tab === 'users') {
       <!-- ------------------------------- Users ------------------------------- -->
       <div class="card users-card">
         <div class="users-head">
-          <h3>Users @if (total) { <span class="muted small">({{ total }})</span> }</h3>
-          <div class="users-tools">
+          <h3>Users @if (total) { <span class="muted small">({{ total }})</span> }</h3>          <div class="users-tools">
             <input
               type="text"
               [(ngModel)]="query"
@@ -299,6 +781,7 @@
           </div>
         }
       </div>
+      }
     }
   }
 </div>

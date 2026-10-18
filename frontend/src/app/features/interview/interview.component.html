@@ -21,17 +21,6 @@
         @if (capturingInterviewer) {
           <button class="btn-ghost btn-sm" (click)="stopInterviewerAudio()">■ Stop audio</button>
         }
-        <label class="opacity-ctl" title="Make the app window see-through (0% = solid, 88% = almost fully transparent) so windows behind it show through">
-          <span class="opacity-lbl">Transparency {{ windowTransparency }}%</span>
-          <input
-            type="range"
-            min="0"
-            max="88"
-            step="4"
-            [value]="windowTransparency"
-            (input)="setWindowTransparency($event)"
-          />
-        </label>
       }
       @if (!sessionActive) {
         <button class="btn-ghost btn-sm demo" (click)="runDemo()">▶ Demo</button>
@@ -243,9 +232,16 @@
       <!-- Transcript -->
       <section class="card panel transcript-panel">
         <h3 class="panel-title">Transcript</h3>
-        <div class="entry iv" [class.q]="lastInterviewerText.includes('?')">
+        <!-- Exactly ONE interviewer message: the latest one, from any source
+             (meeting audio, microphone, demo or a typed question). While the
+             mic is mid-sentence the live interim text takes its place. -->
+        <div
+          class="entry iv"
+          [class.q]="!interim && lastInterviewerText.includes('?')"
+          [class.interim]="!!interim"
+        >
           <div class="entry-head">
-            <span class="who">🎧 Interviewer (meeting audio)</span>
+            <span class="who">{{ interim ? 'Listening…' : '🎧 Interviewer' }}</span>
             <button
               class="btn-ghost btn-sm copy-transcript"
               (click)="copyTranscript()"
@@ -255,23 +251,7 @@
               {{ copiedTranscript ? '✓ Copied' : 'Copy' }}
             </button>
           </div>
-          <p>{{ lastInterviewerText || 'Listening for the interviewer’s question…' }}</p>
-        </div>
-        <div class="transcript">
-          @for (e of recentEntries; track $index) {
-            <div class="entry" [class.q]="e.isQuestion">
-              <span class="who">{{ e.isQuestion ? '❓ Interviewer' : 'Interviewer' }}</span>
-              <p>{{ e.text }}</p>
-            </div>
-          } @empty {
-            <p class="muted small empty">No transcript yet. Press Start + Demo, or type a question.</p>
-          }
-          @if (interim) {
-            <div class="entry interim">
-              <span class="who">Listening…</span>
-              <p>{{ interim }}</p>
-            </div>
-          }
+          <p>{{ interim || lastInterviewerText || 'Listening for the interviewer’s question…' }}</p>
         </div>
       </section>
 
@@ -320,131 +300,142 @@
         }
         @if (isStreaming && provisionalPoints.length) {
           <section class="gsec drafting">
-            <h4 class="gsec-title"><span class="gsec-num">…</span> Drafting live</h4>
-            <p class="gsec-lead">Provisional preview — the validated answer replaces this.</p>
-            <ul class="pts">
-              @for (p of provisionalPoints; track $index) {
-                <li [innerHTML]="p | richText"></li>
+            <h4 class="gsec-title"><span class="spin sm"></span> Drafting best answer…</h4>
+            <p class="gsec-lead">Provisional preview — the final card replaces this.</p>
+            <div class="say">
+              @for (p of draftParagraphs; track $index) {
+                <p [innerHTML]="p | richText"></p>
               }
-              <li class="typing"><span class="spin sm"></span></li>
-            </ul>
+            </div>
           </section>
         }
 
         <div class="guidance-body" [style.--guide-fs]="guidanceFontSize + 'px'">
           @if (guidance) {
-            <div class="qcard">
-              <div class="qcard-tags">
-                <span class="tag">{{ guidance.questionType }}</span>
-                <span class="tag lvl">{{ guidance.responseLength || responseLength }}</span>
-              </div>
-              <p class="qtext">{{ guidance.question }}</p>
-            </div>
-
-            <!-- 1. How to open your answer -->
-            <section class="gsec">
-              <h4 class="gsec-title"><span class="gsec-num">1</span> How to open your answer</h4>
-              <p class="gsec-lead">
-                Start with a confident one-line summary, then expand. This sets the tone before you
-                dive into detail.
-              </p>
-              <ul class="pts">
-                @for (p of guidance.answerPoints; track $index) {
-                  <li [innerHTML]="p | richText"></li>
-                }
-              </ul>
-            </section>
-
-            <!-- Comparison table (difference / compare questions) -->
-            @if (guidance.comparison; as cmp) {
-              <section class="gsec">
-                <h4 class="gsec-title"><span class="gsec-num">⚖</span> Quick comparison</h4>
-                <p class="gsec-lead">
-                  Scan this table while you answer — the key differences at a glance.
-                </p>
-                <div class="table-scroll">
-                  <table class="cmp-table">
-                    <thead>
-                      <tr>
-                        @for (h of cmp.headers; track $index) {
-                          <th [innerHTML]="h | richText"></th>
-                        }
-                      </tr>
-                    </thead>
-                    <tbody>
-                      @for (row of cmp.rows; track $index) {
-                        <tr>
-                          @for (cell of row; track $index) {
-                            <td [innerHTML]="cell | richText"></td>
-                          }
-                        </tr>
-                      }
-                    </tbody>
-                  </table>
+            <article class="answer-card" [class.coding]="card.isCoding">
+              <header class="qcard">
+                <div class="qcard-tags">
+                  <span class="tag">{{ card.typeLabel }}</span>
+                  <span class="tag lvl">{{ guidance.responseLength || responseLength }}</span>
                 </div>
-              </section>
-            }
+                <p class="qtext">{{ guidance.question }}</p>
+              </header>
 
-            <!-- 2. Points that impress the interviewer -->
-            @if (guidance.keyTakeaways?.length) {
-              <section class="gsec">
-                <h4 class="gsec-title">
-                  <span class="gsec-num">2</span> Points that impress the interviewer
-                </h4>
-                <p class="gsec-lead">
-                  Weave these in to show depth, ownership and impact — they are what interviewers
-                  remember.
-                </p>
-                <ul class="pts takeaways">
-                  @for (t of guidance.keyTakeaways; track $index) {
-                    <li [innerHTML]="t | richText"></li>
-                  }
-                </ul>
-              </section>
-            }
+              @if (card.isCoding) {
+                <!-- Coding: reasoning first, then code, complexity, edge cases. -->
+                @if (guidance.approach) {
+                  <section class="csec">
+                    <h4 class="csec-title">Approach</h4>
+                    <p class="csec-text" [innerHTML]="guidance.approach | richText"></p>
+                  </section>
+                }
+                @if (guidance.codeHint) {
+                  <section class="csec">
+                    <h4 class="csec-title">Program 1 · AI solution</h4>
+                    <pre class="code">{{ guidance.codeHint }}</pre>
+                    @if (guidance.complexity) {
+                      <p class="complexity" [innerHTML]="guidance.complexity | richText"></p>
+                    }
+                  </section>
+                }
+                @if (guidance.humanCode) {
+                  <section class="csec">
+                    <h4 class="csec-title">Program 2 · Human-style version</h4>
+                    <pre class="code">{{ guidance.humanCode }}</pre>
+                  </section>
+                }
+                @if (guidance.edgeCases?.length) {
+                  <section class="csec">
+                    <h4 class="csec-title">Edge cases</h4>
+                    <ul class="details">
+                      @for (e of guidance.edgeCases; track $index) {
+                        <li [innerHTML]="e | richText"></li>
+                      }
+                    </ul>
+                  </section>
+                }
+                <section class="csec best">
+                  <h4 class="csec-title">Explain it like this</h4>
+                  <div class="say">
+                    @for (p of card.bestAnswer; track $index) {
+                      <p [innerHTML]="p | richText"></p>
+                    }
+                  </div>
+                </section>
+              } @else {
+                <!-- 1. Best Answer — what the candidate says aloud. -->
+                <section class="csec best">
+                  <h4 class="csec-title">Best answer</h4>
+                  <div class="say">
+                    @for (p of card.bestAnswer; track $index) {
+                      <p [innerHTML]="p | richText"></p>
+                    }
+                  </div>
+                </section>
 
-            <!-- 3. Real-world example -->
-            @if (guidance.example) {
-              <section class="gsec">
-                <h4 class="gsec-title"><span class="gsec-num">3</span> Real-world example to cite</h4>
-                <p class="gsec-lead">
-                  Use this to make your answer concrete — a specific story beats a generic claim.
-                </p>
-                <p class="example" [innerHTML]="guidance.example | richText"></p>
-              </section>
-            }
+                <!-- Scenario / behavioral: Situation → Action → Result. -->
+                @if (guidance.star) {
+                  <section class="csec">
+                    <h4 class="csec-title">Situation → Action → Result</h4>
+                    @if (isStarObject()) {
+                      <dl class="star-grid">
+                        @for (e of starEntries(); track $index) {
+                          <dt>{{ e[0] }}</dt>
+                          <dd [innerHTML]="e[1] | richText"></dd>
+                        }
+                      </dl>
+                    } @else {
+                      <p class="csec-text">{{ guidance.star }}</p>
+                    }
+                  </section>
+                }
 
-            <!-- 4. STAR story -->
-            @if (guidance.star) {
-              <section class="gsec">
-                <h4 class="gsec-title"><span class="gsec-num">4</span> STAR story (behavioural)</h4>
-                <p class="gsec-lead">
-                  Structure your story as Situation → Task → Action → Result for a crisp, credible
-                  answer.
-                </p>
-                @if (isStarObject()) {
-                  <ul class="pts star-list">
-                    @for (e of starEntries(); track $index) {
-                      <li><strong>{{ e[0] }}:</strong> {{ e[1] }}</li>
+                <!-- 2. Explain It Simply -->
+                @if (guidance.simpleExplanation) {
+                  <section class="csec">
+                    <h4 class="csec-title">Explain it simply</h4>
+                    <p class="csec-text" [innerHTML]="guidance.simpleExplanation | richText"></p>
+                  </section>
+                }
+
+                <!-- 3. Key Details / What the interviewer expects -->
+                @if (card.keyDetails.length) {
+                  <section class="csec">
+                    <h4 class="csec-title">What the interviewer expects</h4>
+                    <ul class="details">
+                      @for (d of card.keyDetails; track $index) {
+                        <li [innerHTML]="d | richText"></li>
+                      }
+                    </ul>
+                  </section>
+                }
+
+                <!-- 4. Practical Example -->
+                @if (guidance.example) {
+                  <section class="csec">
+                    <h4 class="csec-title">Practical example</h4>
+                    <p class="example" [innerHTML]="guidance.example | richText"></p>
+                  </section>
+                }
+              }
+
+              <!-- 5. If They Ask Further -->
+              @if (card.followUps.length) {
+                <section class="csec">
+                  <h4 class="csec-title">If they ask further</h4>
+                  <ul class="followups">
+                    @for (f of card.followUps; track $index) {
+                      <li>
+                        <p class="fq" [innerHTML]="f.question | richText"></p>
+                        @if (f.answer) {
+                          <p class="fa" [innerHTML]="f.answer | richText"></p>
+                        }
+                      </li>
                     }
                   </ul>
-                } @else {
-                  <p class="star">{{ guidance.star }}</p>
-                }
-              </section>
-            }
-
-            <!-- 5. Code hint -->
-            @if (guidance.codeHint) {
-              <section class="gsec">
-                <h4 class="gsec-title"><span class="gsec-num">5</span> Code hint</h4>
-                <p class="gsec-lead">
-                  Reference this approach if the interviewer asks you to code or explain the
-                  implementation.
-                </p>
-                <pre class="code">{{ guidance.codeHint }}</pre>
-              </section>
-            }
+                </section>
+              }
+            </article>
 
           } @else {
             <p class="muted small empty">

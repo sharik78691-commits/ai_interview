@@ -2,6 +2,8 @@
 
 GET  /api/admin/stats           — business dashboard: system status, totals,
                                    signups (last 30 days), AI usage summary
+GET  /api/admin/business        — owner report: growth, funnel, retention,
+                                   segments, heatmap, who-to-contact, insights
 GET  /api/admin/users           — searchable, paginated user list
 PATCH /api/admin/users/{id}     — activate/deactivate, promote/demote admin
 GET  /api/admin/users/export    — full user list as CSV download
@@ -30,6 +32,13 @@ from app.models.activity_log import ANALYZE, LLM_USAGE, PREPARE, ActivityLog
 from app.models.ai_model_config import AIModelConfig
 from app.models.user import User
 from app.providers.llm import registry
+from app.providers.stt.provider import (
+    active_stt_model,
+    default_stt_key,
+    list_stt_models,
+)
+from app.services.ai_cost import build_cost_report
+from app.services.business_analytics import EventRow, UserRow, build_report
 from app.schemas.admin import (
     AIModelUpdateRequest,
     AdminStats,
@@ -215,6 +224,73 @@ async def stats(
     )
 
 
+@router.get("/business")
+async def business(
+    request: Request,
+    _admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+    from_date: str | None = Query(default=None, alias="from", max_length=10),
+    to_date: str | None = Query(default=None, alias="to", max_length=10),
+) -> dict:
+    """Owner-level business report: growth, funnel, retention, segments,
+    usage heatmap, AI reliability, who to contact, and ranked next actions."""
+    rate_limit(request, "admin")
+    d0, d1 = _parse_range(from_date, to_date)
+    users = [
+        UserRow(
+            id=u.id, name=u.name or "", email=u.email,
+            provider=u.auth_provider or "local", created_at=u.created_at,
+            is_admin=bool(u.is_admin), is_active=bool(u.is_active),
+        )
+        for u in db.scalars(select(User)).all()
+    ]
+    events = [
+        EventRow(
+            kind=a.kind, user_id=a.user_id, created_at=a.created_at,
+            provider=a.provider, model=a.model, latency_ms=a.latency_ms,
+            input_tokens=a.input_tokens, output_tokens=a.output_tokens,
+            error_category=a.error_category,
+        )
+        for a in db.scalars(select(ActivityLog)).all()
+    ]
+    return build_report(users, events, d0, d1)
+
+
+DEMO_EMAIL_SUFFIX = "@demo.oyeinterview.test"
+
+
+@router.get("/ai-costs")
+async def ai_costs(
+    request: Request,
+    _admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+    include_demo: bool = Query(default=False),
+) -> dict:
+    """Per-model usage + cost for 24h / 7d / 30d / 90d (rolling, live data).
+
+    Demo-seeded users (``@demo.oyeinterview.test``) are excluded unless
+    ``include_demo`` so seeded sample data never pollutes real spend.
+    """
+    rate_limit(request, "admin")
+    demo_ids: set[int] = set()
+    if not include_demo:
+        demo_ids = set(
+            db.scalars(select(User.id).where(User.email.like(f"%{DEMO_EMAIL_SUFFIX}")))
+        )
+    rows = db.scalars(select(ActivityLog).where(ActivityLog.kind == LLM_USAGE)).all()
+    events = [
+        EventRow(
+            kind=a.kind, user_id=a.user_id, created_at=a.created_at,
+            provider=a.provider, model=a.model, latency_ms=a.latency_ms,
+            input_tokens=a.input_tokens, output_tokens=a.output_tokens,
+            error_category=a.error_category,
+        )
+        for a in rows
+        if a.user_id not in demo_ids
+    ]
+    return build_cost_report(events, registry.list_models())
+
+
 @router.get("/users", response_model=AdminUsersPage)
 async def list_users(
     request: Request,
@@ -388,3 +464,59 @@ async def update_ai_model(
     logger.info("Admin updated AI model config key=%s enabled=%s default=%s",
                 key, record.enabled, record.is_default)
     return {"models": registry.list_models(), "default": registry.default_model_key()}
+
+
+# ------------------------------------------------------------- STT model management
+
+
+@router.get("/stt-models")
+async def list_stt_models_admin(
+    request: Request,
+    _admin: User = Depends(require_admin),
+) -> dict:
+    """STT model catalog + active transcription model (no secrets)."""
+    rate_limit(request, "admin")
+    return {
+        "models": list_stt_models(),
+        "default": default_stt_key(),
+        "active": active_stt_model(),
+    }
+
+
+@router.patch("/stt-models/{key}")
+async def update_stt_model(
+    key: str,
+    body: AIModelUpdateRequest,
+    request: Request,
+    _admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Enable/disable a speech-to-text model or change the STT default."""
+    rate_limit(request, "admin")
+    valid_keys = {m["key"] for m in list_stt_models()}
+    if key not in valid_keys:
+        raise HTTPException(status_code=404, detail=f"unknown STT model '{key}'")
+
+    record = db.get(AIModelConfig, key)
+    if record is None:
+        record = AIModelConfig(key=key)
+        db.add(record)
+
+    if body.enabled is not None:
+        record.enabled = body.enabled
+    if body.is_default is not None:
+        record.is_default = body.is_default
+        if body.is_default:
+            # Exactly one STT default: clear the flag only on other STT models
+            # (never touch the LLM models sharing this table).
+            for other in db.scalars(select(AIModelConfig)).all():
+                if other.key != key and other.key in valid_keys:
+                    other.is_default = False
+
+    db.commit()
+    # The overrides cache covers this shared table — drop it so both the LLM
+    # and STT reads see the fresh rows immediately.
+    registry.invalidate_model_overrides()
+    logger.info("Admin updated STT model key=%s enabled=%s default=%s",
+                key, record.enabled, record.is_default)
+    return {"models": list_stt_models(), "default": default_stt_key()}

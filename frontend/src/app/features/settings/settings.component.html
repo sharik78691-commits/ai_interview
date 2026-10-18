@@ -31,6 +31,7 @@
     </select>
     <label class="lbl" for="len">Response length</label>
     <select id="len" [(ngModel)]="responseLength">
+      <option value="default">Default — covers everything the interviewer expects</option>
       <option value="short">Short — quick bullets (3–4)</option>
       <option value="medium">Medium — structured answer (5–7)</option>
       <option value="long">Long — detailed with examples (8–12)</option>

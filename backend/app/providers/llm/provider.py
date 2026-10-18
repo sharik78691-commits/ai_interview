@@ -8,57 +8,129 @@ import httpx
 
 from app.core.config import get_settings
 from app.core.http import shared_http
-from app.models.ai_response import AIInterviewResponse, ComparisonTable
+from app.models.ai_response import AIInterviewResponse, FollowUp
 from app.providers.llm.base import LLMProvider
 
 logger = logging.getLogger(__name__)
 
-BASE_SCHEMA = """{"question": str, "questionType": "technical|behavioral|coding|general", "answerPoints": [str, ...non-empty], "star": {"situation": str, "task": str, "action": str, "result": str} | null, "codeHint": str | null, "example": str | null, "keyTakeaways": [str], "followUpQuestions": [str], "responseLength": "short|medium|long", "comparison": {"headers": [str, ...], "rows": [[str, ...]]} | null}"""
+# Key order matters: "answerPoints" (the spoken Best Answer) comes right after
+# the type so the live stream can show the provisional draft as early as before.
+BASE_SCHEMA = """{"question": str, "questionType": "technical|behavioral|coding|general", "answerPoints": [str, ...non-empty], "simpleExplanation": str | null, "keyDetails": [str], "star": {"situation": str, "task": str, "action": str, "result": str} | null, "approach": str | null, "codeHint": str | null, "humanCode": str | null, "complexity": str | null, "edgeCases": [str], "example": str | null, "followUps": [{"question": str, "answer": str}], "responseLength": "default|short|medium|long"}"""
 
 LENGTH_RULES: dict[str, str] = {
-    "short": """- answerPoints: 3-4 SHORT bullets (max ~12 words each). Quick mental cue, not an essay.
-- example: null. keyTakeaways: 1-2 items. followUpQuestions: 1-2 items.
-- CODING: codeHint still holds the COMPLETE runnable solution (see CODE RULES).""",
-    "medium": """- answerPoints: 5-7 bullets, 1-2 sentences each (15-35 words).
-- example: 1 short concrete example (2-3 sentences) from the candidate's stack, or null.
-- keyTakeaways: 2-3 items. followUpQuestions: 2-3 items.
-- CODING: codeHint holds the COMPLETE runnable solution (see CODE RULES).""",
+    "default": """COMPLETE COVERAGE: first decide what the interviewer is really testing, then make the card cover EVERY point they expect to hear — nothing important missing, no filler.
+- answerPoints (Best Answer): 5-8 spoken sentences (12-35 words each) in speaking order that cover the full expected answer: definition / direct answer -> how it works -> key points or components -> benefits -> limitations / trade-offs -> when to use or avoid -> a practical touch from the resume. Skip a step only if the question genuinely does not need it.
+- simpleExplanation: 1-2 plain-language sentences (null for HR / personal questions).
+- keyDetails (WHAT THE INTERVIEWER EXPECTS): the COMPLETE checklist of expected points — every concept, step, term, benefit, limitation and trade-off an interviewer would tick off (typically 5-8 items, 5-15 words each). Do not leave an expected point out.
+- example: 3-4 sentences, one realistic project scenario with outcome.
+- followUps: 3-4 likely next questions with 1-2 sentence answers.
+- Behavioral questions: complete STAR. Coding: complete runnable solution plus complexity and edge cases (see CODING CARD).""",
+    "short": """- answerPoints (Best Answer): 2-3 short spoken sentences (max ~20 words each). Direct and confident.
+- simpleExplanation: null, or ONE plain sentence if the topic is abstract.
+- keyDetails: 0-3 items (3-10 words each). example: null.
+- followUps: 1-2 items, answer max ~15 words.
+- CODING: codeHint AND humanCode still hold COMPLETE runnable solutions (see CODING CARD).""",
+    "medium": """- answerPoints (Best Answer): 3-5 spoken sentences (12-30 words each).
+- simpleExplanation: 1-2 plain-language sentences, or null when the Best Answer is already simple (HR).
+- keyDetails: 3-5 scannable items (5-15 words each). example: 2-3 sentences, or null.
+- followUps: 2-3 items, answer 1-2 sentences.
+- CODING: codeHint AND humanCode hold COMPLETE runnable solutions (see CODING CARD).""",
     "long": """You are a SENIOR ENGINEER / SENIOR ANALYST mentoring the candidate. Be thorough and specific.
-- answerPoints: 8-12 bullets (20-45 words each), ordered: 1) definition & core concept 2) mechanism/internals 3) trade-offs, failure modes, when NOT to use it 4) comparison with alternatives 5) production relevance tied to resume + job description. Concrete substance (class names, patterns, protocols, metrics) — no filler.
-- example: DETAILED real-world scenario (4-6 sentences) with services, scale, outcomes.
-- keyTakeaways: 3-5 crisp one-liners. followUpQuestions: 3-5 sharp probes at increasing depth.
-- CODING: codeHint holds the COMPLETE runnable solution (see CODE RULES).""",
+- answerPoints (Best Answer): 5-8 spoken sentences (15-40 words each) a senior candidate would say: core idea -> how it works -> trade-off -> impact. Concrete substance (class names, patterns, protocols, metrics) — no filler.
+- simpleExplanation: 2-3 plain-language sentences (an analogy is welcome).
+- keyDetails: 5-8 items covering mechanism, benefits, limitations, trade-offs and when NOT to use it.
+- example: DETAILED project scenario (4-6 sentences) with services, scale, outcomes.
+- followUps: 3-4 sharp probes at increasing depth; deeper technical detail goes HERE, answer 1-3 sentences.
+- CODING: codeHint AND humanCode hold COMPLETE runnable solutions (see CODING CARD).""",
 }
 
 # Output token caps per depth. These are CAPS, not targets — the model stops
 # when done, so a higher cap only adds headroom for reasoning models (gpt-oss)
 # to finish their thought AND emit the JSON without getting truncated empty.
-MAX_TOKENS: dict[str, int] = {"short": 700, "medium": 2000, "long": 3000}
+#
+# `short` was 700, which is BELOW what a reasoning model needs just to think:
+# probing the real providers showed openai/gpt-oss-120b and gemini-3.5-flash
+# returning finish_reason="length" with UNPARSEABLE JSON at 700 (0/3 valid for
+# gemini-3.5-flash, 0 content deltas for gpt-oss at 600). A truncated answer is
+# worse than a slightly larger cap — it forces a whole extra request and often
+# ends on the template fallback. Non-reasoning models stop on their own
+# (finish_reason="stop"), so raising this does NOT make their answers longer:
+# gemini-3.5-flash-lite took 1.56s at 700 and 1.61s at 1200, 4 bullets both.
+MAX_TOKENS: dict[str, int] = {"short": 1400, "medium": 2000, "long": 3000, "default": 3000}
+
+# Extra multiplier applied when a response came back truncated
+# (finish_reason == "length") or empty, so the retry has real headroom instead
+# of failing for the same reason twice.
+BUDGET_LIFT_ON_TRUNCATION = 1.5
+
+# Pre-delta transient-retry backoff (429/5xx/network). Kept small on purpose:
+# during a LIVE interview the candidate is sitting in silence, so retrying in
+# 0.5s instead of 1.5s/3s is worth the extra request — the retry only fires
+# before any bullet was shown, i.e. when nothing was lost by asking again.
+RETRY_BACKOFF_BASE = 0.5
 
 COMMON_RULES = """RULES:
 - STRICT JSON only. No fences, preamble, or commentary.
-- Tailor every bullet to the candidate's ACTUAL resume + the job description; name their real stack.
-- "star" for behavioral only. "codeHint" for coding only — and for coding it is NEVER null, at ANY depth.
+- Tailor the answer to the candidate's ACTUAL resume + the job description; name their real stack.
 - Never invent resume facts; advise ("frame it around your X experience").
 - Set responseLength to the requested level.
+- Inside string values you MAY mark key terms with **double asterisks** and identifiers with `backticks` — they are plain characters and still valid JSON. Bold ONLY the 1-3 essential words per item, never whole sentences.
 
-COMPARISON TABLE (difference / compare / contrast / vs questions, EVERY depth):
-- When the interviewer asks to compare, differentiate, or contrast two or more things, set "comparison" to a side-by-side table.
-- headers: first column a short label like "Aspect", then one column per thing compared (e.g. ["Aspect", "X", "Y"]).
-- rows: 4-6 rows, one per dimension (e.g. Definition, Key idea, Use case, Trade-offs, When to pick). Keep each cell 3-12 words, scannable.
-- Keep answerPoints as the spoken summary; the table is the visual aid. For non-comparison questions set "comparison": null.
-- Inside string values you MAY mark key terms with **double asterisks** and identifiers with `backticks` — they are plain characters and still valid JSON.
+INTERVIEW ANSWER CARD (one adaptive card — fill ONLY the sections that help THIS question):
+- answerPoints = BEST ANSWER: what the candidate says aloud, in natural first-person spoken English, one sentence per item, in speaking order. answerPoints[0] is the DIRECT answer — no warm-up, no restating the question. Concise for simple questions, fuller for conceptual / senior questions.
+- simpleExplanation = EXPLAIN IT SIMPLY: the idea in plain language for a quick understanding; briefly explain any technical term you must use. null when nothing needs simplifying.
+- keyDetails = WHAT THE INTERVIEWER EXPECTS: the important concepts, process, benefits, limitations or trade-offs as short scannable fragments (not paragraphs). [] when not useful.
+- example = PRACTICAL EXAMPLE: ONE realistic project/industry example the candidate can narrate credibly ("On our order service we..."), or null.
+- followUps = IF THEY ASK FURTHER: the likely next questions THIS interviewer asks, each with a short, strong answer. Deeper technical detail belongs here, not in the Best Answer.
+- star, approach, codeHint, humanCode, complexity, edgeCases: null / [] unless the question type below asks for them.
+- Do NOT force every section. Empty sections are better than filler.
+
+ADAPT TO THE QUESTION TYPE (decide what the interviewer is really testing, then answer THAT):
+- HR / personal ("tell me about yourself", strengths, why this role) -> questionType "general" (or "behavioral" for past-experience stories): a natural, personalized-sounding Best Answer built from the resume, 1-3 keyDetails at most, simpleExplanation null, followUps focused on how to handle the probe.
+- THEORY / concept -> "technical": clarity first, simpleExplanation, keyDetails with trade-offs, a practical example.
+- SCENARIO / behavioral ("tell me about a time", "what would you do if") -> "behavioral": Best Answer told as Situation -> Action -> Result with a quantified result; ALSO fill "star". simpleExplanation null.
+- SYSTEM DESIGN -> "technical": Best Answer covers requirements -> components -> scaling -> trade-offs; keyDetails lists bottlenecks and choices.
+- COMPARE / DIFFERENCE / VS -> "technical": Best Answer states the key difference first; keyDetails contrasts the dimensions as "**X**: ... vs **Y**: ..." and ends with when to pick each.
+- CODING -> "coding": see CODING CARD.
+- Be correct over impressive; if a resume fact is missing, advise how to frame it instead of inventing it.
+
+FOLLOW-UPS (a "Conversation so far" block may precede the question):
+- Interviewers often dig into the SAME or an EARLIER question ("why?", "what if it fails?", "and at 10x scale?", "give me an example", "what about the other approach?").
+- If the new question depends on earlier ones, resolve every reference ("that", "it", "this approach") and set "question" to the FULL self-contained question (e.g. "Why did you pick Kafka over RabbitMQ for order events?").
+- Answer ONLY the new angle, building on what was already advised: do not repeat earlier points, and stay consistent with the earlier stack, examples and numbers. A follow-up is usually narrower, so go deeper, not wider.
+- If the new question is unrelated to the history, ignore the history.
 
 HUMAN VOICE (sound like a person, not an AI):
-- Every bullet must be SAY OUT LOUD ready: plain spoken English, contractions OK, concrete verbs, real numbers/tools from the resume.
+- The Best Answer must be SAY OUT LOUD ready: plain spoken English, contractions OK, concrete verbs, real numbers/tools from the resume. Confident and practical — a well-prepared candidate talking, not AI notes.
 - Vary openers; no back-to-back repetition, no listicle filler ("Firstly... Secondly... In conclusion...").
 - BANNED: "as an AI", "as a language model", "delve", "furthermore", "moreover", "in today's fast-paced", "landscape", "tapestry", "game-changer", "cutting-edge", "it's important to note", "in conclusion", "overall,". No hype adjectives ("crucial", "seamless") unless earned — name the service, metric, outcome.
 - "example" reads like a retold memory ("we hit... so I..."), not a textbook case.
+- The whole card must be scannable in 10-15 seconds: no walls of text.
 
-CODE RULES (coding questions, EVERY depth):
-- codeHint = COMPLETE working solution to the exact problem — never pseudo-code or sketches.
-- Runnable code in the best-fit language (resume's primary, else Python): full signature, algorithm body, one key-step comment, trailing time/space complexity ("# Time: O(n), Space: O(1)").
-- Self-contained, copy-paste ready ("\\n" for line breaks). SHORT still ships complete code — only prose shrinks."""
+CODING CARD (coding questions, EVERY depth):
+- approach = the reasoning FIRST, 1-3 sentences: brute force -> the insight -> the optimal idea.
+- codeHint = PROGRAM 1 (the polished AI solution): COMPLETE working solution to the exact problem — never pseudo-code or sketches. Runnable code in the best-fit language (resume's primary, else Python): full signature, algorithm body, concise comments on the key steps. Self-contained, copy-paste ready ("\\n" for line breaks). codeHint is NEVER null for coding, at ANY depth — SHORT still ships complete code, only prose shrinks.
+- humanCode = PROGRAM 2, ALWAYS present for coding (NEVER null, at ANY depth): the SAME correct solution, rewritten the way an experienced developer naturally types it live in an interview — plain descriptive variable names, simple loops/ifs instead of clever one-liners, no docstring boilerplate, small helper only if a person would write one. Comments are short, casual and explain the WHY in the candidate's own words ("# remember what we've seen so far", "# found the pair, done"), one every few lines — not on every line, no "Step 1:" labels. Same language as codeHint, also complete and runnable.
+- complexity = "Time: O(..) — why. Space: O(..) — why."
+- edgeCases = 2-4 short items (empty input, duplicates, overflow, ...).
+- answerPoints = how to explain the solution in interview language while coding."""
+
+
+def format_history(history: list[dict] | None) -> str:
+    """Render prior Q&A turns as a compact block (empty string when none).
+
+    Lets the model resolve follow-ups ("why?", "and at 10x scale?") against what
+    the interviewer already asked and what the candidate was already advised.
+    """
+    if not history:
+        return ""
+    lines = ["Conversation so far (oldest first):"]
+    for i, turn in enumerate(history, 1):
+        lines.append(f"Q{i}: {str(turn.get('question', ''))[:300]}")
+        points = [str(p)[:200] for p in (turn.get("points") or [])[:3]]
+        if points:
+            lines.append("Advised: " + " | ".join(points))
+    return "\n".join(lines) + "\n\n"
 
 
 def build_system_prompt(response_length: str = "medium") -> str:
@@ -145,21 +217,18 @@ def _comparison_terms(question: str) -> tuple[str, str]:
     return "Option A", "Option B"
 
 
-def _comparison_table(question: str) -> ComparisonTable | None:
-    """Build a side-by-side table for comparison questions (mock/demo)."""
+def _comparison_details(question: str) -> list[str]:
+    """Contrast lines for comparison questions (mock/demo) — the card's Key
+    Details carry the difference instead of a separate table."""
     if not _is_comparison(question):
-        return None
+        return []
     a, b = _comparison_terms(question)
-    return ComparisonTable(
-        headers=["Aspect", a, b],
-        rows=[
-            ["Definition", f"What {a} is, in one line", f"What {b} is, in one line"],
-            ["Key idea", "The core concept behind it", "The core concept behind it"],
-            ["Use case", "When it fits best", "When it fits best"],
-            ["Trade-offs", "Main cost or limitation", "Main cost or limitation"],
-            ["When to pick", f"Choose {a} when…", f"Choose {b} when…"],
-        ],
-    )
+    return [
+        f"**Core idea** — {a}: what it is in one line vs {b}: what it is in one line",
+        f"**Best fit** — where {a} shines vs where {b} shines",
+        "**Trade-off** — the main cost or limitation of each",
+        f"**When to pick** — choose {a} when…, {b} when…",
+    ]
 
 
 def _extract_resume_skills(resume: str) -> list[str]:
@@ -278,6 +347,7 @@ class MockLLMProvider(LLMProvider):
         job_description: str,
         question: str,
         response_length: str = "medium",
+        history: list[dict] | None = None,
     ) -> AIInterviewResponse:
         level = response_length if response_length in LENGTH_RULES else "medium"
         qtype = _classify(question)
@@ -298,8 +368,16 @@ class MockLLMProvider(LLMProvider):
                 "result": "Share the measurable result and what you learned.",
             }
             follows = [
-                "What would you do differently if it happened again?",
-                "How did the rest of the team react to your call?",
+                ("What would you do differently if it happened again?",
+                 "Name one concrete change — earlier alerting, a smaller rollout — and why it matters."),
+                ("How did the rest of the team react to your call?",
+                 "Be honest about the pushback, then show how you brought them along."),
+            ]
+            simple = None
+            details = [
+                "**Ownership** — what *you* did, not the team",
+                "**Numbers** — scope, impact, time saved",
+                "**Reflection** — what you learned and changed",
             ]
             extra = [
                 "Name who was in the room and how you kept them posted — that's what makes the story believable.",
@@ -320,8 +398,40 @@ class MockLLMProvider(LLMProvider):
             ]
             star = None
             follows = [
-                "What is the time and space complexity?",
-                "How would you handle very large inputs?",
+                ("What is the time and space complexity?",
+                 "One pass with O(1) lookups, so O(n) time and O(n) extra space."),
+                ("How would you handle very large inputs?",
+                 "Stream the input, or sort and use two pointers to drop the extra memory."),
+            ]
+            simple = None
+            details = []
+            approach = (
+                "Brute force checks every pair in O(n²). The insight: remember what you've "
+                "already seen in a hash map, so each lookup is O(1) and one pass is enough."
+            )
+            # Program 2: the same solution, typed the way a person writes it live.
+            human_code = (
+                "def solve(nums):\n"
+                "    # nothing to do for an empty list\n"
+                "    if len(nums) == 0:\n"
+                "        return None\n"
+                "\n"
+                "    # remember each number and where we saw it\n"
+                "    positions = {}\n"
+                "    for index in range(len(nums)):\n"
+                "        current = nums[index]\n"
+                "        if current in positions:\n"
+                "            # seen it before, so we have our pair\n"
+                "            return [positions[current], index]\n"
+                "        positions[current] = index\n"
+                "\n"
+                "    return None  # no match found"
+            )
+            complexity = "Time: O(n) — single pass. Space: O(n) — the hash map."
+            edge_cases = [
+                "Empty or single-element input",
+                "Duplicate values",
+                "No valid answer exists",
             ]
             extra = [
                 "Say why this data structure beats the obvious alternatives.",
@@ -352,7 +462,15 @@ class MockLLMProvider(LLMProvider):
                 "Finish with why this position honestly interests you.",
             ]
             star = None
-            follows = ["What interests you most about this role?"]
+            follows = [
+                ("What interests you most about this role?",
+                 "Point to one thing in the job description that matches your best work."),
+            ]
+            simple = None
+            details = [
+                "**Relevance** — tie it to this role",
+                "**Proof** — one real number or outcome",
+            ]
             extra = [
                 "Bridge your background to the job's core need in a single line.",
                 "Back one claim with a real number or outcome.",
@@ -371,8 +489,20 @@ class MockLLMProvider(LLMProvider):
             ]
             star = None
             follows = [
-                "Can you describe a project where you applied this?",
-                "What are the trade-offs of this approach?",
+                ("Can you describe a project where you applied this?",
+                 f"Pick one {skill_txt} project: the problem, what you built, the result."),
+                ("What are the trade-offs of this approach?",
+                 "Name the cost — complexity, latency or consistency — and when it's worth it."),
+            ]
+            simple = (
+                "In plain terms: say what problem this solves and how it works, "
+                "as you'd explain it to a teammate from another team."
+            )
+            details = _comparison_details(question) or [
+                "**Core idea** — what it is and the problem it solves",
+                "**How it works** — the main moving parts",
+                "**Trade-offs** — the cost and when not to use it",
+                "**Real use** — where it shows up in production",
             ]
             extra = [
                 "Explain the moving parts and how data flows between them.",
@@ -394,39 +524,43 @@ class MockLLMProvider(LLMProvider):
             points.append(
                 "Summarize in one sentence a senior engineer would say to close the answer."
             )
+        elif level == "default":
+            points += extra
         elif level == "medium":
             points += extra[:1]
 
-        def _first_sentence(text: str) -> str:
-            head = text.split(". ")[0].rstrip(".")
-            return f"{head}." if head else ""
-
-        takeaways: list[str] = []
-        if level != "short":
-            source = (core + extra)[: 2 if level == "medium" else 4]
-            takeaways = [s for s in (_first_sentence(p) for p in source) if s]
-
         if level == "long":
-            follow_ups = follows + [
-                "How would this change at 10x the current scale?",
-                "What would make you abandon this approach?",
+            follows = follows + [
+                ("How would this change at 10x the current scale?",
+                 "Name the first bottleneck and how you'd remove it."),
+                ("What would make you abandon this approach?",
+                 "Give the concrete signal — cost, latency, or team overhead — that tips it."),
             ]
-        elif level == "medium":
-            follow_ups = follows
-        else:
-            follow_ups = follows[:1]
+        elif level == "short":
+            follows = follows[:1]
+        follow_ups = [FollowUp(question=q, answer=a) for q, a in follows]
 
+        if level == "short":
+            details = details[:3]
+        elif level == "medium":
+            details = details[:5]
+
+        is_coding = qtype == "coding"
         return AIInterviewResponse(
             question=question,
             questionType=qtype,
             answerPoints=points,
+            simpleExplanation=simple if level != "short" else None,
+            keyDetails=details,
             star=star,
-            codeHint=code_hint if qtype == "coding" else None,
+            approach=approach if is_coding else None,
+            codeHint=code_hint if is_coding else None,
+            humanCode=human_code if is_coding else None,
+            complexity=complexity if is_coding else None,
+            edgeCases=edge_cases if is_coding else [],
             example=example if level != "short" else None,
-            keyTakeaways=takeaways,
-            followUpQuestions=follow_ups,
+            followUps=follow_ups,
             responseLength=level,
-            comparison=_comparison_table(question),
         )
 
 
@@ -444,7 +578,14 @@ class OpenAICompatibleLLMProvider(LLMProvider):
     def _categorize_status(status: int, body: str = "") -> str:
         """Map an HTTP status (+body) to a stable, reportable error category."""
         low = body.lower()
-        if "insufficient_quota" in low or "billing" in low:
+        # 402 Payment Required is a billing state by definition; DeepSeek spells
+        # it "Insufficient Balance" (OpenAI/Groq use "insufficient_quota").
+        if (
+            "insufficient_quota" in low
+            or "insufficient balance" in low
+            or "billing" in low
+            or status == 402
+        ):
             return "quota"
         if status == 429:
             return "rate_limit"
@@ -464,21 +605,82 @@ class OpenAICompatibleLLMProvider(LLMProvider):
         base_url: str = "",
         model: str = "",
         name: str = "openai-compatible",
+        max_tokens_param: str = "max_tokens",
+        supports_temperature: bool = True,
+        reasoning_effort: str | None = None,
     ) -> None:
         settings = get_settings()
         self.api_key = api_key or settings.llm_api_key
         self.base_url = (base_url or settings.llm_base_url).rstrip("/")
         self.model = model or settings.llm_model
         self.name = name
+        # OpenAI's reasoning models (GPT-6 Luna) require max_completion_tokens;
+        # everyone else uses max_tokens.
+        self.max_tokens_param = max_tokens_param or "max_tokens"
+        # Reasoning models accept only temperature=1 (the default) — omit it.
+        self.supports_temperature = supports_temperature
+        # Optional reasoning budget ("low"|"medium"|"high"). Omitting it means
+        # the provider's own default, which for several models is a LONG think
+        # that delays the first visible bullet. Verified: openai/gpt-oss-120b
+        # reached its first content delta in 0.50s with low vs 1.12s without.
+        # If a provider rejects the field we drop it and retry once (see
+        # _suppress_reasoning_effort) — an unsupported param can never fail a
+        # request outright.
+        self.reasoning_effort = reasoning_effort
+        self._reasoning_disabled = False
+        # Set when an attempt was cut short by the token cap, so the retry
+        # actually gets more room (see BUDGET_LIFT_ON_TRUNCATION).
+        self._budget_multiplier: float = 1.0
+        # Extra instruction appended to the system prompt on a retry (empty /
+        # truncated answer). Kept per-instance because the payload is rebuilt
+        # every attempt, which is what makes a dropped reasoning_effort or a
+        # lifted budget take effect on the retry.
+        self._system_addendum: str = ""
         self._mock = MockLLMProvider()
         # Usage telemetry (filled after each call; read by AIService for tracking).
         self.last_latency_ms: float = 0.0
         self.last_input_tokens: int | None = None
         self.last_output_tokens: int | None = None
         self.last_error_category: str | None = None
+        # Time-to-first-provisional-bullet (ms) — the number the candidate
+        # actually perceives as "how long until something appears". None when
+        # the call never streamed a bullet (non-stream call or failure).
+        self.first_delta_ms: float | None = None
         # True when the latest streaming call emitted at least one delta
         # before finishing/failing (lets the caller pick single-shot retry).
         self.stream_had_deltas: bool = False
+
+    def _suppress_reasoning_effort(self, status: int) -> bool:
+        """True when this request-body rejection was caused by `reasoning_effort`.
+
+        One clean retry without the field is always allowed, so a provider
+        update that stops accepting it degrades to the old behaviour instead of
+        breaking the answer. 400 covers Google/Groq/OpenAI-style rejections and
+        422 covers DeepSeek, which deserializes the body and answers
+        HTTP 422 `unknown variant ...` for a bad effort value.
+        """
+        if status not in (400, 422):
+            return False
+        if not self.reasoning_effort or self._reasoning_disabled:
+            return False
+        self._reasoning_disabled = True
+        logger.warning(
+            "LLM rejected reasoning_effort (HTTP %d) — retrying without it: model=%s",
+            status,
+            self.model,
+        )
+        return True
+
+    def _output_budget(self, level: str) -> int:
+        return int(MAX_TOKENS.get(level, 1400) * self._budget_multiplier)
+
+    def _lift_budget(self, why: str) -> None:
+        """Give the NEXT attempt more room after a truncated/empty answer."""
+        self._budget_multiplier *= BUDGET_LIFT_ON_TRUNCATION
+        logger.warning(
+            "LLM unusable response (%s) — lifting output budget to %.2fx (model=%s)",
+            why, self._budget_multiplier, self.model,
+        )
 
     def _headers(self) -> dict[str, str]:
         """Auth (+ attribution OpenRouter asks for on its endpoint only)."""
@@ -499,7 +701,12 @@ class OpenAICompatibleLLMProvider(LLMProvider):
     def _friendly_error(status: int, body: str, model: str = "") -> str:
         detail = body[:300]
         low = body.lower()
-        if "insufficient_quota" in low or "billing" in low:
+        if (
+            "insufficient_quota" in low
+            or "insufficient balance" in low
+            or "billing" in low
+            or status == 402
+        ):
             return (
                 "LLM quota exhausted — add credits/billing to your provider account "
                 f"(HTTP {status}). {detail}"
@@ -524,28 +731,50 @@ class OpenAICompatibleLLMProvider(LLMProvider):
         return f"LLM request failed (HTTP {status}). {detail}"
 
     def _request_payload(
-        self, level: str, resume: str, job_description: str, question: str
+        self,
+        level: str,
+        resume: str,
+        job_description: str,
+        question: str,
+        history: list[dict] | None = None,
     ) -> tuple[dict, int]:
         """Chat-completions body + token budget shared by single-shot/stream."""
-        payload = {
+        payload: dict = {
             "model": self.model,
-            # Longer answers benefit from a bit more creativity in phrasing.
-            "temperature": 0.6 if level == "long" else 0.4,
             "messages": [
-                {"role": "system", "content": build_system_prompt(level)},
+                {
+                    "role": "system",
+                    # + retry addendum (empty on the first attempt).
+                    "content": build_system_prompt(level) + self._system_addendum,
+                },
                 {
                     "role": "user",
                     "content": (
                         f"Desired response length: {level.upper()}\n\n"
                         f"Resume:\n{resume[:4000]}\n\n"
                         f"Job description:\n{job_description[:4000]}\n\n"
+                        f"{format_history(history)}"
                         f"Interviewer question:\n{question}"
                     ),
                 },
             ],
         }
-        # Shared caps (short answers never need a long tail).
-        max_tokens = MAX_TOKENS.get(level, 1400)
+        # Reasoning models (GPT-6 Luna) accept only the default temperature,
+        # so omit it for them; everyone else gets a little variance.
+        if self.supports_temperature:
+            payload["temperature"] = 0.6 if level == "long" else 0.4
+        # Ask for a SHORT think when the model supports it. This is the single
+        # biggest lever on time-to-first-bullet for reasoning models: without it
+        # they sit in a silent thinking phase while the candidate watches a
+        # spinner (measured: openai/gpt-oss-120b first delta 1.12s -> 0.50s).
+        # Dropped automatically on a 400 so an unsupported field can never fail
+        # the request outright.
+        if self.reasoning_effort and not self._reasoning_disabled:
+            payload["reasoning_effort"] = self.reasoning_effort
+        # Shared caps (short answers never need a long tail). Lifted when a
+        # previous attempt was truncated, so the retry is not doomed to fail
+        # for exactly the same reason.
+        max_tokens = self._output_budget(level)
         return payload, max_tokens
 
     async def analyze_question_stream(
@@ -555,6 +784,7 @@ class OpenAICompatibleLLMProvider(LLMProvider):
         question: str,
         response_length: str = "medium",
         on_delta: Callable[[str], Awaitable[None]] | None = None,
+        history: list[dict] | None = None,
     ) -> AIInterviewResponse:
         """SSE streaming variant: provisional bullets via ``on_delta``.
 
@@ -569,13 +799,12 @@ class OpenAICompatibleLLMProvider(LLMProvider):
 
         if on_delta is None:
             return await self.analyze_question(
-                resume, job_description, question, response_length
+                resume, job_description, question, response_length, history
             )
         level = response_length if response_length in LENGTH_RULES else "medium"
         payload, max_tokens = self._request_payload(
-            level, resume, job_description, question
+            level, resume, job_description, question, history
         )
-        body = {**payload, "max_tokens": max_tokens, "stream": True}
         # NOTE: no stream_options.include_usage — tolerance on Gemini's
         # OpenAI-compatible endpoint is unverified, so streamed token counts
         # stay None (never estimated) instead of risking a rejected request.
@@ -585,16 +814,27 @@ class OpenAICompatibleLLMProvider(LLMProvider):
         )
         t0 = time.perf_counter()
         self.stream_had_deltas = False
+        self.first_delta_ms = None
         self.last_input_tokens = None
         self.last_output_tokens = None
         timeout = httpx.Timeout(connect=15.0, read=60.0, write=15.0, pool=15.0)
         try:
             async with shared_http() as client:
                 last_exc: Exception | None = None
-                for attempt in range(self.max_retries + 1):
+                # +1 spare attempt only when reasoning_effort is in play: it is
+                # reserved for the "provider rejected the field, retry without
+                # it" path, so a normal call's retry budget is unchanged.
+                attempts = self.max_retries + 1 + (1 if self.reasoning_effort else 0)
+                for attempt in range(attempts):
                     # A started stream can never resume — retry pre-delta only.
                     if attempt > 0 and self.stream_had_deltas:
                         break
+                    # Rebuilt each attempt: a 400 on reasoning_effort removes
+                    # the field from the NEXT payload.
+                    payload, max_tokens = self._request_payload(
+                        level, resume, job_description, question, history
+                    )
+                    body = {**payload, self.max_tokens_param: max_tokens, "stream": True}
                     try:
                         async with client.stream(
                             "POST",
@@ -612,6 +852,7 @@ class OpenAICompatibleLLMProvider(LLMProvider):
                                 )
                             buffer = ""
                             sent = 0
+                            finish_reason = None
                             async for line in resp.aiter_lines():
                                 if not line.startswith("data:"):
                                     continue
@@ -624,8 +865,12 @@ class OpenAICompatibleLLMProvider(LLMProvider):
                                     continue
                                 try:
                                     choices = chunk.get("choices") or [{}]
+                                    choice = choices[0] or {}
+                                    fin = choice.get("finish_reason")
+                                    if fin:
+                                        finish_reason = fin
                                     delta = (
-                                        choices[0].get("delta", {}).get("content")
+                                        choice.get("delta", {}).get("content")
                                         or ""
                                     )
                                 except (AttributeError, IndexError, TypeError):
@@ -635,19 +880,43 @@ class OpenAICompatibleLLMProvider(LLMProvider):
                                 buffer += delta
                                 for point in _extract_answer_points(buffer)[sent:]:
                                     sent += 1
-                                    self.stream_had_deltas = True
+                                    if not self.stream_had_deltas:
+                                        self.stream_had_deltas = True
+                                        # Time-to-first-bullet: the latency the
+                                        # candidate actually SEES (the final
+                                        # total hides how long the model spent
+                                        # thinking before anything appeared).
+                                        self.first_delta_ms = (
+                                            time.perf_counter() - t0
+                                        ) * 1000
+                                        logger.info(
+                                            "LLM stream first bullet: %.2fs model=%s",
+                                            self.first_delta_ms / 1000, self.model,
+                                        )
                                     await on_delta(point)
                             content = buffer.strip()
                             self.last_latency_ms = (time.perf_counter() - t0) * 1000
                             self.last_error_category = "ok"
                             if not content:
+                                self._lift_budget("empty content")
                                 raise ValueError("LLM returned an empty response")
-                            data = _extract_json(content)
+                            try:
+                                data = _extract_json(content)
+                            except ValueError:
+                                # finish_reason == "length" is the common cause:
+                                # the reasoning model outran the cap mid-JSON.
+                                # Lift the budget now so the caller's retry has
+                                # real headroom instead of failing identically.
+                                self._lift_budget(
+                                    f"finish_reason={finish_reason} / invalid JSON"
+                                )
+                                raise
                             data.setdefault("question", question)
                             data["responseLength"] = level
                             logger.info(
-                                "LLM stream ok: %.2fs, %d points",
+                                "LLM stream ok: %.2fs (first bullet %.2fs), %d points",
                                 time.perf_counter() - t0,
+                                (self.first_delta_ms or 0.0) / 1000,
                                 len(data.get("answerPoints", [])),
                             )
                             return AIInterviewResponse(**data)
@@ -662,12 +931,25 @@ class OpenAICompatibleLLMProvider(LLMProvider):
                             status, err_body
                         )
                         self.last_latency_ms = (time.perf_counter() - t0) * 1000
+                        # Error bodies were previously swallowed, which made
+                        # provider 400s (bad param, retired model) invisible.
+                        logger.warning(
+                            "LLM stream HTTP %d after %.2fs: %s",
+                            status, self.last_latency_ms / 1000, err_body[:300],
+                        )
+                        # A rejected `reasoning_effort` must never fail the
+                        # answer — drop it and retry once with the spare attempt.
+                        if (
+                            self._suppress_reasoning_effort(status)
+                            and not self.stream_had_deltas
+                        ):
+                            continue
                         if (
                             status in (429, 500, 502, 503, 504)
                             and attempt < self.max_retries
                             and not self.stream_had_deltas
                         ):
-                            wait = 1.5 * (2**attempt)
+                            wait = RETRY_BACKOFF_BASE * (2**attempt)
                             logger.warning(
                                 "LLM stream %s — retrying in %.1fs (attempt %d/%d)",
                                 status, wait, attempt + 1, self.max_retries,
@@ -686,7 +968,7 @@ class OpenAICompatibleLLMProvider(LLMProvider):
                         )
                         self.last_latency_ms = (time.perf_counter() - t0) * 1000
                         if attempt < self.max_retries and not self.stream_had_deltas:
-                            await asyncio.sleep(1.5 * (2**attempt))
+                            await asyncio.sleep(RETRY_BACKOFF_BASE * (2**attempt))
                             continue
                         raise LLMQuotaError(
                             "Unable to reach the AI service."
@@ -708,7 +990,7 @@ class OpenAICompatibleLLMProvider(LLMProvider):
             )
             try:
                 return await self.analyze_question(
-                    resume, job_description, question, response_length
+                    resume, job_description, question, response_length, history
                 )
             except Exception:
                 return await self._mock.analyze_question(resume, job_description, question)
@@ -719,12 +1001,15 @@ class OpenAICompatibleLLMProvider(LLMProvider):
         job_description: str,
         question: str,
         response_length: str = "medium",
+        history: list[dict] | None = None,
     ) -> AIInterviewResponse:
         import asyncio
         import time
 
         level = response_length if response_length in LENGTH_RULES else "medium"
-        payload, max_tokens = self._request_payload(level, resume, job_description, question)
+        payload, max_tokens = self._request_payload(
+            level, resume, job_description, question, history
+        )
         logger.info(
             "LLM request: model=%s level=%s max_tokens=%d timeout=15s qlen=%d",
             self.model, level, max_tokens, len(question)
@@ -736,12 +1021,20 @@ class OpenAICompatibleLLMProvider(LLMProvider):
             # via the shared pool (no per-call TLS handshake).
             async with shared_http() as client:
                 last_exc: Exception | None = None
-                for attempt in range(self.max_retries + 1):
+                # +1 spare attempt is reserved for dropping a rejected
+                # reasoning_effort — a normal call's retry budget is unchanged.
+                attempts = self.max_retries + 1 + (1 if self.reasoning_effort else 0)
+                for attempt in range(attempts):
+                    # Rebuilt per attempt so a 400 can drop reasoning_effort,
+                    # and so a lifted budget from a truncated attempt applies.
+                    payload, max_tokens = self._request_payload(
+                        level, resume, job_description, question, history
+                    )
                     try:
                         resp = await client.post(
                             f"{self.base_url}/chat/completions",
                             headers=self._headers(),
-                            json={**payload, "max_tokens": max_tokens},
+                            json={**payload, self.max_tokens_param: max_tokens},
                             timeout=15.0,
                         )
                         if resp.status_code >= 400:
@@ -765,17 +1058,28 @@ class OpenAICompatibleLLMProvider(LLMProvider):
                         # when they spend the whole budget thinking.
                         if not content:
                             if attempt < self.max_retries:
-                                logger.warning(
-                                    "LLM returned empty content — retrying with more budget"
-                                )
-                                max_tokens = int(max_tokens * 1.5)
-                                payload["messages"][0]["content"] += (
+                                self._lift_budget("empty content")
+                                self._system_addendum += (
                                     "\nRespond with JSON only. Do not add reasoning text."
                                 )
-                                await asyncio.sleep(0.5)
+                                await asyncio.sleep(0.25)
                                 continue
                             raise ValueError("LLM returned an empty response")
-                        data = _extract_json(content)
+                        try:
+                            data = _extract_json(content)
+                        except ValueError:
+                            # Truncated / unparseable JSON (a reasoning model
+                            # that outran its budget mid-answer). Retry with
+                            # more headroom and an explicit "don't truncate".
+                            if attempt < self.max_retries:
+                                self._lift_budget("unparseable JSON")
+                                self._system_addendum += (
+                                    "\nRespond with a COMPLETE, valid JSON object. "
+                                    "Do not truncate."
+                                )
+                                await asyncio.sleep(0.25)
+                                continue
+                            raise
                         # The backend asked the question, so it is the authority
                         # when the model doesn't echo it back verbatim.
                         data.setdefault("question", question)
@@ -791,12 +1095,24 @@ class OpenAICompatibleLLMProvider(LLMProvider):
                         body = exc.response.text or ""
                         self.last_error_category = self._categorize_status(status, body)
                         self.last_latency_ms = (time.perf_counter() - t0) * 1000
+                        # Error bodies were previously swallowed, which made
+                        # provider 400s (bad param, retired model) invisible.
+                        logger.warning(
+                            "LLM HTTP %d after %.2fs: %s",
+                            status, self.last_latency_ms / 1000, body[:300],
+                        )
+                        # A rejected `reasoning_effort` must never fail the
+                        # answer — drop it and retry once with the spare attempt.
+                        if self._suppress_reasoning_effort(status):
+                            continue
                         # Retry transient limits/server errors only.
                         if status in (429, 500, 502, 503, 504) and attempt < self.max_retries:
-                            wait = 1.5 * (2**attempt)
+                            wait = RETRY_BACKOFF_BASE * (2**attempt)
                             retry_after = exc.response.headers.get("retry-after")
                             if retry_after and retry_after.isdigit():
-                                wait = min(float(retry_after), 10.0)
+                                # Live answers cannot wait out a long rate-limit
+                                # window — cap it and let the fallback handle it.
+                                wait = min(float(retry_after), 5.0)
                             logger.warning(
                                 "LLM %s (%.2fs) — retrying in %.1fs (attempt %d/%d)",
                                 status, time.perf_counter() - t0, wait, attempt + 1, self.max_retries,
@@ -814,7 +1130,7 @@ class OpenAICompatibleLLMProvider(LLMProvider):
                         self.last_latency_ms = (time.perf_counter() - t0) * 1000
                         if attempt < self.max_retries:
                             logger.warning("LLM network error (%s) — retrying", exc)
-                            await asyncio.sleep(1.5 * (2**attempt))
+                            await asyncio.sleep(RETRY_BACKOFF_BASE * (2**attempt))
                             continue
                         raise LLMQuotaError("Unable to reach the AI service.") from exc
                 raise LLMQuotaError(

@@ -1,0 +1,99 @@
+<div class="result">
+  <div class="head">
+    <div class="chips">
+      @if (result().topic) { <span class="chip">Topic: {{ result().topic }}</span> }
+      @if (result().seniority) { <span class="chip alt">Level: {{ result().seniority }}</span> }
+    </div>
+    <button class="btn-ghost sm" (click)="copy('all', allText(result()))">
+      {{ copied() === 'all' ? '✓ Copied' : 'Copy all' }}
+    </button>
+  </div>
+
+  <section>
+    <h4>Detected question{{ result().questions.length === 1 ? '' : 's' }}</h4>
+    @if (result().questions.length) {
+      <ol>
+        @for (q of result().questions; track $index) { <li>{{ q }}</li> }
+      </ol>
+    } @else {
+      <p class="muted">No question was detected in the screenshots.</p>
+    }
+  </section>
+
+  @if (result().directAnswer) {
+    <section>
+      <div class="sec-head">
+        <h4>1 · Direct answer</h4>
+        <button class="btn-ghost sm" (click)="copy('direct', result().directAnswer)">{{ copied() === 'direct' ? '✓ Copied' : 'Copy' }}</button>
+      </div>
+      <p class="pre">{{ result().directAnswer }}</p>
+    </section>
+  }
+
+  @if (result().interviewAnswer) {
+    <section>
+      <div class="sec-head">
+        <h4>2 · Interview-style answer</h4>
+        <button class="btn-ghost sm" (click)="copy('interview', result().interviewAnswer)">{{ copied() === 'interview' ? '✓ Copied' : 'Copy' }}</button>
+      </div>
+      <p class="pre">{{ result().interviewAnswer }}</p>
+    </section>
+  }
+
+  @if (result().keyPoints.length) {
+    <section>
+      <div class="sec-head">
+        <h4>3 · Key points to mention</h4>
+        <button class="btn-ghost sm" (click)="copy('points', keyPointsText(result()))">{{ copied() === 'points' ? '✓ Copied' : 'Copy' }}</button>
+      </div>
+      <ul>
+        @for (p of result().keyPoints; track $index) { <li>{{ p }}</li> }
+      </ul>
+    </section>
+  }
+
+  @if (result().followUps.length) {
+    <section>
+      <div class="sec-head">
+        <h4>4 · Likely follow-ups</h4>
+        <button class="btn-ghost sm" (click)="copy('follow', followUpsText(result()))">{{ copied() === 'follow' ? '✓ Copied' : 'Copy' }}</button>
+      </div>
+      @for (f of result().followUps; track $index) {
+        <div class="follow">
+          <strong>{{ f.question }}</strong>
+          <p class="pre">{{ f.suggestedResponse }}</p>
+        </div>
+      }
+    </section>
+  }
+
+  @if (result().code; as code) {
+    <section>
+      <h4>5 · Code review</h4>
+      @if (code.explanation) {
+        <h5>Explanation</h5>
+        <p class="pre">{{ code.explanation }}</p>
+      }
+      @if (code.complexity) {
+        <h5>Complexity</h5>
+        <p class="pre">{{ code.complexity }}</p>
+      }
+      @if (code.edgeCases.length) {
+        <h5>Edge cases</h5>
+        <ul>
+          @for (e of code.edgeCases; track $index) { <li>{{ e }}</li> }
+        </ul>
+      }
+      @if (code.improvedAnswer) {
+        <div class="sec-head">
+          <h5>Improved answer</h5>
+          <button class="btn-ghost sm" (click)="copy('improved', code.improvedAnswer)">{{ copied() === 'improved' ? '✓ Copied' : 'Copy' }}</button>
+        </div>
+        @for (seg of splitFences(code.improvedAnswer); track $index) {
+          @if (seg.kind === 'code') { <pre><code>{{ seg.value }}</code></pre> }
+          @else { <p class="pre">{{ seg.value }}</p> }
+        }
+      }
+    </section>
+  }
+</div>

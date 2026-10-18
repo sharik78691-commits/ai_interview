@@ -98,7 +98,14 @@ Setup:
 GROQ_API_KEY=        # optional: falls back to LLM_API_KEY
 GEMINI_API_KEY=      # Google AI Studio key for Gemini Flash
 OPENROUTER_API_KEY=  # serves both Qwen and the OpenRouter fallback
+DEEPSEEK_API_KEY=    # DeepSeek V4.1 Flash + V4 Pro (chat needs account balance)
 ```
+
+- DeepSeek runs on its official OpenAI-compatible endpoint
+  (`https://api.deepseek.com/v1`). Model ids come from `GET /models`:
+  `deepseek-flash` (DeepSeek-V4.1 Flash) and `deepseek-v4-pro`
+  (DeepSeek-V4 Pro). An empty balance rejects generation with HTTP
+  402 `Insufficient Balance` even though the key authenticates.
 
 - A model is selectable only when its provider key is set AND an admin has not
   disabled it. Keys without configuration show as "unavailable" in the UI.

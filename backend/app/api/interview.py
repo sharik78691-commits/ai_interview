@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-VALID_LENGTHS = {"short", "medium", "long"}
+VALID_LENGTHS = {"default", "short", "medium", "long"}
 
 # Per-user interview context, keyed by user id. This replaces the previous
 # single global dict so one user can never read another user's resume/JD.

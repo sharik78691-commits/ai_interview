@@ -5,6 +5,7 @@ import { Subscription } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import {
   AIInterviewResponse,
+  FollowUpItem,
   HistoryItem,
   InterviewStatus,
   RESPONSE_LENGTH_LABELS,
@@ -24,6 +25,36 @@ import { TranscriptionService } from '../../core/services/transcription.service'
 import { ErrorBannerComponent } from '../../shared/components/error-banner/error-banner.component';
 import { TimeFormatPipe } from '../../shared/pipes/time-format.pipe';
 import { RichTextPipe } from '../../shared/pipes/rich-text.pipe';
+
+/** View model for the adaptive Interview Answer Card. */
+export interface AnswerCard {
+  typeLabel: string;
+  isCoding: boolean;
+  /** Best Answer sentences grouped into short, speakable paragraphs. */
+  bestAnswer: string[];
+  keyDetails: string[];
+  followUps: FollowUpItem[];
+}
+
+const EMPTY_CARD: AnswerCard = {
+  typeLabel: '',
+  isCoding: false,
+  bestAnswer: [],
+  keyDetails: [],
+  followUps: [],
+};
+
+/**
+ * Group spoken sentences into paragraphs of at most two, so the Best Answer
+ * reads like natural speech without becoming a wall of text.
+ */
+export function groupSentences(sentences: string[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < sentences.length; i += 2) {
+    out.push(sentences.slice(i, i + 2).join(' '));
+  }
+  return out;
+}
 
 @Component({
   selector: 'app-interview',
@@ -110,31 +141,83 @@ export class InterviewComponent implements OnInit, OnDestroy {
   systemAudioDevices: string[] | null = null;
   /** Info popup shown before "Auto Select Meeting Audio" starts capturing. */
   autoSelectInfoOpen = false;
-  /** Window transparency in percent (desktop top-bar slider, 0 = solid). */
-  windowTransparency = 0;
 
-  /** Answer text used by the "Copy Answer" button. */
+  /** Answer text used by the "Copy Answer" button (mirrors the card). */
   get answerText(): string {
     const g = this.guidance;
     if (!g) return '';
-    const parts: string[] = [`Question: ${g.question}`, '', 'Answer points:'];
-    g.answerPoints.forEach((p, i) => parts.push(`${i + 1}. ${p}`));
-    if (g.keyTakeaways?.length) {
-      parts.push('', 'Key takeaways:');
-      g.keyTakeaways.forEach((t) => parts.push(`- ${t}`));
+    const c = this.card;
+    const parts: string[] = [`Question: ${g.question}`];
+    const section = (title: string, body: string[]) => {
+      if (body.length) parts.push('', `${title}:`, ...body);
+    };
+    if (c.isCoding) {
+      section('Approach', g.approach ? [g.approach] : []);
+      section('Program 1 (AI solution)', g.codeHint ? [g.codeHint] : []);
+      section('Program 2 (human-style version)', g.humanCode ? [g.humanCode] : []);
+      section('Complexity', g.complexity ? [g.complexity] : []);
+      section('Edge cases', (g.edgeCases ?? []).map((e) => `- ${e}`));
+      section('Explain it like this', [g.answerPoints.join(' ')]);
+    } else {
+      section('Best answer', [g.answerPoints.join(' ')]);
+      section('Explain it simply', g.simpleExplanation ? [g.simpleExplanation] : []);
+      section('Key details', c.keyDetails.map((d) => `- ${d}`));
+      section('Practical example', g.example ? [g.example] : []);
     }
-    if (g.example) parts.push('', `Example: ${g.example}`);
     if (g.star) {
-      parts.push('', 'STAR:');
-      if (typeof g.star === 'string') parts.push(g.star);
-      else Object.entries(g.star).forEach(([k, v]) => parts.push(`${k}: ${v}`));
+      section(
+        'Situation → Action → Result',
+        typeof g.star === 'string' ? [g.star] : this.starEntries().map(([k, v]) => `${k}: ${v}`),
+      );
     }
-    if (g.codeHint) parts.push('', `Code hint:\n${g.codeHint}`);
-    if (g.followUpQuestions?.length) {
-      parts.push('', 'Follow-up questions:');
-      g.followUpQuestions.forEach((f) => parts.push(`- ${f}`));
-    }
+    section(
+      'If they ask further',
+      c.followUps.map((f) => (f.answer ? `- ${f.question}\n  ${f.answer}` : `- ${f.question}`)),
+    );
     return parts.join('\n');
+  }
+
+  /** Display labels for the backend's question types. */
+  private static readonly TYPE_LABELS: Record<string, string> = {
+    technical: 'Theory',
+    behavioral: 'Scenario',
+    coding: 'Coding',
+    general: 'HR',
+  };
+
+  private cardFor: AIInterviewResponse | null = null;
+  private cardCache: AnswerCard = EMPTY_CARD;
+
+  /**
+   * View model for the adaptive Interview Answer Card, memoized per answer so
+   * change detection does not rebuild arrays. Falls back to the legacy
+   * `keyTakeaways` / `followUpQuestions` fields for older payloads.
+   */
+  get card(): AnswerCard {
+    const g = this.guidance;
+    if (!g) return EMPTY_CARD;
+    if (g === this.cardFor) return this.cardCache;
+    const followUps: FollowUpItem[] = g.followUps?.length
+      ? g.followUps.filter((f) => f?.question)
+      : (g.followUpQuestions ?? []).map((f) => {
+          const [question, ...rest] = f.split(' - ');
+          return { question: question.trim(), answer: rest.join(' - ').trim() };
+        });
+    const isCoding = g.questionType === 'coding' && !!(g.codeHint || g.approach);
+    this.cardFor = g;
+    this.cardCache = {
+      typeLabel: InterviewComponent.TYPE_LABELS[g.questionType] ?? g.questionType,
+      isCoding,
+      bestAnswer: groupSentences(g.answerPoints),
+      keyDetails: g.keyDetails?.length ? g.keyDetails : (g.keyTakeaways ?? []),
+      followUps,
+    };
+    return this.cardCache;
+  }
+
+  /** Provisional (streamed) Best Answer, grouped the same way as the final card. */
+  get draftParagraphs(): string[] {
+    return groupSentences(this.provisionalPoints);
   }
   elapsed = 0;
   live = false;
@@ -163,6 +246,12 @@ export class InterviewComponent implements OnInit, OnDestroy {
     this.ws.connect();
     this.transcription.connect();
     this.micSupported = this.transcription.isSupported();
+    // connect() only wires the callbacks — the Web Speech recognizer must also
+    // be STARTED or the mic path stays completely silent (that start call was
+    // dropped in bc62b86, which made voice-to-text look like it "never loads").
+    // Chrome asks for mic permission once per origin; afterwards this is
+    // silent. ngOnDestroy()/sign-out release it via transcription.stop().
+    if (this.micSupported) this.transcription.start();
     // Meeting audio needs server-side transcription; show the state up front.
     this.resumeService.checkHealth().subscribe({
       next: (h) => (this.sttReady = h.stt_configured !== false),
@@ -265,11 +354,6 @@ export class InterviewComponent implements OnInit, OnDestroy {
       this.ws.streamPoints$.subscribe((pts) => (this.provisionalPoints = pts)),
       this.ws.streaming$.subscribe((s) => (this.isStreaming = s)),
     );
-
-    // --- Window transparency (Electron top-bar slider) ---
-    // Restore the user's last choice so a restart keeps the same look.
-    this.windowTransparency = this.readTransparency();
-    this.applyTransparency(this.windowTransparency);
   }
 
   /**
@@ -306,11 +390,6 @@ export class InterviewComponent implements OnInit, OnDestroy {
     return this.history.slice(0, -1).reverse();
   }
 
-  /** Latest three transcript entries are shown in the Transcript panel. */
-  get recentEntries(): TranscriptEntry[] {
-    return this.entries.slice(-3);
-  }
-
   ngOnDestroy(): void {
     this.subs.forEach((s) => s.unsubscribe());
     this.stopTimer();
@@ -335,6 +414,7 @@ export class InterviewComponent implements OnInit, OnDestroy {
   /** Rough word budget shown next to the depth selector. */
   get lengthHint(): string {
     switch (this.responseLength) {
+      case 'default': return 'Complete answer + full interviewer checklist';
       case 'short': return '3–4 quick bullets';
       case 'long': return '8–12 detailed bullets + example';
       default: return '5–7 structured bullets';
@@ -354,53 +434,6 @@ export class InterviewComponent implements OnInit, OnDestroy {
         this.live = false;
       },
     });
-  }
-
-  // --------------------------------- window transparency (Electron)
-
-  /** Slider value (0–88). 0% = solid window, 88% = almost fully see-through. */
-  private static readonly MAX_TRANSPARENCY = 88;
-  private static readonly TRANSPARENCY_KEY = 'aia_window_transparency';
-
-  private clampTransparency(value: number): number {
-    if (!Number.isFinite(value)) return 0;
-    return Math.min(
-      InterviewComponent.MAX_TRANSPARENCY,
-      Math.max(0, Math.round(value)),
-    );
-  }
-
-  private readTransparency(): number {
-    try {
-      const raw = localStorage.getItem(InterviewComponent.TRANSPARENCY_KEY);
-      // Older versions allowed up to 100 — clamp into the current range.
-      return this.clampTransparency(raw === null ? 0 : Number(raw));
-    } catch {
-      return 0;
-    }
-  }
-
-  /** Slider moved: live update + remember the choice. */
-  setWindowTransparency(event: Event): void {
-    const input = event.target as HTMLInputElement | null;
-    this.windowTransparency = this.clampTransparency(
-      input ? Number(input.value) : 0,
-    );
-    try {
-      localStorage.setItem(
-        InterviewComponent.TRANSPARENCY_KEY,
-        String(this.windowTransparency),
-      );
-    } catch {
-      // Private mode / blocked storage — the slider still works this session.
-    }
-    this.applyTransparency(this.windowTransparency);
-  }
-
-  /** Send 0–88% transparency to the Electron shell as 1.0–0.12 opacity. */
-  private applyTransparency(percent: number): void {
-    const opacity = 1 - this.clampTransparency(percent) / 100;
-    void window.electronAPI?.setOpacity?.(opacity);
   }
 
   // ------------------------------------------------ interviewer audio controls
@@ -673,6 +706,8 @@ export class InterviewComponent implements OnInit, OnDestroy {
   private onTranscript(text: string, isFinal: boolean): void {
     if (!isFinal) return;
     this.entries.push({ speaker: 'interviewer', text, timestamp: new Date(), isQuestion: QuestionDetectorService.detect(text) });
+    // The Transcript panel shows only the latest interviewer message.
+    this.lastInterviewerText = text;
     this.detector.pushFragment(text);
     // Demo mode is fully on-device: never forward demo speech to the server,
     // or every demo question gets TWO answers (demo + live AI).

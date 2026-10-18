@@ -42,6 +42,23 @@ class ModelSpec:
     api_key: str
     free_tier: bool
     capabilities: str
+    # Which request field carries the output token cap. OpenAI's newer
+    # reasoning models (GPT-6 Luna) reject ``max_tokens`` and require
+    # ``max_completion_tokens``; every other provider uses ``max_tokens``.
+    max_tokens_param: str = "max_tokens"
+    # Reasoning models accept only temperature=1 (default) — set False to omit
+    # the temperature field entirely for them.
+    supports_temperature: bool = True
+    # Optional `reasoning_effort` ("low"|"medium"|"high") sent with the request.
+    # Asking for a shorter think is the biggest measured lever on time-to-
+    # first-bullet for reasoning models (openai/gpt-oss-120b: 1.12s -> 0.50s to
+    # the first visible bullet, total 1.56s -> 0.84s, JSON valid either way).
+    # None means "leave the provider's default alone" — it is deliberately NOT
+    # set for models where it was measured neutral or negative (Gemini flash-lite
+    # 0.71s vs 0.74s) or where the field is rejected outright (Gemini flash-lite
+    # rejects "none" with HTTP 400). A rejected value is dropped and retried
+    # once by the provider, so this can degrade safely.
+    reasoning_effort: str | None = None
 
 
 # Canonical model catalog. model_id values were verified against the providers'
@@ -60,16 +77,52 @@ def _catalog() -> list[ModelSpec]:
             api_key=s.groq_api_key,
             free_tier=True,
             capabilities="Fast, strong open-weight model for technical and coding answers",
+            # gpt-oss is a REASONING model: at the default effort it spends a
+            # silent 0.6s thinking before the first bullet appears, and at a
+            # 700-token cap it could burn the whole budget on reasoning and
+            # return truncated JSON. Verified 200 on this endpoint (it enforces
+            # the low|medium|high enum) and measured: first bullet 1.12s -> 0.50s,
+            # total 1.56s -> 0.84s, valid JSON in both cases. Also cuts TPM
+            # consumption, which is this account's tightest free-tier limit
+            # (8000 tokens/min).
+            reasoning_effort="low",
         ),
         ModelSpec(
             key="gemini-flash",
             provider="Google",
-            display_name="Gemini Flash — Google",
+            display_name="Gemini 3.5 Flash-Lite — Google",
             model_id=s.gemini_model,
             base_url="https://generativelanguage.googleapis.com/v1beta/openai",
             api_key=s.gemini_api_key,
             free_tier=True,
-            capabilities="Google's low-latency Flash model via the official OpenAI-compatible endpoint",
+            capabilities="Google's fastest, low-cost Gemini 3.5 Flash-Lite model",
+        ),
+        ModelSpec(
+            key="gemini-3.5-flash",
+            provider="Google",
+            display_name="Gemini 3.5 Flash — Google",
+            model_id=s.gemini_35_model,
+            base_url="https://generativelanguage.googleapis.com/v1beta/openai",
+            api_key=s.gemini_api_key,
+            free_tier=True,
+            capabilities="Google's Gemini 3.5 Flash (full Flash — replaces the retired 2.5 Flash)",
+            # Full Flash is the SLOWEST model in the catalog (measured 4.43s to
+            # the first visible bullet vs 0.71s for Flash-Lite) because it
+            # thinks first. `low` is validated by this endpoint (it rejects an
+            # out-of-enum value with 400, so the field is honoured, not ignored)
+            # and measured 4.43s -> 3.38s to first bullet. The two Gemini models
+            # where it measured neutral or negative are deliberately left unset.
+            reasoning_effort="low",
+        ),
+        ModelSpec(
+            key="gemini-3.1-flash-lite",
+            provider="Google",
+            display_name="Gemini 3.1 Flash-Lite — Google",
+            model_id=s.gemini_31_lite_model,
+            base_url="https://generativelanguage.googleapis.com/v1beta/openai",
+            api_key=s.gemini_api_key,
+            free_tier=True,
+            capabilities="Google's Gemini 3.1 Flash-Lite (lightweight, low-cost)",
         ),
         ModelSpec(
             key="qwen-coder",
@@ -90,6 +143,54 @@ def _catalog() -> list[ModelSpec]:
             api_key=s.openrouter_api_key,
             free_tier=True,
             capabilities="A general free open-weight model as a fallback option",
+        ),
+        ModelSpec(
+            key="openai-gpt6-luna",
+            provider="OpenAI",
+            display_name="GPT-6 Luna — OpenAI",
+            model_id=s.openai_model,
+            base_url="https://api.openai.com/v1",
+            api_key=s.openai_api_key,
+            free_tier=False,
+            capabilities="OpenAI's cost-efficient GPT-6 Luna — fast, reliable answers",
+            max_tokens_param="max_completion_tokens",
+            supports_temperature=False,
+        ),
+        ModelSpec(
+            key="deepseek-flash",
+            provider="DeepSeek",
+            display_name="DeepSeek-V4.1 Flash — DeepSeek",
+            model_id=s.deepseek_model,
+            base_url="https://api.deepseek.com/v1",
+            api_key=s.deepseek_api_key,
+            free_tier=False,
+            capabilities="DeepSeek's speed tier — quick, low-latency answers for live interviews",
+            # Reasoning model whose effort DEFAULTS to "high" per DeepSeek's
+            # own GET /models ("effort": supported_levels [low, high, max],
+            # default_level high). For the Flash tier the whole point is speed,
+            # so ask for a short think: measured elsewhere this is the lever
+            # that moves time-to-first-bullet (Groq gpt-oss 1.12s -> 0.50s).
+            # The field name + value are VERIFIED against DeepSeek: an invalid
+            # value returns HTTP 422 listing `none, minimal, low, medium, high,
+            # xhigh, ultra, max`, and `reasoning_effort=low` clears validation
+            # (it reaches billing, which returns 402 on an empty balance).
+            # Couldn't be measured end-to-end yet — the account has no balance.
+            reasoning_effort="low",
+        ),
+        ModelSpec(
+            key="deepseek-v4-pro",
+            provider="DeepSeek",
+            display_name="DeepSeek-V4 Pro — DeepSeek",
+            model_id=s.deepseek_v4_pro_model,
+            base_url="https://api.deepseek.com/v1",
+            api_key=s.deepseek_api_key,
+            free_tier=False,
+            capabilities="DeepSeek's capability tier — deeper, more thorough answers",
+            # Deliberately NO reasoning_effort: this is the capability tier, so
+            # it keeps DeepSeek's default (effort=high) rather than trading
+            # depth for speed. Flip to "low" (one line) if live measurement
+            # shows the default effort makes the first bullet arrive too late.
+            reasoning_effort=None,
         ),
     ]
 
@@ -138,12 +239,14 @@ def invalidate_model_overrides() -> None:
 
 def default_model_key() -> str:
     """Resolve the default model: DB override -> env -> built-in Groq default."""
+    llm_keys = {m.key for m in _catalog()}
     overrides = _load_overrides()
     for key, ov in overrides.items():
-        if ov.is_default:
+        # Ignore non-LLM rows (e.g. STT models sharing ai_model_config).
+        if key in llm_keys and ov.is_default:
             return key
     env_default = os.getenv("DEFAULT_LLM_MODEL", "").strip()
-    if env_default in {m.key for m in _catalog()}:
+    if env_default in llm_keys:
         return env_default
     return DEFAULT_KEY
 
@@ -239,4 +342,7 @@ def get_llm_provider(model_key: str | None = None) -> LLMProvider:
         base_url=spec.base_url,
         model=spec.model_id,
         name=f"{spec.key}",
+        max_tokens_param=spec.max_tokens_param,
+        supports_temperature=spec.supports_temperature,
+        reasoning_effort=spec.reasoning_effort,
     )

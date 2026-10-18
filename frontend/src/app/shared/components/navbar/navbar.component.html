@@ -15,9 +15,19 @@
       }
     </a>
     <div class="links">
+      @if (isDesktop) {
+        <label class="opacity-ctl" title="Make the app window see-through (0% = solid, 88% = almost fully transparent) so windows behind it show through">
+          <span class="opacity-lbl">Transparency {{ transparency.percent() }}%</span>
+          <input type="range" min="0" [max]="maxTransparency" step="4" aria-label="Window transparency"
+            [value]="transparency.percent()" (input)="transparency.set(+$any($event.target).value)" />
+        </label>
+      }
       <a routerLink="/pricing" routerLinkActive="active">Pricing</a>
       @if (user) {
         <a routerLink="/dashboard" routerLinkActive="active">Dashboard</a>
+        @if (isDesktop) {
+          <a routerLink="/screenshot-analysis" routerLinkActive="active">Screenshots</a>
+        }
         <a routerLink="/settings" routerLinkActive="active">Settings</a>
         @if (user.is_admin) {
           <a routerLink="/admin" routerLinkActive="active">Admin</a>

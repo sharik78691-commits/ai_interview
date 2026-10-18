@@ -8,6 +8,7 @@ import pytest
 
 from app.models.ai_response import AIInterviewResponse
 from app.providers.stt.provider import (
+    GeminiTranscribeSTTProvider,
     GroqWhisperSTTProvider,
     MockSTTProvider,
     STTRequestError,
@@ -122,6 +123,64 @@ class TestSTTProviders:
             text = await p.transcribe(b"fake-audio", mime_type="audio/webm")
         assert text == "Can you explain the Saga pattern?"
 
+    async def test_gemini_transcribe_hits_native_generate_content(self) -> None:
+        """gemini-3.5-transcribe uses native generateContent + audioTranscription."""
+        p = GeminiTranscribeSTTProvider(
+            api_key="g-test",
+            base_url="https://generativelanguage.googleapis.com/v1beta",
+            model="gemini-3.5-transcribe",
+        )
+        response = type(
+            "R",
+            (),
+            {
+                "status_code": 200,
+                "json": lambda self: {
+                    "candidates": [
+                        {
+                            "content": {
+                                "parts": [
+                                    {
+                                        "audioTranscription": {
+                                            "text": "Tell me about yourself."
+                                        }
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                },
+                "text": "",
+                "headers": {},
+            },
+        )()
+
+        seen = {}
+
+        class FakeClient:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *a):
+                return False
+
+            async def post(self, url, **kwargs):
+                seen["url"] = url
+                seen["json"] = kwargs.get("json")
+                return response
+
+        with patch("app.providers.stt.provider.shared_http", return_value=FakeClient()):
+            text = await p.transcribe(b"fake-audio", mime_type="audio/wav")
+
+        assert text == "Tell me about yourself."
+        assert seen["url"] == (
+            "https://generativelanguage.googleapis.com/v1beta"
+            "/models/gemini-3.5-transcribe:generateContent"
+        )
+        # The clip travels as inline base64 audio, not a multipart file.
+        part = seen["json"]["contents"][0]["parts"][0]
+        assert part["inline_data"]["mime_type"] == "audio/wav"
+
     def test_factory_returns_working_provider_with_key(self) -> None:
         with patch("app.providers.stt.provider.get_settings") as gs:
             s = gs.return_value
@@ -132,6 +191,24 @@ class TestSTTProviders:
             s.stt_model = "whisper"
             provider = get_stt_provider()
         assert isinstance(provider, GroqWhisperSTTProvider)
+
+    def test_stt_catalog_has_two_models_whisper_default(self) -> None:
+        from app.providers.stt.provider import default_stt_key, list_stt_models
+
+        models = list_stt_models()
+        keys = {m["key"] for m in models}
+        assert {"whisper", "gpt-4o-mini-transcribe"} <= keys
+        assert default_stt_key() == "whisper"
+        # No secrets leak.
+        for m in models:
+            assert "api_key" not in m
+            assert "key" in m and "modelId" in m and "enabled" in m
+
+    def test_stt_catalog_includes_gemini_transcribe(self) -> None:
+        from app.providers.stt.provider import list_stt_models
+
+        keys = {m["key"] for m in list_stt_models()}
+        assert "gemini-3.5-transcribe" in keys
 
 
 def _response(status: int, text: str = "", headers: dict | None = None):

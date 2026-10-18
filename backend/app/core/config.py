@@ -51,16 +51,39 @@ class Settings:
         # Groq key falls back to the legacy LLM_API_KEY for backward compat.
         self.groq_api_key: str = os.getenv("GROQ_API_KEY", "") or self.llm_api_key
         self.gemini_api_key: str = os.getenv("GEMINI_API_KEY", "")
-        # Gemini Flash on Google's official OpenAI-compatible endpoint.
-        self.gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+        # Gemini Flash-Lite on Google's official OpenAI-compatible endpoint.
+        self.gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
+        # Gemini 3.5 Flash (full Flash) — a second Gemini option (replaces the retired 2.5 Flash).
+        self.gemini_35_model: str = os.getenv("GEMINI_35_MODEL", "gemini-3.5-flash")
+        # Gemini 3.1 Flash-Lite — a third selectable Gemini option.
+        self.gemini_31_lite_model: str = os.getenv(
+            "GEMINI_31_LITE_MODEL", "gemini-3.1-flash-lite"
+        )
         # Qwen + the OpenRouter free model share the OpenRouter key.
         self.openrouter_api_key: str = os.getenv("OPENROUTER_API_KEY", "")
         self.qwen_model: str = os.getenv("QWEN_MODEL", "qwen/qwen3-coder:free")
         self.openrouter_model: str = os.getenv(
             "OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct:free"
         )
+        # OpenAI native API (GPT-6 Luna etc.).
+        self.openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
+        self.openai_model: str = os.getenv("OPENAI_MODEL", "gpt-6-luna")
+        # DeepSeek (OpenAI-compatible endpoint, https://api.deepseek.com/v1).
+        # Two selectable models: V4.1 Flash (speed tier) + V4 Pro (capability).
+        self.deepseek_api_key: str = os.getenv("DEEPSEEK_API_KEY", "")
+        self.deepseek_model: str = os.getenv("DEEPSEEK_MODEL", "deepseek-flash")
+        self.deepseek_v4_pro_model: str = os.getenv(
+            "DEEPSEEK_V4_PRO_MODEL", "deepseek-v4-pro"
+        )
         self.stt_api_key: str = os.getenv("STT_API_KEY", "")
         self.stt_model: str = os.getenv("STT_MODEL", "whisper-large-v3-turbo")
+        # Forcing the language skips Whisper's auto-detect (faster, and stops
+        # accented English being misread as another language). Empty = auto.
+        self.stt_language: str = os.getenv("STT_LANGUAGE", "en").strip()
+        # Second STT model (OpenAI's gpt-4o-mini-transcribe).
+        self.stt_model_2: str = os.getenv("STT_MODEL_2", "gpt-4o-mini-transcribe")
+        # Third STT model (Google's Gemini 3.5 Transcribe).
+        self.stt_model_3: str = os.getenv("STT_MODEL_3", "gemini-3.5-transcribe")
         # Server-side STT only. Browsers cannot transcribe tab/meeting audio
         # locally, so that audio is streamed to the backend for transcription.
         # Defaults to the LLM endpoint (Groq serves Whisper on the same base URL).
@@ -227,6 +250,7 @@ class Settings:
         logger.info("  llm_configured   = %s", self.llm_configured)
         logger.info("  gemini_configured= %s", self.gemini_configured)
         logger.info("  openrouter_conf  = %s", self.openrouter_configured)
+        logger.info("  deepseek_conf    = %s", self.deepseek_configured)
         logger.info("  stt_configured   = %s", self.stt_configured)
         logger.info("  demo_mode        = %s", self.demo_mode)
         logger.info("  google_oauth     = %s", self.google_configured)
@@ -325,6 +349,14 @@ class Settings:
     @property
     def openrouter_configured(self) -> bool:
         return bool(self.openrouter_api_key)
+
+    @property
+    def openai_configured(self) -> bool:
+        return bool(self.openai_api_key)
+
+    @property
+    def deepseek_configured(self) -> bool:
+        return bool(self.deepseek_api_key)
 
     @property
     def stt_configured(self) -> bool:
