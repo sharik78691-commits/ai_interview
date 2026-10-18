@@ -1,6 +1,7 @@
 import { Routes } from '@angular/router';
 import { adminGuard, authGuard, guestGuard } from './core/auth/auth.guard';
 import { interviewGuard } from './core/guards/interview.guard';
+import { desktopOnlyGuard } from './core/screenshot/desktop-only.guard';
 import { DashboardComponent } from './features/dashboard/dashboard.component';
 import { InterviewComponent } from './features/interview/interview.component';
 import { LandingComponent } from './features/landing/landing.component';
@@ -124,6 +125,24 @@ export const routes: Routes = [
         title: 'Settings — OyeInterview',
         description: 'Manage your OyeInterview settings.',
         path: '/settings',
+        noindex: true,
+      },
+    },
+  },
+  // Desktop-only (packaged .exe): screenshot capture + analysis. The guard
+  // redirects the web build to /dashboard, so the route is inert in browsers.
+  {
+    path: 'screenshot-analysis',
+    loadComponent: () =>
+      import('./features/screenshot-analysis/screenshot-analysis.component').then(
+        (m) => m.ScreenshotAnalysisComponent,
+      ),
+    canActivate: [authGuard, desktopOnlyGuard],
+    data: {
+      seo: {
+        title: 'Screenshot analysis — OyeInterview',
+        description: 'Analyze screenshots of interview questions.',
+        path: '/screenshot-analysis',
         noindex: true,
       },
     },

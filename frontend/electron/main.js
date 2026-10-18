@@ -4,9 +4,13 @@
 // Dev:   run `ng serve`, then `npm run electron` (loads http://localhost:4200).
 // Prod:  `npm run dist:win` / `dist:mac` builds a packaged app (electron-builder)
 //        that loads the built files from dist/frontend/browser.
-const { app, BrowserWindow, globalShortcut, ipcMain, screen, session, Tray, Menu, nativeImage } = require('electron');
+const { app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, safeStorage, screen, session, Tray, Menu, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { createCapture } = require('./screenshot/capture');
+const { createKeyStore } = require('./screenshot/key-store');
+const { registerScreenshotIpc } = require('./screenshot/ipc');
+const { createEnvKeys } = require('./screenshot/env-key');
 
 // Known Windows issue: with GPU acceleration, a content-protected window can
 // render BLACK on the local screen too (not just in captures). Software
@@ -35,6 +39,19 @@ function isOldWebsitePage(url) {
   } catch {
     return false;
   }
+}
+
+/** Where to look for a .env holding GEMINI_API_KEY (priority order). */
+function envFileCandidates() {
+  return [
+    path.join(app.getPath('userData'), '.env'),
+    path.join(path.dirname(process.execPath), '.env'),
+    path.join(process.resourcesPath || '', '.env'),
+    // Dev (`npm run electron`): the repo's own env files.
+    path.join(__dirname, '..', '.env'),
+    path.join(__dirname, '..', '..', 'backend', '.env'),
+    path.join(__dirname, '..', '..', '.env'),
+  ];
 }
 
 function loadDesktopApp() {
@@ -365,6 +382,18 @@ app.whenReady().then(async () => {
   // Audio" needs getUserMedia to read the loopback device. Deny everything else.
   session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
     callback(['media', 'audioCapture', 'videoCapture'].includes(permission));
+  });
+
+  // Screenshot analysis (capture + encrypted API key + AI request). All
+  // privileged work stays in the main process; see electron/screenshot/*.
+  registerScreenshotIpc({
+    ipcMain,
+    getMainWindow: () => mainWindow,
+    capture: createCapture({ desktopCapturer, screen, BrowserWindow }),
+    keyStore: createKeyStore({ safeStorage, fs, userDataDir: app.getPath('userData') }),
+    // AI key is picked up automatically from the environment or a .env file.
+    envKeys: createEnvKeys({ fs, candidates: envFileCandidates() }),
+    envHint: path.join(app.getPath('userData'), '.env'),
   });
 
   createMainWindow();

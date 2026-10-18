@@ -6,6 +6,7 @@ import { AuthUser } from '../../../core/models/auth.models';
 import { environment } from '../../../../environments/environment';
 import { ResumeService } from '../../../core/services/resume.service';
 import { SettingsService, ThemeName } from '../../../core/services/settings.service';
+import { MAX_TRANSPARENCY, WindowTransparencyService } from '../../../core/services/window-transparency.service';
 
 @Component({
   selector: 'app-navbar',
@@ -18,6 +19,8 @@ export class NavbarComponent implements OnInit, OnDestroy {
   private resumeService = inject(ResumeService);
   private settings = inject(SettingsService);
   private auth = inject(AuthService);
+  /** Global desktop window-transparency slider (shown on every page). */
+  readonly transparency = inject(WindowTransparencyService);
   mode: 'demo' | 'live' | 'offline' | 'checking' = 'checking';
   /** Current theme, kept in sync with SettingsService. */
   theme: ThemeName = 'dark';
@@ -25,6 +28,7 @@ export class NavbarComponent implements OnInit, OnDestroy {
   user: AuthUser | null = null;
   /** Desktop build only: shows the auto-invisible notice next to the brand. */
   readonly isDesktop = environment.electron;
+  readonly maxTransparency = MAX_TRANSPARENCY;
   signingOut = false;
   private sub: Subscription | null = null;
   private userSub: Subscription | null = null;

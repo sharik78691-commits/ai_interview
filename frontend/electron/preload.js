@@ -41,4 +41,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     onClosed: (cb) => ipcRenderer.on('copilot:closed', () => cb()),
   },
   setOpacity: (opacity) => ipcRenderer.invoke('window:set-opacity', opacity),
+  // Screenshot analysis. The API key can be set/cleared but never read back.
+  screenshot: {
+    getConfig: () => ipcRenderer.invoke('screenshot:get-config'),
+    listSources: () => ipcRenderer.invoke('screenshot:list-sources'),
+    capture: (sourceId) => ipcRenderer.invoke('screenshot:capture', sourceId),
+    setKey: (modelKey, apiKey) => ipcRenderer.invoke('screenshot:set-key', modelKey, apiKey),
+    clearKey: (modelKey) => ipcRenderer.invoke('screenshot:clear-key', modelKey),
+    analyze: (modelKey, images) => ipcRenderer.invoke('screenshot:analyze', modelKey, images),
+  },
 });

@@ -47,6 +47,10 @@
 }
 .hotkey-action { margin-left: 3px; letter-spacing: .02em; }
 .links { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }.links a { padding: 8px 14px; border-radius: 8px; font-size: .9rem; font-weight: 600; color: var(--muted); }
+/* Desktop-only global transparency slider. */
+.opacity-ctl { display: inline-flex; align-items: center; gap: 8px; padding: 5px 12px; border-radius: 8px; background: rgba(255,255,255,.05); border: 1px solid var(--border); cursor: pointer; }
+.opacity-lbl { font-size: .7333rem; font-weight: 600; white-space: nowrap; }
+.opacity-ctl input[type="range"] { width: 110px; accent-color: #6e8bff; cursor: pointer; }
 .links a:hover { background: rgba(255,255,255,.06); color: var(--text); }
 .links a.active { background: rgba(110,139,255,.14); color: #c9d4ff; }
 /* Dark / white mode toggle. Uses theme vars so it adapts to both modes. */

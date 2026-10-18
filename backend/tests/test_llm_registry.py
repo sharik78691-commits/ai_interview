@@ -70,6 +70,106 @@ def test_catalog_has_four_models_with_groq_default() -> None:
     assert registry.default_model_key() == "groq-gpt-oss"
 
 
+def test_openai_model_uses_reasoning_params() -> None:
+    """OpenAI GPT-6 Luna (reasoning) needs max_completion_tokens + no
+    temperature; other providers keep max_tokens + temperature."""
+    luna = registry.get_model("openai-gpt6-luna")
+    assert luna.max_tokens_param == "max_completion_tokens"
+    assert luna.supports_temperature is False
+
+    groq = registry.get_model("groq-gpt-oss")
+    assert groq.max_tokens_param == "max_tokens"
+    assert groq.supports_temperature is True
+
+
+def test_openai_provider_payload_omits_temperature() -> None:
+    from app.providers.llm.provider import OpenAICompatibleLLMProvider
+
+    p = OpenAICompatibleLLMProvider(
+        api_key="k", base_url="https://api.openai.com/v1", model="gpt-6-luna",
+        max_tokens_param="max_completion_tokens", supports_temperature=False,
+    )
+    body, _ = p._request_payload("medium", "r", "j", "q")
+    assert "temperature" not in body
+    assert p.max_tokens_param == "max_completion_tokens"
+
+
+def test_deepseek_models_registered() -> None:
+    """Both requested DeepSeek models sit on the official OpenAI-compatible
+    endpoint and are selectable alongside the other providers."""
+    from app.core.config import get_settings
+
+    s = get_settings()
+    flash = registry.get_model("deepseek-flash")
+    pro = registry.get_model("deepseek-v4-pro")
+
+    assert flash.provider == "DeepSeek"
+    assert pro.provider == "DeepSeek"
+    assert flash.base_url == pro.base_url == "https://api.deepseek.com/v1"
+    # Env-driven ids (defaults documented in .env.example).
+    assert flash.model_id == s.deepseek_model
+    assert pro.model_id == s.deepseek_v4_pro_model
+    # Plain OpenAI-compatible payload — no provider-specific knobs.
+    assert flash.max_tokens_param == "max_tokens"
+    assert flash.supports_temperature is True
+    # Generation needs a topped-up balance, so never advertise free tier.
+    assert flash.free_tier is False
+    assert pro.free_tier is False
+
+    listed = {m["key"]: m for m in registry.list_models()}
+    assert {"deepseek-flash", "deepseek-v4-pro"} <= listed.keys()
+    assert listed["deepseek-flash"]["provider"] == "DeepSeek"
+    assert listed["deepseek-flash"]["displayName"] == "DeepSeek-V4.1 Flash — DeepSeek"
+    assert listed["deepseek-v4-pro"]["displayName"] == "DeepSeek-V4 Pro — DeepSeek"
+    assert listed["deepseek-flash"]["freeTier"] is False
+
+
+def test_deepseek_default_model_ids_match_get_models() -> None:
+    """GET https://api.deepseek.com/v1/models advertises exactly these ids; a
+    wrong one only fails at call time, so pin the shipped defaults rather than
+    trusting an edited local .env."""
+    import os
+
+    from app.core.config import Settings
+
+    with patch.dict(os.environ):
+        os.environ.pop("DEEPSEEK_MODEL", None)
+        os.environ.pop("DEEPSEEK_V4_PRO_MODEL", None)
+        fresh = Settings()
+    assert fresh.deepseek_model == "deepseek-flash"
+    assert fresh.deepseek_v4_pro_model == "deepseek-v4-pro"
+
+
+def test_deepseek_effort_split_speed_vs_capability() -> None:
+    """Flash is the speed tier -> ask for a short think (DeepSeek's own
+    GET /models reports effort default_level "high", i.e. a slow default).
+    Pro is the capability tier -> keeps DeepSeek's default rather than trading
+    depth for speed. The field name is DeepSeek's own: an invalid value is
+    rejected pre-billing with HTTP 422 listing `none, minimal, low, medium,
+    high, xhigh, ultra, max`."""
+    assert registry.get_model("deepseek-flash").reasoning_effort == "low"
+    assert registry.get_model("deepseek-v4-pro").reasoning_effort is None
+
+    p = OpenAICompatibleLLMProvider(
+        api_key="k",
+        base_url="https://api.deepseek.com/v1",
+        model="deepseek-flash",
+        reasoning_effort=registry.get_model("deepseek-flash").reasoning_effort,
+    )
+    body, _ = p._request_payload("short", "r", "j", "q")
+    assert body["reasoning_effort"] == "low"
+    assert body["temperature"] == 0.4
+
+    pro = OpenAICompatibleLLMProvider(
+        api_key="k",
+        base_url="https://api.deepseek.com/v1",
+        model="deepseek-v4-pro",
+        reasoning_effort=registry.get_model("deepseek-v4-pro").reasoning_effort,
+    )
+    pro_body, _ = pro._request_payload("short", "r", "j", "q")
+    assert "reasoning_effort" not in pro_body
+
+
 def test_list_models_exposes_no_secrets() -> None:
     for m in registry.list_models():
         assert "api_key" not in m
@@ -133,6 +233,12 @@ def test_error_categories() -> None:
     assert P._categorize_status(408) == "timeout"
     assert P._categorize_status(500) == "server"
     assert P._categorize_status(400, "insufficient_quota") == "quota"
+    # DeepSeek phrases an empty balance as "Insufficient Balance" on HTTP 402;
+    # it must land in the same quota bucket (admin dashboard + retry policy).
+    assert P._categorize_status(402, '{"error":"Insufficient Balance"}') == "quota"
+    assert P._categorize_status(402) == "quota"
+    assert P._categorize_status(400, "insufficient balance") == "quota"
+    assert P._categorize_status(422, '{"error":"unknown variant"}') == "http_422"
 
 
 # ------------------------------------------------------------ provider HTTP (mocked)
@@ -305,8 +411,11 @@ def test_overrides_invalidation_and_ttl_expiry() -> None:
 
 
 def test_short_token_cap() -> None:
+    """short's cap carries reasoning headroom (was 700 — measured to truncate:
+    gemini-3.5-flash 0/3 valid JSON, gpt-oss finish_reason="length"). The other
+    levels are unchanged. See tests/test_llm_model_latency.py for the evidence."""
     from app.providers.llm.provider import MAX_TOKENS
 
-    assert MAX_TOKENS["short"] == 700
+    assert MAX_TOKENS["short"] == 1400
     assert MAX_TOKENS["medium"] == 2000
     assert MAX_TOKENS["long"] == 3000

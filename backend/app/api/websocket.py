@@ -14,6 +14,8 @@ Messages to the browser:
   {type: "status"}     {type: "ai_guidance"}   {type: "stt_transcript"}
   {type: "notice"}     {type: "error"}
 """
+import asyncio
+import json
 import logging
 import re
 import time
@@ -29,6 +31,7 @@ from app.providers.stt.provider import (
     STTRequestError,
     STTUnavailableError,
     get_stt_provider,
+    is_stt_hallucination,
 )
 from app.services.activity import log_llm_usage
 from app.services.ai_service import AIService
@@ -43,6 +46,11 @@ MAX_CLIP_BYTES = 12 * 1024 * 1024
 MAX_CLIP_SECONDS = 30
 # Format assumed until a clip tells us its own (see audio_flush).
 DEFAULT_AUDIO_MIME = "audio/wav"
+# How many audio clips may transcribe at the same time. Clips used to queue
+# BEHIND the LLM answer (the receive loop awaited every STT call inline), so
+# the next question waited minutes; now they run in parallel, bounded so a
+# fast-talking interviewer cannot hammer the transcription rate limit.
+MAX_CONCURRENT_TRANSCRIPTIONS = 2
 
 
 def sniff_audio(data: bytes) -> str:
@@ -176,7 +184,9 @@ async def ws_interview(websocket: WebSocket) -> None:
         "yes" if ticket else "no",
     )
     
-    user_id = _authenticate_ws(websocket)
+    # Auth does synchronous DB reads; keep them OFF the event loop so a slow
+    # SQLite lock can never stall the socket's audio/message pump.
+    user_id = await asyncio.to_thread(_authenticate_ws, websocket)
     if user_id is None:
         # 1008 = policy violation; the browser reports this as an opaque 403 on
         # the handshake, so log the cause and the remediation here.
@@ -284,7 +294,7 @@ async def ws_interview(websocket: WebSocket) -> None:
         # forward one provisional bullet per streamed delta. The final
         # ai_guidance below stays strictly validated (provisional != final).
         try:
-            spec = get_model(model_key)
+            spec = await asyncio.to_thread(get_model, model_key)
             await websocket.send_json(
                 {
                     "type": "ai_stream_start",
@@ -327,8 +337,22 @@ async def ws_interview(websocket: WebSocket) -> None:
                 {"type": "error", "message": "AI response unavailable. Please try again."}
             )
             return
+        # Perceived latency: how long until the candidate saw the FIRST bullet.
+        # The DB column stores the full-call latency, which hides the model's
+        # silent thinking phase — this is the number to compare models by.
+        first_ms = service.last_usage.get("first_delta_ms")
+        if first_ms is not None:
+            logger.info(
+                "Answer latency: first_bullet=%.2fs total=%.2fs key=%s model=%s",
+                first_ms / 1000,
+                (service.last_usage.get("latency_ms") or 0.0) / 1000,
+                model_key,
+                service.last_model,
+            )
         # Usage tracking: provider-reported tokens only, never estimated.
-        log_llm_usage(
+        # Off the event loop: a SQLite write must not delay the next question.
+        await asyncio.to_thread(
+            log_llm_usage,
             user_id=user_id,
             request_type="interview",
             provider=service.last_provider,
@@ -350,15 +374,19 @@ async def ws_interview(websocket: WebSocket) -> None:
         )
         await _send_guidance(question)
 
-    async def _transcribe_and_detect() -> None:
+    async def _transcribe_and_detect(
+        clip: bytes, clip_mime: str, length_raw: object, model_raw: object
+    ) -> None:
         """Transcribe one interviewer audio clip, then run question detection.
 
         Question detection uses the same QuestionBuffer as microphone speech, so
         an interviewer question triggers exactly the same AI answer flow.
+
+        Runs as a BACKGROUND task: the receive loop keeps reading (pings, the
+        next clip, model switches) while this awaits the STT provider, and at
+        most MAX_CONCURRENT_TRANSCRIPTIONS clips transcribe at once.
         """
-        nonlocal audio_buffer, audio_mime
-        clip = bytes(audio_buffer)
-        audio_buffer = bytearray()
+        nonlocal audio_mime
         if not clip:
             return
 
@@ -369,7 +397,7 @@ async def ws_interview(websocket: WebSocket) -> None:
         logger.info(
             "Interviewer clip: %d bytes, declared=%s, detected=%s",
             len(clip),
-            audio_mime,
+            clip_mime,
             detected,
         )
         if detected == "unknown":
@@ -393,46 +421,60 @@ async def ws_interview(websocket: WebSocket) -> None:
         # The backend is the authority on format. If the label disagrees with the
         # magic bytes, trust the bytes - a WAV payload sent as audio/webm (or vice
         # versa) is rejected by strict providers as an invalid file.
-        real_mime = MIME_BY_FORMAT.get(detected)
-        if real_mime and real_mime != audio_mime:
+        real_mime = MIME_BY_FORMAT.get(detected) or clip_mime
+        if real_mime != audio_mime:
             logger.info("Correcting declared mime %s -> %s", audio_mime, real_mime)
             audio_mime = real_mime
 
-        try:
-            text = await stt.transcribe(clip, mime_type=audio_mime)
-        except STTUnavailableError:
-            # No transcription backend configured at all.
-            logger.warning("Interviewer audio received but no STT provider is configured")
-            await websocket.send_json(
-                {
-                    "type": "error",
-                    "message": "Browser audio capture is unavailable. Please paste the question manually.",
-                }
+        async with stt_slots:
+            t0 = time.perf_counter()
+            try:
+                text = await stt.transcribe(clip, mime_type=real_mime)
+            except STTUnavailableError:
+                # No transcription backend configured at all.
+                logger.warning("Interviewer audio received but no STT provider is configured")
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "message": "Browser audio capture is unavailable. Please paste the question manually.",
+                    }
+                )
+                return
+            except STTRequestError as exc:
+                # Provider is configured but the call failed - tell the real reason.
+                # scope="stt" so the UI does not claim it is showing template guidance.
+                logger.warning("Interviewer audio transcription failed: %s", exc)
+                await websocket.send_json(
+                    {"type": "notice", "scope": "stt", "message": str(exc)}
+                )
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "message": "Transcription failed. Please paste the question manually.",
+                    }
+                )
+                return
+            except Exception:
+                logger.exception("transcription failed")
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "message": "Transcription failed. Please paste the question manually.",
+                    }
+                )
+                return
+            # Latency telemetry: the single number that tells us whether STT is
+            # slow (provider) or the clip simply sat waiting (pipeline).
+            logger.info(
+                "STT latency: %.2fs for %d bytes (%s)",
+                time.perf_counter() - t0,
+                len(clip),
+                real_mime,
             )
-            return
-        except STTRequestError as exc:
-            # Provider is configured but the call failed - tell the real reason.
-            # scope="stt" so the UI does not claim it is showing template guidance.
-            logger.warning("Interviewer audio transcription failed: %s", exc)
-            await websocket.send_json(
-                {"type": "notice", "scope": "stt", "message": str(exc)}
-            )
-            await websocket.send_json(
-                {
-                    "type": "error",
-                    "message": "Transcription failed. Please paste the question manually.",
-                }
-            )
-            return
-        except Exception:
-            logger.exception("transcription failed")
-            await websocket.send_json(
-                {
-                    "type": "error",
-                    "message": "Transcription failed. Please paste the question manually.",
-                }
-            )
-            return
+
+        if text and is_stt_hallucination(text):
+            logger.info("STT hallucination dropped: %r", text[:40])
+            text = ""
 
         if not text:
             # Empty transcription (silence/music). Tell the UI so it does not
@@ -452,24 +494,136 @@ async def ws_interview(websocket: WebSocket) -> None:
         )
 
         # Question detection for interviewer audio: the clip already ends at a
-        # pause, so treat this segment as a finished utterance. With the new
-        # push_complete, any substantial utterance fires the AI — the log line
-        # below proves the LLM call started (if it is missing, detection gated).
+        # pause, so treat this segment as a finished utterance — but only a
+        # GENUINE, complete question is answered. Answering every substantial
+        # utterance used to burn an LLM call on "let me pull up your resume"
+        # and on half-asked questions, and because answers run one-at-a-time on
+        # the queue, each of those delayed the real question.
         question = buffer.push_complete(text)
         if question:
             logger.info("Interviewer prompt (%d chars): %s", len(question), question[:100])
-            await _handle_detected_question(question)
-        else:
-            # Too short to answer (backchannel like "okay", "thank you").
-            # Report it so the UI leaves the "Question detected" state.
-            logger.info("Interviewer backchannel ignored (%d chars): %s", len(text), text[:80])
+            await _enqueue_answer(question, length_raw, model_raw, announce=True)
+            return
+
+        if buffer.holding_partial:
+            # The clip boundary landed mid-question. Wait out the hold window
+            # so the next clip can be stitched onto this one and the WHOLE
+            # question answered; if the interviewer truly abandoned the
+            # sentence, flush what we have instead of dropping it.
+            # flush_expired() is deadline-checked, so a stale timer is
+            # harmless, and a question already stitched away is gone from the
+            # buffer — so it can never be answered twice.
+            logger.info(
+                "Holding %d chars of an unfinished question for its second half",
+                len(text),
+            )
+            _spawn(_flush_held_question(buffer.HOLD_MS / 1000.0, length_raw, model_raw))
+            return
+
+        # Backchannel / small talk ("okay", "thank you", "let me see").
+        # Report it so the UI leaves the "Question detected" state.
+        logger.info("Interviewer backchannel ignored (%d chars): %s", len(text), text[:80])
+        await websocket.send_json(
+            {
+                "type": "status",
+                "status": "listening",
+                "message": "listening... (waiting for a complete question)",
+            }
+        )
+
+    async def _flush_held_question(
+        delay_s: float, length_raw: object, model_raw: object
+    ) -> None:
+        """Answer a question that was cut in half if its continuation never comes.
+
+        The hold window covers a normal mid-question pause plus the next clip's
+        upload and transcription, so in practice this only fires when the
+        interviewer genuinely abandoned the sentence mid-way.
+        """
+        try:
+            await asyncio.sleep(delay_s)
+        except asyncio.CancelledError:
+            return
+        held = buffer.flush_expired()
+        if held:
+            logger.info(
+                "Held question flushed after %.1fs (%d chars): %s",
+                delay_s,
+                len(held),
+                held[:100],
+            )
+            await _enqueue_answer(held, length_raw, model_raw, announce=True)
+
+    # ------------------------------------------------------------------
+    # Background pipeline (latency-critical).
+    #
+    # The receive loop used to AWAIT every STT and LLM call inline, so pings,
+    # model switches and the NEXT audio clip queued behind up to minutes of
+    # provider I/O — the single biggest cause of "the AI/STT is slow".
+    # Now: clips transcribe as bounded background tasks, and answers are
+    # generated by ONE worker, so two streamed answers can never interleave on
+    # the socket and a duplicate can never spend a second AI call.
+    # ------------------------------------------------------------------
+    answer_queue: asyncio.Queue = asyncio.Queue()
+    #: Normalized questions currently queued/being answered (duplicate guard).
+    answering: set[str] = set()
+    #: Everything spawned for this connection; cancelled on disconnect.
+    background: set[asyncio.Task] = set()
+    #: Caps concurrent transcriptions (rate-limit protection).
+    stt_slots = asyncio.Semaphore(MAX_CONCURRENT_TRANSCRIPTIONS)
+
+    def _spawn(coro) -> asyncio.Task:
+        task = asyncio.create_task(coro)
+        background.add(task)
+        task.add_done_callback(background.discard)
+        return task
+
+    async def _answer_worker() -> None:
+        """Answer queued questions sequentially — one streamed answer at a time."""
+        while True:
+            question, length_raw, model_raw, announce = await answer_queue.get()
+            try:
+                # Only a real client value overrides the depth; `None` keeps the
+                # session's current depth (a stop-flush has no length field).
+                if isinstance(length_raw, str):
+                    _apply_length(length_raw)
+                await _apply_model(model_raw)
+                if announce:
+                    await _handle_detected_question(question)
+                else:
+                    await _send_guidance(question)
+            finally:
+                answering.discard(_norm_question(question))
+                answer_queue.task_done()
+
+    async def _enqueue_answer(
+        question: str, length_raw: object, model_raw: object, announce: bool = False
+    ) -> bool:
+        """Queue one question for the answer worker.
+
+        Returns False when the SAME question is already queued or generating —
+        a repeat (mic fragment + debounced force detector, or WebSpeech
+        delivering the same final twice) must never spend a second AI call, and
+        the UI gets a status so its spinner does not hang.
+        """
+        key = _norm_question(question)
+        if key in answering:
+            logger.info(
+                "Duplicate question suppressed (in flight, %d chars)", len(question)
+            )
             await websocket.send_json(
                 {
                     "type": "status",
-                    "status": "listening",
-                    "message": "listening... (waiting for a complete question)",
+                    "status": "ready",
+                    "message": "Already answered — showing the previous guidance.",
                 }
             )
+            return False
+        answering.add(key)
+        answer_queue.put_nowait((question, length_raw, model_raw, announce))
+        return True
+
+    _spawn(_answer_worker())
 
     # Initial handshake keeps the existing client contract intact.
     logger.info("[ws user=%s] accepted; sending handshake", user_id)
@@ -506,8 +660,6 @@ async def ws_interview(websocket: WebSocket) -> None:
             if text_frame is None:
                 continue
             try:
-                import json
-
                 msg = json.loads(text_frame)
             except Exception:
                 await websocket.send_json(
@@ -556,7 +708,11 @@ async def ws_interview(websocket: WebSocket) -> None:
             elif mtype == "interviewer_audio_stop":
                 interviewer_capturing = False
                 if audio_buffer:
-                    await _transcribe_and_detect()
+                    # Snapshot synchronously, then transcribe in the background
+                    # so the "stopped" status (and everything else) stays fast.
+                    clip = bytes(audio_buffer)
+                    audio_buffer = bytearray()
+                    _spawn(_transcribe_and_detect(clip, audio_mime, None, None))
                 await websocket.send_json(
                     {
                         "type": "status",
@@ -574,9 +730,15 @@ async def ws_interview(websocket: WebSocket) -> None:
                 clip_mime = msg.get("mimeType")
                 if isinstance(clip_mime, str) and clip_mime.strip():
                     audio_mime = clip_mime.strip()
-                _apply_length(msg.get("responseLength"))
-                await _apply_model(msg.get("model"))
-                await _transcribe_and_detect()
+                # Snapshot NOW (the loop keeps appending the NEXT clip right
+                # after this handler returns) and transcribe in the background.
+                clip = bytes(audio_buffer)
+                audio_buffer = bytearray()
+                _spawn(
+                    _transcribe_and_detect(
+                        clip, audio_mime, msg.get("responseLength"), msg.get("model")
+                    )
+                )
 
             elif mtype == "interviewer_question":
                 # Manual/typed interviewer question -> existing AI flow.
@@ -585,15 +747,16 @@ async def ws_interview(websocket: WebSocket) -> None:
                     await websocket.send_json(
                         {"type": "stt_transcript", "text": question, "final": True}
                     )
-                    _apply_length(msg.get("responseLength"))
-                    await _apply_model(msg.get("model"))
-                    await _handle_detected_question(question)
+                    await _enqueue_answer(
+                        question,
+                        msg.get("responseLength"),
+                        msg.get("model"),
+                        announce=True,
+                    )
 
             elif mtype == "transcript":
                 service.resume_text = context.get("resume", service.resume_text)
                 service.job_description = context.get("job", service.job_description)
-                _apply_length(msg.get("responseLength"))
-                await _apply_model(msg.get("model"))
                 text = (msg.get("text") or "").strip()
                 if not text:
                     continue
@@ -620,7 +783,9 @@ async def ws_interview(websocket: WebSocket) -> None:
                     ):
                         question = buffer.force_flush()
                 if question:
-                    await _handle_detected_question(question)
+                    await _enqueue_answer(
+                        question, msg.get("responseLength"), msg.get("model")
+                    )
                 else:
                     await websocket.send_json(
                         {"type": "status", "status": "listening", "message": "listening..."}
@@ -632,10 +797,10 @@ async def ws_interview(websocket: WebSocket) -> None:
                 # (e.g. reconnect in between): fall back to the supplied text.
                 if not pending and isinstance(msg.get("text"), str) and msg["text"].strip():
                     pending = msg["text"].strip()
-                _apply_length(msg.get("responseLength"))
-                await _apply_model(msg.get("model"))
                 if pending:
-                    await _send_guidance(pending)
+                    await _enqueue_answer(
+                        pending, msg.get("responseLength"), msg.get("model")
+                    )
 
             else:
                 await websocket.send_json(
@@ -650,3 +815,10 @@ async def ws_interview(websocket: WebSocket) -> None:
             await websocket.close()
         except Exception:
             logger.debug("[ws user=%s] client already gone; could not send error", user_id)
+    finally:
+        # Background work (answer worker, in-flight transcriptions) belongs to
+        # THIS socket — stop it so a departed client never keeps calling APIs.
+        for task in list(background):
+            task.cancel()
+        if background:
+            await asyncio.gather(*background, return_exceptions=True)

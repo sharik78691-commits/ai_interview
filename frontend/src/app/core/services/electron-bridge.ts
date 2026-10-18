@@ -28,6 +28,8 @@ export interface ElectronInvisibleAPI {
 export interface ElectronAPI {
   isElectron: boolean;
   invisible: ElectronInvisibleAPI;
+  /** Screenshot capture + analysis (desktop only; see core/screenshot). */
+  screenshot?: import('../screenshot/screenshot-bridge').ScreenshotBridge;
   /** Set the main window opacity (1 = solid, 0 = fully see-through). */
   setOpacity?(opacity: number): Promise<boolean>;
 }

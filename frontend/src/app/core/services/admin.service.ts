@@ -2,7 +2,7 @@ import { HttpClient, HttpParams } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
-import { AdminStats, AdminUserRow, AdminUsersPage } from '../models/admin.models';
+import { AdminStats, AdminUserRow, AiCostReport, BusinessReport, AdminUsersPage, SttModel, SttModelsResponse } from '../models/admin.models';
 import { AiModel } from '../models/ai-models';
 
 const BASE = environment.apiBaseUrl;
@@ -22,6 +22,20 @@ export class AdminService {
     if (from) params = params.set('from', from);
     if (to) params = params.set('to', to);
     return this.http.get<AdminStats>(`${BASE}/api/admin/stats`, { params });
+  }
+
+  /** Per-model usage + cost for 24h / 7d / 30d / 90d. */
+  aiCosts(includeDemo = false): Observable<AiCostReport> {
+    const params = new HttpParams().set('include_demo', includeDemo);
+    return this.http.get<AiCostReport>(`${BASE}/api/admin/ai-costs`, { params });
+  }
+
+  /** Owner-level report: growth, funnel, retention, segments, insights. */
+  business(from?: string, to?: string): Observable<BusinessReport> {
+    let params = new HttpParams();
+    if (from) params = params.set('from', from);
+    if (to) params = params.set('to', to);
+    return this.http.get<BusinessReport>(`${BASE}/api/admin/business`, { params });
   }
 
   /** Searchable, paginated user list (newest first), optional signup range. */
@@ -68,6 +82,22 @@ export class AdminService {
   ): Observable<{ models: AiModel[]; default: string }> {
     return this.http.patch<{ models: AiModel[]; default: string }>(
       `${BASE}/api/admin/ai-models/${encodeURIComponent(key)}`,
+      patch,
+    );
+  }
+
+  /** Speech-to-text model catalog + active model (no secrets). */
+  sttModels(): Observable<SttModelsResponse> {
+    return this.http.get<SttModelsResponse>(`${BASE}/api/admin/stt-models`);
+  }
+
+  /** Enable/disable a STT model or change the STT default. */
+  updateSttModel(
+    key: string,
+    patch: { enabled?: boolean; is_default?: boolean },
+  ): Observable<SttModelsResponse> {
+    return this.http.patch<SttModelsResponse>(
+      `${BASE}/api/admin/stt-models/${encodeURIComponent(key)}`,
       patch,
     );
   }

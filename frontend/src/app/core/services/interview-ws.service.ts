@@ -65,6 +65,16 @@ export class InterviewWsService {
   private wantOpen = false;
   /** Guards against overlapping reconnect attempts while a ticket is fetched. */
   private opening = false;
+  private pingTimer: ReturnType<typeof setInterval> | null = null;
+
+  /**
+   * Keepalive cadence. An idle WebSocket looks like a dead connection to
+   * proxies/NAT (they drop it silently) and to free-tier hosts (Render spins
+   * the instance down, so the NEXT question pays a 30s+ cold start). A tiny
+   * application-level ping every 30s keeps the pipe hot and surfaces a dead
+   * socket early instead of on the next question.
+   */
+  private static readonly PING_INTERVAL_MS = 30_000;
 
   /**
    * WebSocket URL for the live-interview socket.
@@ -184,6 +194,7 @@ export class InterviewWsService {
       // A successful (re)connect clears a previous "Connection issue" pill so
       // the UI recovers automatically instead of staying stuck on error.
       if (this.status$.value === 'error') this.status$.next('idle');
+      this.startPing();
     };
     this.ws.onmessage = (ev) => {
       try {
@@ -258,6 +269,7 @@ export class InterviewWsService {
       console.warn(
         `[ws] closed code=${ev.code} reason=${ev.reason || '-'} clean=${ev.wasClean}; retrying`,
       );
+      this.stopPing();
       this.scheduleReconnect();
     };
     this.ws.onerror = (ev: Event) => {
@@ -274,6 +286,27 @@ export class InterviewWsService {
     this.retries++;
     const backoff = Math.min(1000 * 2 ** Math.min(this.retries, 5), 15000);
     setTimeout(() => this.open(), backoff);
+  }
+
+  /** Start the application-level keepalive (see PING_INTERVAL_MS). */
+  private startPing(): void {
+    this.stopPing();
+    this.pingTimer = setInterval(() => {
+      if (this.ws?.readyState === WebSocket.OPEN) {
+        try {
+          this.ws.send(JSON.stringify({ type: 'ping' }));
+        } catch {
+          /* socket raced closed; onclose will retry */
+        }
+      }
+    }, InterviewWsService.PING_INTERVAL_MS);
+  }
+
+  private stopPing(): void {
+    if (this.pingTimer) {
+      clearInterval(this.pingTimer);
+      this.pingTimer = null;
+    }
   }
 
   // ------------------------------------------------ interviewer (tab/meeting) audio
@@ -375,6 +408,7 @@ export class InterviewWsService {
 
   disconnect(): void {
     this.wantOpen = false;
+    this.stopPing();
     try { this.ws?.close(); } catch { /* noop */ }
     this.ws = null;
   }

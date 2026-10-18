@@ -27,6 +27,8 @@ function clampFontSize(value: unknown): number {
 
 /** Legacy values stored by earlier builds. */
 const LENGTH_ALIASES: Record<string, ResponseLength> = {
+  default: 'default',
+  complete: 'default',
   concise: 'short',
   brief: 'short',
   short: 'short',

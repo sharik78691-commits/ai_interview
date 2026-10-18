@@ -66,9 +66,11 @@ export class InterviewerAudioService {
   readonly systemAudioSetup$ = new BehaviorSubject<string[] | null>(null);
 
   /** Consecutive silent checks (~100ms each) that end a clip. */
-  private readonly silenceTicksToCut = 12;
-  /** RMS below this counts as silence. */
-  private readonly silenceThreshold = 0.012;
+  private readonly silenceTicksToCut = 10;
+  /** RMS below this counts as silence (re-derived live from the noise floor). */
+  private silenceThreshold = DEFAULT_SILENCE_THRESHOLD;
+  /** Slow-moving estimate of the source's background level. */
+  private noiseFloor = DEFAULT_SILENCE_THRESHOLD / NOISE_MARGIN;
 
   /**
    * Why tab/meeting audio cannot be used, or null when it looks supported.
@@ -575,6 +577,15 @@ export class InterviewerAudioService {
       this.silentMs = 0;
     } else {
       this.silentMs += durationMs;
+      // Only quiet frames teach us the noise floor: it falls fast, rises slowly.
+      this.noiseFloor += (rms - this.noiseFloor) * (rms < this.noiseFloor ? 0.5 : 0.03);
+      // A fixed threshold fails both ways: a hot loopback hum never reads as
+      // silence (clips only end at the 15 s cap), a quiet tab never reads as
+      // speech. Track the floor instead, within sane bounds.
+      this.silenceThreshold = Math.min(
+        MAX_SILENCE_THRESHOLD,
+        Math.max(MIN_SILENCE_THRESHOLD, this.noiseFloor * NOISE_MARGIN),
+      );
     }
 
     const clipMs = this.pcmCount ? (this.pcmCount / (this.pcmRate || 1)) * 1000 : 0;
@@ -604,7 +615,7 @@ export class InterviewerAudioService {
 
       // Primary path: encode the PCM we already hold. No decoder involved.
       if (pcmCount > 0 && pcmRate > 0) {
-        const wav = pcmToWav(pcmChunks, pcmRate);
+        const wav = pcmToWav(pcmChunks, pcmRate, undefined, this.silenceThreshold);
         if (wav.byteLength > 44) {
           this.clip$.next({ data: wav, mimeType: 'audio/wav' });
           return;
@@ -644,6 +655,8 @@ export class InterviewerAudioService {
     this.stream = null;
     this.recorder = null;
     this.silentTicks = 0;
+    this.silenceThreshold = DEFAULT_SILENCE_THRESHOLD;
+    this.noiseFloor = DEFAULT_SILENCE_THRESHOLD / NOISE_MARGIN;
     this._resetClipState();
   }
 }
@@ -654,8 +667,18 @@ const CHUNK_MS = 250;
 const MIN_CLIP_MS = 1_500;
 /** Hard cap per clip so one long answer still reaches the AI. */
 const MAX_CLIP_MS = 15_000;
-/** Quiet for this long ends the clip (the interviewer has finished a sentence). */
-const SILENCE_MS_TO_CUT = 1_200;
+/**
+ * Quiet for this long ends the clip (the interviewer has finished a sentence).
+ * 0.85s sits above phrase-internal pauses (~200–500ms) and shaves 150ms of dead
+ * air off every question; a clip that still lands mid-question is stitched by
+ * the backend QuestionBuffer hold window.
+ */
+const SILENCE_MS_TO_CUT = 850;
+/** Adaptive silence threshold: starting point, bounds, and margin over the floor. */
+const DEFAULT_SILENCE_THRESHOLD = 0.012;
+const MIN_SILENCE_THRESHOLD = 0.006;
+const MAX_SILENCE_THRESHOLD = 0.035;
+const NOISE_MARGIN = 3;
 /** ScriptProcessor buffer; ~85 ms of samples at 48 kHz. */
 const PCM_BUFFER_SIZE = 4_096;
 

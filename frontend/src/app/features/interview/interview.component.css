@@ -48,27 +48,6 @@
   flex-wrap: wrap;
   align-items: center;
 }
-/* Desktop-only transparency slider (top bar). */
-.opacity-ctl {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 5px 12px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--border);
-  cursor: pointer;
-}
-.opacity-lbl {
-  font-size: 0.7333rem;
-  font-weight: 600;
-  white-space: nowrap;
-}
-.opacity-ctl input[type="range"] {
-  width: 110px;
-  accent-color: #6e8bff;
-  cursor: pointer;
-}
 .demo {
   border-color: rgba(110, 139, 255, 0.5);
   color: #c9d4ff;
@@ -565,31 +544,115 @@
   color: #d6e2ff;
 }
 
-/* Comparison table (difference / compare questions). */
-.table-scroll { overflow-x: auto; margin-top: 4px; }
-.cmp-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.8744em;
-  line-height: 1.55;
+/* ------------------------- Interview Answer Card ------------------------- */
+/* One adaptive card: a prominent Best Answer, then only the sections that
+   help this question, separated by hairlines so it scans in seconds. */
+.answer-card {
+  margin-top: 14px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.18);
+  overflow: hidden;
 }
-.cmp-table th, .cmp-table td {
-  border: 1px solid var(--border-strong);
-  padding: 8px 11px;
-  text-align: left;
-  vertical-align: top;
+.answer-card .qcard {
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  margin: 0;
 }
-.cmp-table th {
-  background: rgba(110, 139, 255, 0.13);
-  color: var(--text);
+.csec {
+  padding: 12px 16px;
+}
+.csec + .csec {
+  border-top: 1px solid var(--border);
+}
+.guidance-body h4.csec-title {
+  margin: 0 0 6px;
+  padding: 0;
+  border-left: 0;
+  font-size: 0.6923em;
   font-weight: 700;
-}
-.cmp-table td:first-child {
-  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
   color: var(--muted);
 }
-.cmp-table tbody tr:nth-child(even) td {
-  background: rgba(255, 255, 255, 0.02);
+.csec-text {
+  margin: 0;
+  line-height: 1.65;
+}
+/* Best Answer: the line the candidate actually says — largest, calmest text. */
+.csec.best {
+  background: rgba(110, 139, 255, 0.07);
+  border-left: 3px solid var(--accent);
+}
+.guidance-body .csec.best h4.csec-title {
+  color: #b9c6ff;
+}
+.say {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.say p {
+  margin: 0;
+  font-size: 1.06em;
+  line-height: 1.7;
+  color: var(--text);
+}
+.details {
+  margin: 0 0 0 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  line-height: 1.6;
+}
+.details li::marker {
+  color: var(--accent);
+}
+.star-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 12px;
+  margin: 0;
+  line-height: 1.6;
+}
+.star-grid dt {
+  font-weight: 700;
+  text-transform: capitalize;
+  color: #6ee7b7;
+}
+.star-grid dd {
+  margin: 0;
+}
+.complexity {
+  margin: 8px 0 0;
+  font-size: 0.9em;
+  color: #6ee7b7;
+}
+.followups {
+  list-style: none;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.followups .fq {
+  margin: 0;
+  font-weight: 600;
+}
+.followups .fq::before {
+  content: 'Q ';
+  color: var(--accent);
+  font-weight: 800;
+}
+.followups .fa {
+  margin: 2px 0 0;
+  padding-left: 14px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+.csec .example {
+  margin: 0;
 }
 
 /* Inline formatting injected by RichTextPipe (bold + code). */

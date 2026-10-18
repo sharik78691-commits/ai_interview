@@ -21,21 +21,42 @@ export interface StarBreakdown {
   [k: string]: unknown;
 }
 
-export type ResponseLength = 'short' | 'medium' | 'long';
+export type ResponseLength = 'default' | 'short' | 'medium' | 'long';
 
-/** Side-by-side comparison table for "difference / compare" questions. */
+/** Legacy side-by-side table (older stored answers only; no longer rendered). */
 export interface ComparisonTable {
   headers: string[];
   rows: string[][];
 }
 
+/** A likely interviewer follow-up with a short, strong answer. */
+export interface FollowUpItem {
+  question: string;
+  answer?: string;
+}
+
+/**
+ * One adaptive "Interview Answer Card". `answerPoints` is the spoken Best
+ * Answer (one sentence per item); every other section is optional and only
+ * present when it helps this question.
+ */
 export interface AIInterviewResponse {
   question: string;
   questionType: string;
   answerPoints: string[];
+  simpleExplanation?: string | null;
+  keyDetails?: string[];
   star?: string | StarBreakdown | null;
+  approach?: string | null;
+  /** Coding program 1: the polished AI solution. */
   codeHint?: string | null;
+  /** Coding program 2: same solution, written the way a person types it. */
+  humanCode?: string | null;
+  complexity?: string | null;
+  edgeCases?: string[];
   example?: string | null;
+  followUps?: FollowUpItem[];
+  /** Legacy fields — still accepted from older payloads. */
   keyTakeaways?: string[];
   followUpQuestions: string[];
   responseLength?: ResponseLength;
@@ -66,6 +87,7 @@ export interface AppSettings {
 }
 
 export const RESPONSE_LENGTH_LABELS: Record<ResponseLength, string> = {
+  default: 'Default — covers everything the interviewer expects',
   short: 'Short — quick bullets',
   medium: 'Medium — structured answer',
   long: 'Long — detailed + examples',
