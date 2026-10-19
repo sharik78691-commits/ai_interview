@@ -54,6 +54,8 @@ DEFAULT_AUDIO_MIME = "audio/wav"
 # the next question waited minutes; now they run in parallel, bounded so a
 # fast-talking interviewer cannot hammer the transcription rate limit.
 MAX_CONCURRENT_TRANSCRIPTIONS = 2
+# Longest question accepted by "Show follow-ups" (questions are short text).
+MAX_FOLLOWUP_QUESTION_CHARS = 2000
 # Longest question sent to the LLM (shared with the REST route): real
 # questions are a few hundred chars; the cap only bounds token spend when a
 # client streams a huge text frame. Here the TAIL is kept (the actual question
@@ -388,6 +390,49 @@ async def ws_interview(websocket: WebSocket) -> None:
             error_category=service.last_usage.get("error_category"),
         )
 
+    #: Questions whose on-demand follow-ups are being generated (dedup clicks).
+    followups_inflight: set[str] = set()
+
+    async def _send_follow_ups(question: str) -> None:
+        """Generate + send on-demand follow-ups; always answers the client."""
+        try:
+            items = await service.follow_ups(question, model_key=model_key)
+            frame: dict = {
+                "type": "ai_followups",
+                "question": question,
+                "followUps": [f.model_dump() for f in items],
+            }
+            if not items:
+                frame["error"] = "No follow-ups were suggested. Try again."
+            await websocket.send_json(frame)
+            if service.last_usage:
+                await asyncio.to_thread(
+                    log_llm_usage,
+                    user_id=user_id,
+                    request_type="followups",
+                    provider=service.last_provider,
+                    model=service.last_model,
+                    latency_ms=service.last_usage.get("latency_ms"),
+                    input_tokens=service.last_usage.get("input_tokens"),
+                    output_tokens=service.last_usage.get("output_tokens"),
+                    error_category=service.last_usage.get("error_category"),
+                )
+        except Exception:
+            logger.exception("follow-ups failed")
+            try:
+                await websocket.send_json(
+                    {
+                        "type": "ai_followups",
+                        "question": question,
+                        "followUps": [],
+                        "error": "Could not load follow-ups. Try again.",
+                    }
+                )
+            except Exception:
+                pass  # socket already gone
+        finally:
+            followups_inflight.discard(_norm_question(question))
+
     async def _handle_detected_question(question: str) -> None:
         """Common path: a question was detected -> ask the existing AI service."""
         await websocket.send_json(
@@ -719,6 +764,22 @@ async def ws_interview(websocket: WebSocket) -> None:
                 await websocket.send_json(
                     {"type": "status", "status": "listening", "message": "model updated"}
                 )
+
+            elif mtype == "request_followups":
+                # "Show follow-ups" button: generate "If they ask further" for
+                # an answered question, off the receive loop and outside the
+                # answer queue so it never delays a live answer.
+                q = msg.get("question")
+                if isinstance(q, str) and q.strip() and len(q) <= MAX_FOLLOWUP_QUESTION_CHARS:
+                    q = q.strip()
+                    if _norm_question(q) not in followups_inflight:
+                        followups_inflight.add(_norm_question(q))
+                        _spawn(_send_follow_ups(q))
+                else:
+                    await websocket.send_json(
+                        {"type": "ai_followups", "question": q if isinstance(q, str) else "",
+                         "followUps": [], "error": "Invalid question."}
+                    )
 
             elif mtype == "reset":
                 buffer = QuestionBuffer()

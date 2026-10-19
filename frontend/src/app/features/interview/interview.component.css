@@ -821,3 +821,17 @@ button[disabled] {
     font-size: 16px;
   }
 }
+
+/* On-demand "If they ask further" button row. */
+.followups-ondemand { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+/* List-style Best Answer: one numbered item per concept ("**Term:** ..."). */
+.best-items { margin: 6px 0 8px; padding-left: 22px; display: grid; gap: 6px; }
+.best-items li { line-height: 1.55; }
+
+/* Quick reference table (multi-part / compare questions). */
+.qref-wrap { overflow-x: auto; }
+.qref { width: 100%; border-collapse: collapse; font-size: .92em; }
+.qref th, .qref td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border, rgba(148,163,184,.25)); vertical-align: top; }
+.qref th { font-weight: 600; white-space: nowrap; }
+.qref tr:last-child td { border-bottom: 0; }

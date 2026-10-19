@@ -257,6 +257,104 @@ export class InterviewerAudioService {
     return true;
   }
 
+  /**
+   * "Auto Select" fallback when no loopback device exists: capture the whole
+   * screen's SYSTEM audio through the browser picker, pre-set to "Entire
+   * screen" with "Also share system audio" on, so the user only clicks Share.
+   * Video is dropped immediately — only the audio is used.
+   */
+  async startScreenSystemAudio(): Promise<void> {
+    const blocked = this.getBlockReason();
+    if (blocked) {
+      this.status$.next(blocked);
+      throw new Error('unsupported');
+    }
+    if (this.state$.value === 'capturing') return;
+
+    this.state$.next('prompting');
+    this.status$.next('Choose "Entire screen" and keep "Also share system audio" on.');
+
+    // Chrome/Edge-specific hints; other browsers ignore unknown keys.
+    const options = {
+      video: { displaySurface: 'monitor' },
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+      systemAudio: 'include',
+      selfBrowserSurface: 'exclude',
+      monitorTypeSurfaces: 'include',
+    } as DisplayMediaStreamOptions;
+
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getDisplayMedia(options);
+    } catch (err) {
+      this.state$.next('idle');
+      const name = (err as DOMException)?.name ?? '';
+      if (name === 'NotAllowedError' || name === 'SecurityError') {
+        this.status$.next('Screen audio sharing was cancelled.');
+      } else if (name === 'InvalidStateError') {
+        this.status$.next('Click Auto Select Meeting Audio again to share system audio.');
+      } else {
+        this.status$.next('System audio capture is unavailable. Please paste the question manually.');
+      }
+      throw err;
+    }
+
+    stream.getVideoTracks().forEach((t) => {
+      t.stop();
+      stream.removeTrack(t);
+    });
+    const track = stream.getAudioTracks()[0];
+    if (!track) {
+      stream.getTracks().forEach((t) => t.stop());
+      this.state$.next('idle');
+      this.status$.next(
+        'No system audio was shared. Click Auto Select again, pick "Entire screen" and turn on "Also share system audio".',
+      );
+      throw new Error('no audio track');
+    }
+    track.addEventListener('ended', () => void this.stop());
+
+    this.systemAudioSetup$.next(null);
+    this._beginCapture(stream);
+  }
+
+  /**
+   * Desktop (.exe) "Auto Select": the Electron main process answers
+   * getDisplayMedia() itself with Windows loopback audio — no picker, no
+   * Stereo Mix. Resolves false (state back to idle) when no audio came back,
+   * so the caller can fall back to a loopback input device.
+   */
+  async startDesktopLoopbackAudio(): Promise<boolean> {
+    if (this.state$.value === 'capturing') return false;
+    if (!navigator.mediaDevices?.getDisplayMedia) return false;
+
+    this.state$.next('prompting');
+    this.status$.next('Connecting to your computer\'s sound…');
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+    } catch {
+      this.state$.next('idle');
+      return false;
+    }
+    // Only the audio is needed: release the screen video immediately.
+    stream.getVideoTracks().forEach((t) => {
+      t.stop();
+      stream.removeTrack(t);
+    });
+    const track = stream.getAudioTracks()[0];
+    if (!track) {
+      stream.getTracks().forEach((t) => t.stop());
+      this.state$.next('idle');
+      return false;
+    }
+    track.addEventListener('ended', () => void this.stop());
+
+    this.systemAudioSetup$.next(null);
+    this._beginCapture(stream);
+    return true;
+  }
+
   /** Why "Auto Select" (system audio) cannot be used, or null when supported. */
   getSystemAudioBlockReason(): string | null {
     const nav = typeof navigator !== 'undefined' ? navigator : undefined;

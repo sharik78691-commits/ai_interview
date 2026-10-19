@@ -63,10 +63,40 @@ def _client_for(response: _FakeResponse):
 
 # ------------------------------------------------------------ registry
 
-def test_catalog_has_four_models_with_groq_default() -> None:
+def test_catalog_has_core_models_with_gemini_flash_lite_default() -> None:
     models = registry.list_models()
     keys = {m["key"] for m in models}
     assert {"groq-gpt-oss", "gemini-flash", "qwen-coder", "openrouter-free"} <= keys
+    # AI Guidance default: Gemini 3.5 Flash-Lite (fastest + steadiest measured).
+    assert registry.default_model_key() == "gemini-flash"
+    assert registry.get_model(None).key == "gemini-flash"
+
+
+def test_default_uses_gemini_when_its_key_is_configured(monkeypatch) -> None:
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "gemini_api_key", "g-key")
+    monkeypatch.setattr(get_settings(), "groq_api_key", "groq-key")
+    assert registry.default_model_key() == "gemini-flash"
+    assert registry.get_llm_provider(None).model == get_settings().gemini_model
+
+
+def test_default_falls_back_to_groq_without_a_gemini_key(monkeypatch) -> None:
+    """A server without GEMINI_API_KEY must still answer for real (Groq),
+    not silently with the mock provider."""
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "gemini_api_key", "")
+    monkeypatch.setattr(get_settings(), "groq_api_key", "groq-key")
+    assert registry.default_model_key() == "groq-gpt-oss"
+    assert isinstance(registry.get_llm_provider(None), OpenAICompatibleLLMProvider)
+
+
+def test_env_and_admin_default_still_win_over_built_in(monkeypatch) -> None:
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "gemini_api_key", "g-key")
+    monkeypatch.setenv("DEFAULT_LLM_MODEL", "groq-gpt-oss")
     assert registry.default_model_key() == "groq-gpt-oss"
 
 
@@ -419,3 +449,110 @@ def test_short_token_cap() -> None:
     assert MAX_TOKENS["short"] == 1400
     assert MAX_TOKENS["medium"] == 2000
     assert MAX_TOKENS["long"] == 3000
+
+
+# ------------------------------------------------- Vercel AI Gateway · DeepSeek
+
+def test_gateway_deepseek_v4_flash_registered_on_vercel_ai_gateway() -> None:
+    from app.core.config import get_settings
+
+    s = get_settings()
+    spec = registry.get_model("gateway-deepseek-v4-flash")
+    assert spec.base_url == s.ai_gateway_base_url == "https://ai-gateway.vercel.sh/v1"
+    assert spec.model_id == s.gateway_deepseek_flash_model == "deepseek/deepseek-v4.1-flash-1017"
+    assert spec.api_key == s.ai_gateway_api_key
+    # Existing direct-DeepSeek models are untouched.
+    assert registry.get_model("deepseek-flash").base_url == "https://api.deepseek.com/v1"
+
+
+def test_gateway_model_unavailable_without_key_and_listed_without_secrets() -> None:
+    row = next(m for m in registry.list_models() if m["key"] == "gateway-deepseek-v4-flash")
+    assert row["available"] is False  # conftest blanks AI_GATEWAY_API_KEY
+    assert "api_key" not in row and "apiKey" not in row
+    assert isinstance(registry.get_llm_provider("gateway-deepseek-v4-flash"), MockLLMProvider)
+
+
+def test_gateway_model_calls_gateway_with_bearer_key(monkeypatch) -> None:
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "ai_gateway_api_key", "vck_test")
+    provider = registry.get_llm_provider("gateway-deepseek-v4-flash")
+    assert isinstance(provider, OpenAICompatibleLLMProvider)
+    assert provider.base_url == "https://ai-gateway.vercel.sh/v1"
+    assert provider.model == "deepseek/deepseek-v4.1-flash-1017"
+    assert provider._headers()["Authorization"] == "Bearer vck_test"
+
+
+def test_gateway_card_required_is_reported_as_billing_not_bad_key() -> None:
+    body = (
+        '{"error":{"message":"AI Gateway requires a valid credit card on file to service '
+        'requests.","type":"customer_verification_required"}}'
+    )
+    assert OpenAICompatibleLLMProvider._categorize_status(403, body) == "quota"
+    msg = OpenAICompatibleLLMProvider._friendly_error(403, body, "deepseek/deepseek-v4.1-flash-1017")
+    assert "payment card" in msg
+    assert "LLM_API_KEY" not in msg
+    # A genuinely bad key is still reported as an auth problem.
+    assert OpenAICompatibleLLMProvider._categorize_status(401, '{"error":"invalid key"}') == "auth"
+
+
+def test_gateway_deepseek_runs_with_reasoning_off() -> None:
+    """Regression: at the default effort the gateway DeepSeek Flash spent ~20s
+    thinking and spilled reasoning into the answer (finish_reason=length,
+    invalid JSON). It must request reasoning_effort=none."""
+    spec = registry.get_model("gateway-deepseek-v4-flash")
+    assert spec.reasoning_effort == "none"
+    p = OpenAICompatibleLLMProvider(
+        api_key="vck_test", base_url=spec.base_url, model=spec.model_id,
+        reasoning_effort=spec.reasoning_effort,
+    )
+    body, _ = p._request_payload("medium", "r", "j", "q")
+    assert body["reasoning_effort"] == "none"
+    assert body["model"] == "deepseek/deepseek-v4.1-flash-1017"
+
+
+def test_gateway_gpt_oss_registered_with_low_reasoning(monkeypatch) -> None:
+    """GPT-OSS 120B through Vercel AI Gateway: same gateway key/endpoint as
+    the DeepSeek entry, short think (low) so the first bullet is fast."""
+    from app.core.config import get_settings
+
+    spec = registry.get_model("gateway-gpt-oss")
+    assert spec.model_id == get_settings().gateway_gpt_oss_model == "openai/gpt-oss-120b"
+    assert spec.base_url == "https://ai-gateway.vercel.sh/v1"
+    assert spec.reasoning_effort == "low"
+    # Unavailable without the gateway key (conftest blanks it), never leaks it.
+    row = next(m for m in registry.list_models() if m["key"] == "gateway-gpt-oss")
+    assert row["available"] is False and "api_key" not in row
+
+    monkeypatch.setattr(get_settings(), "ai_gateway_api_key", "vck_test")
+    provider = registry.get_llm_provider("gateway-gpt-oss")
+    assert isinstance(provider, OpenAICompatibleLLMProvider)
+    body, _ = provider._request_payload("medium", "r", "j", "q")
+    assert body["model"] == "openai/gpt-oss-120b"
+    assert body["reasoning_effort"] == "low"
+    assert provider._headers()["Authorization"] == "Bearer vck_test"
+    # The Groq-hosted GPT-OSS entry is untouched.
+    assert registry.get_model("groq-gpt-oss").base_url == "https://api.groq.com/openai/v1"
+
+
+def test_cerebras_gpt_oss_registered_with_low_reasoning(monkeypatch) -> None:
+    """GPT-OSS 120B on Cerebras (OpenAI-compatible endpoint)."""
+    from app.core.config import get_settings
+
+    spec = registry.get_model("cerebras-gpt-oss")
+    assert spec.provider == "Cerebras"
+    assert spec.base_url == get_settings().cerebras_base_url == "https://api.cerebras.ai/v1"
+    assert spec.model_id == get_settings().cerebras_gpt_oss_model == "gpt-oss-120b"
+    assert spec.reasoning_effort == "low"
+    # Unavailable without the key (conftest blanks CEREBRAS_API_KEY); no secrets listed.
+    row = next(m for m in registry.list_models() if m["key"] == "cerebras-gpt-oss")
+    assert row["available"] is False and "api_key" not in row
+    assert isinstance(registry.get_llm_provider("cerebras-gpt-oss"), MockLLMProvider)
+
+    monkeypatch.setattr(get_settings(), "cerebras_api_key", "csk-test")
+    provider = registry.get_llm_provider("cerebras-gpt-oss")
+    assert isinstance(provider, OpenAICompatibleLLMProvider)
+    body, _ = provider._request_payload("medium", "r", "j", "q")
+    assert body["model"] == "gpt-oss-120b"
+    assert body["reasoning_effort"] == "low"
+    assert provider._headers()["Authorization"] == "Bearer csk-test"

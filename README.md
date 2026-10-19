@@ -100,12 +100,16 @@ settings; the health endpoint stays public.
 ## AI model selection
 
 Users can choose among four text-generation models; transcription (Whisper) is
-unaffected and has no selector. The default is **GPT-OSS 120B through Groq**.
+unaffected and has no selector. The default is **Gemini 3.5 Flash-Lite**
+(`gemini-flash`) — the fastest and steadiest model measured for live AI Guidance
+(~1.3s to the first bullet, ~3.3s full answer). Without `GEMINI_API_KEY` the
+default falls back to GPT-OSS through Groq. An admin default (Admin → AI
+models) or `DEFAULT_LLM_MODEL` overrides it.
 
 | Selector key | Provider | Model ID | Endpoint |
 |---|---|---|---|
-| `groq-gpt-oss` (default) | Groq | `openai/gpt-oss-120b` | `https://api.groq.com/openai/v1` |
-| `gemini-flash` | Google | `gemini-2.5-flash` | `https://generativelanguage.googleapis.com/v1beta/openai` |
+| `groq-gpt-oss` | Groq | `openai/gpt-oss-120b` | `https://api.groq.com/openai/v1` |
+| `gemini-flash` (default) | Google | `gemini-3.5-flash-lite` | `https://generativelanguage.googleapis.com/v1beta/openai` |
 | `qwen-coder` | OpenRouter · Qwen | `qwen/qwen3-coder:free` | `https://openrouter.ai/api/v1` |
 | `openrouter-free` | OpenRouter | `meta-llama/llama-3.3-70b-instruct:free` | `https://openrouter.ai/api/v1` |
 

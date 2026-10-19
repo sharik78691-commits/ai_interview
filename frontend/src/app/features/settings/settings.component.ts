@@ -25,7 +25,7 @@ export class SettingsComponent implements OnInit {
   /** Model catalog from the backend (never hardcoded). */
   aiModelList: AiModel[] = [];
   sttProvider = 'browser';
-  responseLength: ResponseLength = 'medium';
+  responseLength: ResponseLength = 'default';
   theme = 'dark';
   micId = '';
   mics: MediaDeviceInfo[] = [];

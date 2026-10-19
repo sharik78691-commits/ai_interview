@@ -10,6 +10,7 @@ const fs = require('fs');
 const { createCapture } = require('./screenshot/capture');
 const { registerScreenshotIpc } = require('./screenshot/ipc');
 const { recoverableFolderHash } = require('./reload-recovery');
+const { createLoopbackAudioHandler } = require('./system-audio');
 
 // Known Windows issue: with GPU acceleration, a content-protected window can
 // render BLACK on the local screen too (not just in captures). Software
@@ -471,6 +472,12 @@ app.whenReady().then(async () => {
   session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
     callback(['media', 'audioCapture', 'videoCapture'].includes(permission));
   });
+
+  // Auto Select: answer getDisplayMedia() with Windows loopback audio, so the
+  // meeting is captured with no picker and no Stereo Mix (electron/system-audio.js).
+  session.defaultSession.setDisplayMediaRequestHandler(
+    createLoopbackAudioHandler({ desktopCapturer }),
+  );
 
   // Screenshot analysis (capture + backend AI request). All privileged work
   // stays in the main process; see electron/screenshot/*.

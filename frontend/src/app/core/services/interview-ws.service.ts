@@ -1,6 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { BehaviorSubject, Subject } from 'rxjs';
-import { AIInterviewResponse, HistoryItem, InterviewStatus } from '../models/interview.models';
+import { AIInterviewResponse, FollowUpItem, HistoryItem, InterviewStatus } from '../models/interview.models';
 import { environment } from '../../../environments/environment';
 import { API_BASE_URL } from '../api/api-config';
 
@@ -60,6 +60,11 @@ export class InterviewWsService {
    * shown instead) from speech-to-text warnings (no fallback exists).
    */
   notice$ = new Subject<{ message: string; scope: 'ai' | 'stt' }>();
+  /**
+   * On-demand "If they ask further" results (ai_followups), requested with
+   * sendRequestFollowUps(). `error` is set when none could be generated.
+   */
+  followUps$ = new Subject<{ question: string; followUps: FollowUpItem[]; error?: string }>();
   private ws: WebSocket | null = null;
   private retries = 0;
   private url = this.defaultUrl();
@@ -237,6 +242,13 @@ export class InterviewWsService {
             if (/question detected|thinking/i.test(m)) this.status$.next('processing');
             else if (/listening|connected|reset/i.test(m)) this.status$.next('listening');
           }
+        } else if (msg.type === 'ai_followups') {
+          const items = Array.isArray(msg['followUps']) ? (msg['followUps'] as FollowUpItem[]) : [];
+          this.followUps$.next({
+            question: String(msg['question'] ?? ''),
+            followUps: items.filter((f) => !!f?.question),
+            error: typeof msg['error'] === 'string' ? msg['error'] : undefined,
+          });
         } else if (msg.type === 'stt_transcript') {
           // Interviewer audio recognised by the server-side STT provider.
           this.interviewerTranscript$.next({
@@ -330,7 +342,7 @@ export class InterviewWsService {
   }
 
   /** Stream one interviewer audio clip as a binary frame. */
-  sendAudioClip(data: ArrayBuffer, mimeType: string, responseLength = 'medium', model?: string): void {
+  sendAudioClip(data: ArrayBuffer, mimeType: string, responseLength = 'default', model?: string): void {
     if (this.ws?.readyState !== WebSocket.OPEN) return;
     this.ws.send(data);
     // Following control frame tells the backend "clip complete, transcribe now".
@@ -339,27 +351,37 @@ export class InterviewWsService {
   }
 
   /** Manual interviewer question -> existing AI flow. */
-  sendInterviewerQuestion(text: string, responseLength = 'medium', model?: string): void {
+  sendInterviewerQuestion(text: string, responseLength = 'default', model?: string): void {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({ type: 'interviewer_question', text, responseLength, model }));
       this.status$.next('thinking');
     }
   }
 
-  sendTranscript(text: string, responseLength = 'medium', model?: string): void {
+  sendTranscript(text: string, responseLength = 'default', model?: string): void {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({ type: 'transcript', text, responseLength, model }));
       this.status$.next('thinking');
     }
   }
 
-  sendForce(question: string, responseLength = 'medium', model?: string): void {
+  sendForce(question: string, responseLength = 'default', model?: string): void {
     if (this.ws?.readyState === WebSocket.OPEN) {
       // Text was already streamed via sendTranscript; the server analyzes its
       // buffer. `text` is included only as a fallback if the buffer is empty.
       this.ws.send(JSON.stringify({ type: 'force', text: question, responseLength, model }));
       this.status$.next('thinking');
     }
+  }
+
+  /**
+   * Ask for "If they ask further" for an answered question. Returns false when
+   * the socket is not open (the caller shows an error instead of spinning).
+   */
+  sendRequestFollowUps(question: string): boolean {
+    if (this.ws?.readyState !== WebSocket.OPEN) return false;
+    this.ws.send(JSON.stringify({ type: 'request_followups', question }));
+    return true;
   }
 
   /** Switch the AI model for subsequent answers (mid-session). */
