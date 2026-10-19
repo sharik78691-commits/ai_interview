@@ -213,7 +213,7 @@ def test_ws_streams_start_deltas_then_guidance(ai_cls) -> None:
     assert frames[0]["type"] == "stt_transcript", frames
     assert frames[1]["type"] == "status", frames
     assert frames[2]["type"] == "ai_stream_start", frames
-    assert frames[2]["model"] == "groq-gpt-oss", frames
+    assert frames[2]["model"] == "gemini-flash", frames  # default: Gemini 3.5 Flash-Lite
     assert frames[3] == {"type": "ai_stream_delta", "point": "Define scope capture."}
     assert frames[4] == {"type": "ai_stream_delta", "point": "Give an example."}
     assert frames[5]["type"] == "ai_guidance", frames

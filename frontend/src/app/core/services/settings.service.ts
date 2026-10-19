@@ -7,7 +7,7 @@ const KEY = 'aia_settings';
 const DEFAULTS: AppSettings = {
   aiModel: 'auto',
   sttProvider: 'browser',
-  responseLength: 'medium',
+  responseLength: 'default',
   theme: 'dark',
   micId: '',
   guidanceFontSize: 15,
@@ -32,10 +32,10 @@ const LENGTH_ALIASES: Record<string, ResponseLength> = {
   concise: 'short',
   brief: 'short',
   short: 'short',
-  standard: 'medium',
-  medium: 'medium',
-  detailed: 'long',
-  long: 'long',
+  standard: 'default',
+  medium: 'default',
+  detailed: 'default',
+  long: 'default',
 };
 
 /** Supported themes. 'darker' was a legacy settings option that never had a

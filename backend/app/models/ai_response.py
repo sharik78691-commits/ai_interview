@@ -62,13 +62,13 @@ class AIInterviewResponse(BaseModel):
     question: ``simpleExplanation`` (Explain It Simply), ``keyDetails`` (what
     the interviewer expects), ``example`` (Practical Example), ``star``
     (scenario/behavioral Situation → Action → Result), ``followUps`` (If They
-    Ask Further) and, for coding, ``approach`` / ``codeHint`` (program 1, the
-    polished AI solution) / ``humanCode`` (program 2, the same solution written
-    the way a person naturally types it, with plain comments) / ``complexity``
-    / ``edgeCases``.
+    Ask Further — generated on demand, empty in answers) and, for coding,
+    ``approach`` / ``codeHint`` (the ONE program) / ``complexity`` /
+    ``edgeCases``.
 
-    ``keyTakeaways``, ``followUpQuestions`` and ``comparison`` are legacy
-    fields kept so older clients and stored answers still validate.
+    ``keyTakeaways``, ``followUpQuestions``, ``comparison`` and ``humanCode``
+    (the removed "Program 2 · human-style version") are legacy fields kept so
+    older clients and stored answers still validate.
     """
 
     question: str
@@ -87,8 +87,33 @@ class AIInterviewResponse(BaseModel):
     keyTakeaways: list[str] = Field(default_factory=list)
     followUpQuestions: list[str] = Field(default_factory=list)
     responseLength: ResponseLength = "medium"
-    #: Legacy comparison table — no longer requested; contrasts now live in keyDetails.
+    #: Quick-reference table for multi-part / list / compare questions
+    #: (one row per member, e.g. Concept | Example | Key keyword).
     comparison: Optional[ComparisonTable] = None
+
+    @field_validator("comparison", mode="before")
+    @classmethod
+    def _lenient_table(cls, v: object) -> object:
+        """A malformed table must never fail the whole answer.
+
+        Cells are stringified, each row is padded/trimmed to the header width,
+        empty rows dropped; a table with no headers or no rows becomes null.
+        """
+        if not isinstance(v, dict):
+            return None
+        headers = [str(h).strip() for h in (v.get("headers") or []) if str(h or "").strip()]
+        if not headers:
+            return None
+        width = len(headers)
+        rows = []
+        for row in v.get("rows") or []:
+            if not isinstance(row, list):
+                continue
+            cells = ["" if c is None else str(c).strip() for c in row][:width]
+            cells += [""] * (width - len(cells))
+            if any(cells):
+                rows.append(cells)
+        return {"headers": headers, "rows": rows} if rows else None
 
     @field_validator("answerPoints")
     @classmethod

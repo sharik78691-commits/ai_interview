@@ -15,6 +15,7 @@ an existing deployment is never accidentally collapsed into one shared bucket.
 Limits are per process: with N workers the effective limit is N x limit.
 """
 import logging
+import math
 import threading
 import time
 
@@ -72,11 +73,22 @@ def _hit(key: str, limit: int) -> bool:
     return count > limit
 
 
+def retry_after_seconds(key: str) -> int:
+    """Seconds until ``key``'s current window resets (at least 1)."""
+    with _lock:
+        window_start, _ = _buckets.get(key, (0.0, 0))
+    remaining = _WINDOW_SECONDS - (time.time() - window_start)
+    return max(1, min(_WINDOW_SECONDS, math.ceil(remaining)))
+
+
 def _reject(key: str) -> None:
     logger.warning("Rate limit exceeded for bucket %s", key.split(":", 1)[0])
+    # Retry-After tells well-behaved clients exactly when to try again instead
+    # of hammering the endpoint (and extending the lockout).
     raise HTTPException(
         status_code=status.HTTP_429_TOO_MANY_REQUESTS,
         detail="Too many attempts. Please try again later.",
+        headers={"Retry-After": str(retry_after_seconds(key))},
     )
 
 

@@ -11,6 +11,8 @@ from sqlalchemy.orm import Session
 
 from app.auth import security
 from app.auth.service import get_user_by_id, is_session_token_revoked
+from app.core.config import get_settings
+from app.core.ratelimit import rate_limit_key
 from app.db.session import get_db
 from app.models.user import User
 
@@ -55,6 +57,17 @@ def require_admin(user: User = Depends(require_user)) -> User:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required.",
         )
+    return user
+
+
+def require_admin_rate_limited(user: User = Depends(require_admin)) -> User:
+    """Admin + per-admin-user rate limit (ADMIN_RATE_LIMIT_PER_MINUTE).
+
+    Keyed by user id, not IP: admins behind one office/NAT IP do not share a
+    budget, and the login brute-force limit (RATE_LIMIT_PER_MINUTE) stays
+    separate from normal dashboard use.
+    """
+    rate_limit_key("admin", str(user.id), get_settings().admin_rate_limit_per_minute)
     return user
 
 

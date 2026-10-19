@@ -4,12 +4,14 @@
 // Dev:   run `ng serve`, then `npm run electron` (loads http://localhost:4200).
 // Prod:  `npm run dist:win` / `dist:mac` builds a packaged app (electron-builder)
 //        that loads the built files from dist/frontend/browser.
-const { app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, screen, session, shell, Tray, Menu, nativeImage } = require('electron');
+const { app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, net, screen, session, shell, Tray, Menu, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { createCapture } = require('./screenshot/capture');
 const { registerScreenshotIpc } = require('./screenshot/ipc');
 const { recoverableFolderHash } = require('./reload-recovery');
+const { createLoopbackAudioHandler } = require('./system-audio');
+const { createSessionFetch } = require('./session-fetch');
 
 // Known Windows issue: with GPU acceleration, a content-protected window can
 // render BLACK on the local screen too (not just in captures). Software
@@ -62,7 +64,7 @@ async function sessionFetch(url, init = {}) {
       // No cookie yet (signed out) — the server answers 401/403 clearly.
     }
   }
-  return ses.fetch(url, { ...init, headers, credentials: 'include' });
+  return createSessionFetch({ net, ses })(url, { ...init, headers });
 }
 
 /**
@@ -472,6 +474,12 @@ app.whenReady().then(async () => {
     callback(['media', 'audioCapture', 'videoCapture'].includes(permission));
   });
 
+  // Auto Select: answer getDisplayMedia() with Windows loopback audio, so the
+  // meeting is captured with no picker and no Stereo Mix (electron/system-audio.js).
+  session.defaultSession.setDisplayMediaRequestHandler(
+    createLoopbackAudioHandler({ desktopCapturer }),
+  );
+
   // Screenshot analysis (capture + backend AI request). All privileged work
   // stays in the main process; see electron/screenshot/*.
   registerScreenshotIpc({
@@ -482,6 +490,8 @@ app.whenReady().then(async () => {
     // Analysis runs on the backend with the SERVER's Gemini key.
     apiBase: API_BASE,
     fetchImpl: sessionFetch,
+    // Ctrl+Shift+S: foreground the app with keyboard focus so Enter reaches the picker.
+    focusWindow: () => showMainWindow(),
   });
 
   createMainWindow();

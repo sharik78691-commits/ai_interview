@@ -5,6 +5,7 @@ import { Subscription } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import {
   AIInterviewResponse,
+  ComparisonTable,
   FollowUpItem,
   HistoryItem,
   InterviewStatus,
@@ -32,7 +33,17 @@ export interface AnswerCard {
   isCoding: boolean;
   /** Best Answer sentences grouped into short, speakable paragraphs. */
   bestAnswer: string[];
+  /**
+   * List-style Best Answer (e.g. the four OOP concepts): intro paragraphs,
+   * one numbered item per "**Term:** ..." point, then closing paragraphs.
+   * `bestItems` is empty for ordinary answers, which use `bestAnswer`.
+   */
+  bestIntro: string[];
+  bestItems: string[];
+  bestOutro: string[];
   keyDetails: string[];
+  /** Quick-reference table (multi-part / compare questions), or null. */
+  table: ComparisonTable | null;
   followUps: FollowUpItem[];
 }
 
@@ -40,9 +51,36 @@ const EMPTY_CARD: AnswerCard = {
   typeLabel: '',
   isCoding: false,
   bestAnswer: [],
+  bestIntro: [],
+  bestItems: [],
+  bestOutro: [],
   keyDetails: [],
+  table: null,
   followUps: [],
 };
+
+/** A point that opens with a bold label: "**Term:** ..." or "**Term**: ...". */
+const LABELLED_POINT = /^\s*\*\*[^*\n]{1,80}?(?::\*\*|\*\*\s*[:—-])/;
+
+/**
+ * Split a Best Answer into intro / numbered items / outro when it is a
+ * list-style answer (2+ labelled points); otherwise everything stays in intro.
+ */
+export function splitLabelled(points: string[]): { intro: string[]; items: string[]; outro: string[] } {
+  const labelled = points.filter((p) => LABELLED_POINT.test(p));
+  if (labelled.length < 2) return { intro: points, items: [], outro: [] };
+  const first = points.findIndex((p) => LABELLED_POINT.test(p));
+  return {
+    intro: points.slice(0, first),
+    items: labelled,
+    outro: points.slice(first).filter((p) => !LABELLED_POINT.test(p)),
+  };
+}
+
+/** Usable table: has headers and at least one row. */
+function tableOf(t: ComparisonTable | null | undefined): ComparisonTable | null {
+  return t && t.headers?.length && t.rows?.length ? t : null;
+}
 
 /**
  * Group spoken sentences into paragraphs of at most two, so the Best Answer
@@ -87,7 +125,7 @@ export class InterviewComponent implements OnInit, OnDestroy {
   error = '';
   micSupported = true;
   /** Answer depth the user picked for the next question. */
-  responseLength: ResponseLength = 'medium';
+  responseLength: ResponseLength = 'default';
   readonly lengthOptions = Object.entries(RESPONSE_LENGTH_LABELS) as Array<[
     ResponseLength,
     string,
@@ -142,6 +180,37 @@ export class InterviewComponent implements OnInit, OnDestroy {
   /** Info popup shown before "Auto Select Meeting Audio" starts capturing. */
   autoSelectInfoOpen = false;
 
+  /** On-demand "If they ask further": loading flag + last error for the current card. */
+  followUpsLoading = false;
+  followUpsError = '';
+
+  /** "Show follow-ups": ask the backend for this answer's likely next questions. */
+  showFollowUps(): void {
+    const q = this.guidance?.question?.trim();
+    if (!q || this.followUpsLoading) return;
+    this.followUpsError = '';
+    if (!this.ws.sendRequestFollowUps(q)) {
+      this.followUpsError = 'Not connected. Try again in a moment.';
+      return;
+    }
+    this.followUpsLoading = true;
+  }
+
+  /** Merge an ai_followups reply into the current card (late replies ignored). */
+  applyFollowUps({ question, followUps, error }: { question: string; followUps: FollowUpItem[]; error?: string }): void {
+    const g = this.guidance;
+    // Ignore a late reply for an answer that is no longer on screen.
+    if (!g || norm(question) !== norm(g.question)) return;
+    this.followUpsLoading = false;
+    if (followUps.length) {
+      // New object so the memoized card is rebuilt with the follow-ups.
+      this.guidance = { ...g, followUps };
+      this.followUpsError = '';
+    } else {
+      this.followUpsError = error || 'No follow-ups were suggested. Try again.';
+    }
+  }
+
   /** Answer text used by the "Copy Answer" button (mirrors the card). */
   get answerText(): string {
     const g = this.guidance;
@@ -153,15 +222,23 @@ export class InterviewComponent implements OnInit, OnDestroy {
     };
     if (c.isCoding) {
       section('Approach', g.approach ? [g.approach] : []);
-      section('Program 1 (AI solution)', g.codeHint ? [g.codeHint] : []);
-      section('Program 2 (human-style version)', g.humanCode ? [g.humanCode] : []);
+      section('Program', g.codeHint ? [g.codeHint] : []);
       section('Complexity', g.complexity ? [g.complexity] : []);
       section('Edge cases', (g.edgeCases ?? []).map((e) => `- ${e}`));
       section('Explain it like this', [g.answerPoints.join(' ')]);
     } else {
-      section('Best answer', [g.answerPoints.join(' ')]);
+      section(
+        'Best answer',
+        c.bestItems.length
+          ? [...c.bestIntro, ...c.bestItems.map((p, i) => `${i + 1}. ${p}`), ...c.bestOutro]
+          : [g.answerPoints.join(' ')],
+      );
       section('Explain it simply', g.simpleExplanation ? [g.simpleExplanation] : []);
       section('Key details', c.keyDetails.map((d) => `- ${d}`));
+      section(
+        'Quick reference',
+        c.table ? [c.table.headers.join(' | '), ...c.table.rows.map((r) => r.join(' | '))] : [],
+      );
       section('Practical example', g.example ? [g.example] : []);
     }
     if (g.star) {
@@ -205,11 +282,16 @@ export class InterviewComponent implements OnInit, OnDestroy {
         });
     const isCoding = g.questionType === 'coding' && !!(g.codeHint || g.approach);
     this.cardFor = g;
+    const split = splitLabelled(g.answerPoints);
     this.cardCache = {
       typeLabel: InterviewComponent.TYPE_LABELS[g.questionType] ?? g.questionType,
       isCoding,
       bestAnswer: groupSentences(g.answerPoints),
+      bestIntro: groupSentences(split.intro),
+      bestItems: split.items,
+      bestOutro: groupSentences(split.outro),
       keyDetails: g.keyDetails?.length ? g.keyDetails : (g.keyTakeaways ?? []),
+      table: isCoding ? null : tableOf(g.comparison),
       followUps,
     };
     return this.cardCache;
@@ -264,12 +346,18 @@ export class InterviewComponent implements OnInit, OnDestroy {
       this.detector.completeQuestions$.subscribe((q) => this.onQuestion(q)),
       this.ws.guidance$.subscribe((g) => {
         if (g) {
+          // A new answer: forget the previous card's follow-up request state.
+          if (g.question !== this.guidance?.question) {
+            this.followUpsLoading = false;
+            this.followUpsError = '';
+          }
           this.guidance = g;
           this.thinking = false;
           this.flash = false;
           requestAnimationFrame(() => (this.flash = true));
         }
       }),
+      this.ws.followUps$.subscribe((r) => this.applyFollowUps(r)),
       this.ws.status$.subscribe((s) => (this.status = s)),
       this.ws.history$.subscribe((h) => (this.history = h)),
       this.ws.notice$.subscribe(({ message, scope }) => {
@@ -414,10 +502,8 @@ export class InterviewComponent implements OnInit, OnDestroy {
   /** Rough word budget shown next to the depth selector. */
   get lengthHint(): string {
     switch (this.responseLength) {
-      case 'default': return 'Complete answer + full interviewer checklist';
       case 'short': return '3–4 quick bullets';
-      case 'long': return '8–12 detailed bullets + example';
-      default: return '5–7 structured bullets';
+      default: return 'Complete answer + full interviewer checklist';
     }
   }
 
@@ -474,7 +560,8 @@ export class InterviewComponent implements OnInit, OnDestroy {
   /** User confirmed the popup: close it and start system-audio capture. */
   confirmAutoSelect(): void {
     this.autoSelectInfoOpen = false;
-    void this.startSystemAudio();
+    // Desktop keeps its loopback-only path; the web build adds the screen-audio fallback.
+    void (this.isDesktop ? this.startSystemAudio() : this.autoSelectMeetingAudio());
   }
 
   /**
@@ -485,7 +572,11 @@ export class InterviewComponent implements OnInit, OnDestroy {
   async startSystemAudio(): Promise<void> {
     this.error = '';
     try {
-      const started = await this.interviewerAudio.startSystemAudio();
+      // Desktop: Windows loopback straight from the Electron main process — no
+      // picker, no Stereo Mix. Falls back to a loopback input device below.
+      const started =
+        (this.isDesktop && (await this.interviewerAudio.startDesktopLoopbackAudio())) ||
+        (await this.interviewerAudio.startSystemAudio());
       // `started === false` means no loopback device exists yet; the service
       // has already flagged setup and the inline helper takes over.
       if (started) {
@@ -496,6 +587,41 @@ export class InterviewComponent implements OnInit, OnDestroy {
     } catch {
       // The service already put a specific reason in status$.
       this.error = this.interviewerAudio.status$.value;
+    }
+  }
+
+  /**
+   * Web "Auto Select Meeting Audio": one click starts capturing the computer's
+   * sound — no info popup. Uses a loopback device (Stereo Mix / VB-Cable) when
+   * one exists, otherwise falls back to sharing the entire screen's system
+   * audio. Either way the interviewer's speech flows into the same question
+   * pipeline as tab audio.
+   */
+  async autoSelectMeetingAudio(): Promise<void> {
+    this.error = '';
+    let started = false;
+    try {
+      started = await this.interviewerAudio.startSystemAudio();
+    } catch (err) {
+      // Only a declined mic-permission prompt falls through to screen audio;
+      // other failures keep their specific message.
+      if ((err as Error)?.message !== 'permission denied') {
+        this.error = this.interviewerAudio.status$.value;
+        return;
+      }
+    }
+    if (!started && !this.capturingInterviewer) {
+      try {
+        await this.interviewerAudio.startScreenSystemAudio();
+        started = true;
+      } catch {
+        this.error = this.interviewerAudio.status$.value;
+        return;
+      }
+    }
+    if (started) {
+      this.ws.sendInterviewerAudioStart('audio/wav');
+      this.startTimer();
     }
   }
 
@@ -752,4 +878,9 @@ export class InterviewComponent implements OnInit, OnDestroy {
     this.timer = null;
     if (!keep) { /* keep elapsed for session record */ }
   }
+}
+
+/** Whitespace/case-insensitive question match (server echoes the question). */
+function norm(q: string | undefined | null): string {
+  return (q ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
 }

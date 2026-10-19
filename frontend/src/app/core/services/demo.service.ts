@@ -98,19 +98,6 @@ export class DemoService {
         '            return [seen[target - x], i]\n' +
         '        seen[x] = i\n' +
         '    return []  # no valid pair',
-      humanCode:
-        'def two_sum(nums, target):\n' +
-        '    # number -> where I saw it\n' +
-        '    seen = {}\n' +
-        '\n' +
-        '    for i in range(len(nums)):\n' +
-        '        needed = target - nums[i]\n' +
-        '        if needed in seen:\n' +
-        '            # found the other half, done\n' +
-        '            return [seen[needed], i]\n' +
-        '        seen[nums[i]] = i\n' +
-        '\n' +
-        '    return []  # nothing adds up',
       complexity: 'Time: O(n) — single pass. Space: O(n) — the hash map.',
       edgeCases: ['No valid pair', 'Duplicates like [3, 3]', 'Negative numbers'],
       followUps: [

@@ -127,14 +127,14 @@ export class ResumeService {
   prepareInterview(
     resumeText: string,
     jobDescription: string,
-    responseLength: string = 'medium',
+    responseLength: string = 'default',
   ): Observable<{ status: string }> {
     this.saveResumeText(resumeText);
     this.saveJobDescription(jobDescription);
     return this.interviewApi.prepare({ resumeText, jobDescription, responseLength });
   }
 
-  analyzeQuestion(question: string, responseLength: string = 'medium', model?: string): Observable<AIInterviewResponse> {
+  analyzeQuestion(question: string, responseLength: string = 'default', model?: string): Observable<AIInterviewResponse> {
     return this.interviewApi.analyze({
       question,
       resumeText: this.resumeText,

@@ -2,7 +2,7 @@
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 
-from app.models.ai_response import AIInterviewResponse
+from app.models.ai_response import AIInterviewResponse, FollowUp
 
 
 class LLMProvider(ABC):
@@ -38,3 +38,18 @@ class LLMProvider(ABC):
         return await self.analyze_question(
             resume, job_description, question, response_length, **extra
         )
+
+    async def generate_follow_ups(
+        self,
+        resume: str,
+        job_description: str,
+        question: str,
+        answer_points: list[str],
+        response_length: str = "medium",
+    ) -> list[FollowUp]:
+        """On-demand "If they ask further" items for an answered question.
+
+        Answers no longer carry follow-ups (they were 15-37% of every answer's
+        output); the candidate requests them with a button. Default: none.
+        """
+        return []

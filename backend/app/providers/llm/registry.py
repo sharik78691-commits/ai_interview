@@ -27,7 +27,14 @@ from app.providers.llm.provider import (
     OpenAICompatibleLLMProvider,
 )
 
-DEFAULT_KEY = "groq-gpt-oss"
+# Built-in default for AI Guidance. Gemini 3.5 Flash-Lite was the fastest AND
+# steadiest model measured through the real streaming path (6 runs, "default"
+# length): first bullet 1.1-2.0s, full answer ~3.3s median. Groq gpt-oss starts
+# faster but its free tier caps at 8000 tokens/min (~3 answers/min, then 429).
+DEFAULT_KEY = "gemini-flash"
+# When the built-in default has no key on a server, use the first configured
+# model from this list instead of silently answering with the mock provider.
+_DEFAULT_FALLBACKS = ("gemini-flash", "groq-gpt-oss")
 
 
 @dataclass(frozen=True)
@@ -192,6 +199,56 @@ def _catalog() -> list[ModelSpec]:
             # shows the default effort makes the first bullet arrive too late.
             reasoning_effort=None,
         ),
+        ModelSpec(
+            key="gateway-deepseek-v4-flash",
+            provider="Vercel AI Gateway · DeepSeek",
+            display_name="DeepSeek V4.1 Flash (1017) — Vercel AI Gateway",
+            model_id=s.gateway_deepseek_flash_model,
+            base_url=s.ai_gateway_base_url,
+            api_key=s.ai_gateway_api_key,
+            free_tier=False,
+            capabilities="DeepSeek V4.1 Flash (1017 snapshot) via Vercel AI Gateway — fast, low-cost answers, billed through Vercel",
+            # DeepSeek Flash is a reasoning model. On the gateway's default
+            # effort the earlier V4 Flash thought for ~20s before the first
+            # bullet on the live interview prompt and spilled its thinking into
+            # the answer, overflowing the token cap (finish_reason=length ->
+            # invalid JSON -> retry). "none" is honoured by the gateway (zero
+            # reasoning tokens) on both snapshots, with valid JSON every time.
+            # Measured (stream, first content / reasoning chars):
+            #   v4-flash:            default 4.56s/1183, low 2.69s/505, none 1.98s/0
+            #   v4.1-flash-1017:     default 1.61s/388,  low 2.18s/314, none 1.92s/0
+            reasoning_effort="none",
+        ),
+        ModelSpec(
+            key="gateway-gpt-oss",
+            provider="Vercel AI Gateway · OpenAI",
+            display_name="GPT-OSS 120B — Vercel AI Gateway",
+            model_id=s.gateway_gpt_oss_model,
+            base_url=s.ai_gateway_base_url,
+            api_key=s.ai_gateway_api_key,
+            free_tier=False,
+            capabilities="OpenAI's open-weight GPT-OSS 120B via Vercel AI Gateway — no Groq per-minute token cap",
+            # Same reasoning model as groq-gpt-oss. Measured on the gateway
+            # (stream, first content / reasoning chars): default 2.60s/1104,
+            # low 0.80s/75. "low" is in gpt-oss's own effort enum
+            # (low|medium|high) and is the value already verified on Groq.
+            reasoning_effort="low",
+        ),
+        ModelSpec(
+            key="cerebras-gpt-oss",
+            provider="Cerebras",
+            display_name="GPT-OSS 120B — Cerebras",
+            model_id=s.cerebras_gpt_oss_model,
+            base_url=s.cerebras_base_url,
+            api_key=s.cerebras_api_key,
+            free_tier=False,
+            capabilities="GPT-OSS 120B on Cerebras wafer-scale chips — fastest measured (~1s full answer); 5 requests/min on the Developer tier",
+            # Measured on Cerebras (non-stream, same JSON prompt): low finished
+            # in 0.95-1.13s with valid JSON; the default effort reasons for
+            # ~1100+ tokens and once returned no content within the cap.
+            # "low" is in gpt-oss's own effort enum (low|medium|high).
+            reasoning_effort="low",
+        ),
     ]
 
 
@@ -238,7 +295,12 @@ def invalidate_model_overrides() -> None:
 
 
 def default_model_key() -> str:
-    """Resolve the default model: DB override -> env -> built-in Groq default."""
+    """Resolve the default model: DB override -> env -> built-in default.
+
+    The built-in default (Gemini 3.5 Flash-Lite) falls back to the next
+    configured + enabled model in ``_DEFAULT_FALLBACKS`` when its key is
+    missing, so a server without a Gemini key still gives real answers.
+    """
     llm_keys = {m.key for m in _catalog()}
     overrides = _load_overrides()
     for key, ov in overrides.items():
@@ -248,6 +310,12 @@ def default_model_key() -> str:
     env_default = os.getenv("DEFAULT_LLM_MODEL", "").strip()
     if env_default in llm_keys:
         return env_default
+    catalog = {m.key: m for m in _catalog()}
+    for key in _DEFAULT_FALLBACKS:
+        spec = catalog.get(key)
+        ov = overrides.get(key)
+        if spec and spec.api_key and (ov.enabled if ov else True):
+            return key
     return DEFAULT_KEY
 
 

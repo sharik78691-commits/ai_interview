@@ -33,12 +33,10 @@
     <select id="len" [(ngModel)]="responseLength">
       <option value="default">Default — covers everything the interviewer expects</option>
       <option value="short">Short — quick bullets (3–4)</option>
-      <option value="medium">Medium — structured answer (5–7)</option>
-      <option value="long">Long — detailed with examples (8–12)</option>
     </select>
     <p class="muted small" style="margin-top:-4px">
-      Controls how much the AI writes. "Long" answers like a senior engineer: definition,
-      mechanism, trade-offs, comparisons, real production example.
+      Controls how much the AI writes. "Default" gives the complete answer the interviewer
+      expects; "Short" gives a few quick bullets.
     </p>
     <label class="lbl" for="theme">Theme</label>
     <select id="theme" [(ngModel)]="theme">

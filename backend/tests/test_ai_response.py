@@ -164,23 +164,60 @@ def test_prompt_requires_human_voice() -> None:
 def test_prompt_is_adaptive_answer_card() -> None:
     """The prompt asks for ONE adaptive Interview Answer Card, not the old
     fixed sections (opener / comparison table / takeaways / code hint)."""
-    from app.providers.llm.provider import BASE_SCHEMA, build_system_prompt
+    from app.providers.llm.provider import (
+        BASE_SCHEMA,
+        build_followup_prompt,
+        build_system_prompt,
+    )
 
     prompt = build_system_prompt("medium")
     assert "INTERVIEW ANSWER CARD" in prompt
     for section in ("BEST ANSWER", "EXPLAIN IT SIMPLY", "WHAT THE INTERVIEWER EXPECTS",
-                    "PRACTICAL EXAMPLE", "IF THEY ASK FURTHER", "CODING CARD"):
+                    "PRACTICAL EXAMPLE", "CODING CARD"):
         assert section in prompt, section
+    # "If they ask further" is generated on demand (Show follow-ups button),
+    # by its own prompt — the answer card always leaves followUps empty.
+    assert "IF THEY ASK FURTHER" not in prompt
+    assert "IF THEY ASK FURTHER" in build_followup_prompt("medium")
     assert "Do NOT force every section" in prompt
     for qtype in ("HR", "THEORY", "SCENARIO", "CODING"):
         assert qtype in prompt, qtype
     # Old fixed sections are no longer requested.
-    assert "COMPARISON TABLE" not in prompt
-    assert '"comparison"' not in BASE_SCHEMA
     assert '"keyTakeaways"' not in BASE_SCHEMA
+    # The quick-reference table is ADAPTIVE: only for multi-part / list and
+    # compare questions (ChatGPT-style), never a fixed section.
+    assert '"comparison"' in BASE_SCHEMA
+    assert "QUICK REFERENCE TABLE, for MULTI-PART / LIST and COMPARE questions only" in prompt
+    assert "null for single-concept, HR, behavioral and coding questions" in prompt
     # answerPoints must stay the first content key so streaming latency
     # (first provisional sentence) is unchanged.
     assert BASE_SCHEMA.index('"answerPoints"') < BASE_SCHEMA.index('"simpleExplanation"')
+    assert BASE_SCHEMA.index('"answerPoints"') < BASE_SCHEMA.index('"comparison"')
+
+
+def test_list_questions_must_cover_every_member_with_labelled_points() -> None:
+    """Regression: "core OOP concepts" was answered without Abstraction.
+    List questions must name the whole set, one "**Term:** ..." point each."""
+    from app.providers.llm.provider import build_system_prompt
+
+    for level in ("default", "short", "medium", "long"):
+        prompt = build_system_prompt(level)
+        assert "COVER EVERY MEMBER of the well-known set" in prompt, level
+        assert "Polymorphism AND Abstraction" in prompt, level
+        assert 'STARTS with "**Member name:** "' in prompt, level
+        assert "so no member is missing" in prompt, level
+
+
+def test_malformed_table_never_fails_the_answer() -> None:
+    base = dict(question="q", questionType="technical", answerPoints=["a"])
+    ok = AIInterviewResponse(
+        **base,
+        comparison={"headers": ["Concept", "Keyword"], "rows": [["Encapsulation"], ["A", "b", "extra"], [None, ""], "junk"]},
+    )
+    assert ok.comparison.headers == ["Concept", "Keyword"]
+    assert ok.comparison.rows == [["Encapsulation", ""], ["A", "b"]]
+    for bad in ({"headers": [], "rows": [["x"]]}, {"headers": ["A"], "rows": []}, "junk", 5):
+        assert AIInterviewResponse(**base, comparison=bad).comparison is None
 
 
 async def test_mock_comparison_question_contrasts_in_key_details() -> None:
@@ -199,10 +236,9 @@ async def test_mock_coding_card_has_approach_complexity_edge_cases() -> None:
             "Python resume", "Python role", "Write a function to solve two-sum?", level
         )
         assert resp.approach and resp.codeHint and resp.complexity, level
-        # Two programs: the AI solution and a human-style rewrite.
-        assert resp.humanCode and "def " in resp.humanCode, level
-        assert resp.humanCode != resp.codeHint
-        assert "#" in resp.humanCode  # carries plain-language comments
+        # Exactly ONE program: no "Program 2 · human-style version" any more.
+        assert "def " in resp.codeHint, level
+        assert resp.humanCode is None, level
         assert "O(" in resp.complexity
         assert len(resp.edgeCases) >= 2
 
@@ -300,15 +336,27 @@ async def test_mock_has_no_ai_tells() -> None:
             )
 
 
-def test_prompt_requires_two_programs_for_coding() -> None:
-    """Coding answers must ship program 1 (AI) AND program 2 (human-style)."""
+def test_prompt_requires_exactly_one_program_for_coding() -> None:
+    """Coding answers ship ONE complete program (codeHint); the removed
+    "Program 2 · human-style version" is never requested."""
     from app.providers.llm.provider import BASE_SCHEMA, build_system_prompt
 
-    assert '"humanCode"' in BASE_SCHEMA
-    for level in ("short", "medium", "long"):
+    assert '"codeHint"' in BASE_SCHEMA
+    assert '"humanCode"' not in BASE_SCHEMA
+    for level in ("default", "short", "medium", "long"):
         prompt = build_system_prompt(level)
-        assert "PROGRAM 1" in prompt and "PROGRAM 2" in prompt, level
-        assert "humanCode" in prompt, level
+        assert "THE PROGRAM (exactly ONE solution)" in prompt, level
+        assert "codeHint is NEVER null for coding" in prompt, level
+        assert "humanCode" not in prompt and "PROGRAM 2" not in prompt, level
+
+
+def test_old_answers_with_human_code_still_load() -> None:
+    """Stored answers from before the change keep validating."""
+    resp = AIInterviewResponse(
+        question="q", questionType="coding", answerPoints=["a"],
+        codeHint="def f(): pass", humanCode="def f(): return 1",
+    )
+    assert resp.humanCode == "def f(): return 1"
 
 
 def test_default_level_covers_everything_interviewer_expects():

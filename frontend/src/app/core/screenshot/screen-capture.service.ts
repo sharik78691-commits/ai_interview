@@ -50,12 +50,28 @@ export class ScreenCaptureService {
     };
   }
 
+  /** Screen picked by a Ctrl+Shift+S press from another page, until the Screenshots page opens its picker. */
+  private pendingPick: string | null = null;
+
   /**
-   * Ctrl+Shift+S pressed while the Screenshots page is NOT open: call
-   * `onRequest` (the app navigates there). No-op on the web build.
+   * Ctrl+Shift+S pressed while the Screenshots page is NOT open: remember the
+   * screen under the cursor and call `onRequest` (the app navigates there).
+   * No-op on the web build.
    */
   onOpenPageRequest(onRequest: () => void): () => void {
-    return getScreenshotBridge()?.onOpenPage?.(onRequest) ?? (() => {});
+    return (
+      getScreenshotBridge()?.onOpenPage?.((sourceId) => {
+        this.pendingPick = sourceId;
+        onRequest();
+      }) ?? (() => {})
+    );
+  }
+
+  /** The pending Ctrl+Shift+S screen (cleared once read). */
+  takePendingPick(): string | null {
+    const id = this.pendingPick;
+    this.pendingPick = null;
+    return id;
   }
 
   async capture(sourceId: string): Promise<CapturedImage> {

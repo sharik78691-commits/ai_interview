@@ -4,9 +4,10 @@ Business logic only: provider choice goes through an injectable factory
 (default: the model registry), so the core flow never names a concrete LLM
 vendor and tests/alternative providers plug in without patching modules.
 """
+import re
 from collections.abc import Awaitable, Callable
 
-from app.models.ai_response import AIInterviewResponse
+from app.models.ai_response import AIInterviewResponse, FollowUp
 from app.providers.llm.base import LLMProvider
 from app.providers.llm.provider import LLMQuotaError, MockLLMProvider
 from app.providers.llm.registry import get_llm_provider
@@ -42,6 +43,11 @@ class AIService:
         # Recent Q&A turns, so a follow-up ("why?", "and at 10x scale?") is
         # answered in context instead of as a cold, unrelated question.
         self.history: list[dict] = []
+        # Full Best Answer per recent question (normalised) so on-demand
+        # follow-ups build on what was actually advised, plus a per
+        # (question, depth) cache so a second click never re-calls the model.
+        self._answers: dict[str, list[str]] = {}
+        self._follow_ups: dict[tuple[str, str], list[FollowUp]] = {}
 
     async def analyze(
         self,
@@ -118,9 +124,57 @@ class AIService:
         resolved = (result.question or "").strip() or question
         self.history.append({"question": resolved, "points": result.answerPoints[:3]})
         del self.history[: -self.HISTORY_TURNS]
+        for q in {question, resolved}:
+            self._answers[_norm(q)] = list(result.answerPoints)
+        while len(self._answers) > self.ANSWERS_KEPT:
+            self._answers.pop(next(iter(self._answers)))
+
+    #: Recent answers kept for on-demand follow-ups.
+    ANSWERS_KEPT = 20
+
+    async def follow_ups(
+        self, question: str, model_key: str | None = None
+    ) -> list[FollowUp]:
+        """On-demand "If they ask further" for an answered question.
+
+        Same model, resume and JD as the answer; the Best Answer is passed as
+        context. Cached per (question, depth). Raises LLMQuotaError when the
+        provider is unavailable, so the caller can offer a retry.
+        """
+        level = self.response_length
+        key = (_norm(question), level)
+        if key in self._follow_ups:
+            self.last_usage = {}
+            return self._follow_ups[key]
+        factory = self._provider_factory or get_llm_provider
+        provider = factory(model_key)
+        self.last_provider = getattr(provider, "name", "") or type(provider).__name__
+        self.last_model = getattr(provider, "model", "") or ""
+        items = await provider.generate_follow_ups(
+            self.resume_text,
+            self.job_description,
+            question,
+            self._answers.get(_norm(question), []),
+            level,
+        )
+        self.last_usage = {
+            "latency_ms": getattr(provider, "last_latency_ms", None),
+            "input_tokens": getattr(provider, "last_input_tokens", None),
+            "output_tokens": getattr(provider, "last_output_tokens", None),
+            "error_category": getattr(provider, "last_error_category", None),
+        }
+        if items:
+            self._follow_ups[key] = items
+            while len(self._follow_ups) > self.ANSWERS_KEPT:
+                self._follow_ups.pop(next(iter(self._follow_ups)))
+        return items
 
     async def demo_guidance(self, question: str) -> AIInterviewResponse:
         provider = MockLLMProvider()
         return await provider.analyze_question(
             self.resume_text, self.job_description, question, self.response_length
         )
+
+
+def _norm(question: str) -> str:
+    return re.sub(r"\s+", " ", (question or "").strip().lower())

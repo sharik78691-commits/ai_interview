@@ -51,7 +51,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     setHotkey: (enabled) => ipcRenderer.invoke('screenshot:set-hotkey', !!enabled),
     // Ctrl+Shift+S pressed while another page is open: go to the Screenshots page.
     onOpenPage: (cb) => {
-      const listener = () => cb();
+      const listener = (_event, sourceId) => cb(sourceId || null);
       ipcRenderer.on('screenshot:open-page', listener);
       return () => ipcRenderer.removeListener('screenshot:open-page', listener);
     },

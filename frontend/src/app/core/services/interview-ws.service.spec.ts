@@ -143,6 +143,28 @@ describe('InterviewWsService keepalive', () => {
     svc.disconnect();
   });
 
+  it('requests on-demand follow-ups and parses ai_followups replies', async () => {
+    const svc = TestBed.runInInjectionContext(() => new InterviewWsService());
+    const ws = await connect(svc);
+    ws.onopen!();
+
+    expect(svc.sendRequestFollowUps('What is a saga?')).toBeTrue();
+    expect(ws.sent).toContain(JSON.stringify({ type: 'request_followups', question: 'What is a saga?' }));
+
+    const got: unknown[] = [];
+    svc.followUps$.subscribe((r) => got.push(r));
+    ws.onmessage!({ data: JSON.stringify({ type: 'ai_followups', question: 'What is a saga?', followUps: [{ question: 'Why?', answer: 'Because.' }, { question: '' }] }) });
+    ws.onmessage!({ data: JSON.stringify({ type: 'ai_followups', question: 'q', followUps: [], error: 'Could not load follow-ups. Try again.' }) });
+    expect(got).toEqual([
+      { question: 'What is a saga?', followUps: [{ question: 'Why?', answer: 'Because.' }], error: undefined },
+      { question: 'q', followUps: [], error: 'Could not load follow-ups. Try again.' },
+    ]);
+
+    ws.readyState = FakeWebSocket.CLOSED;
+    expect(svc.sendRequestFollowUps('again')).toBeFalse();
+    svc.disconnect();
+  });
+
   it('stops keepalive on disconnect', async () => {
     const svc = TestBed.runInInjectionContext(() => new InterviewWsService());
     const ws = await connect(svc);

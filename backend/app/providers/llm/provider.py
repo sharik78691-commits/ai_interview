@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 # Key order matters: "answerPoints" (the spoken Best Answer) comes right after
 # the type so the live stream can show the provisional draft as early as before.
-BASE_SCHEMA = """{"question": str, "questionType": "technical|behavioral|coding|general", "answerPoints": [str, ...non-empty], "simpleExplanation": str | null, "keyDetails": [str], "star": {"situation": str, "task": str, "action": str, "result": str} | null, "approach": str | null, "codeHint": str | null, "humanCode": str | null, "complexity": str | null, "edgeCases": [str], "example": str | null, "followUps": [{"question": str, "answer": str}], "responseLength": "default|short|medium|long"}"""
+BASE_SCHEMA = """{"question": str, "questionType": "technical|behavioral|coding|general", "answerPoints": [str, ...non-empty], "simpleExplanation": str | null, "keyDetails": [str], "comparison": {"headers": [str], "rows": [[str]]} | null, "star": {"situation": str, "task": str, "action": str, "result": str} | null, "approach": str | null, "codeHint": str | null, "complexity": str | null, "edgeCases": [str], "example": str | null, "followUps": [], "responseLength": "default|short|medium|long"}"""
 
 LENGTH_RULES: dict[str, str] = {
     "default": """COMPLETE COVERAGE: first decide what the interviewer is really testing, then make the card cover EVERY point they expect to hear — nothing important missing, no filler.
@@ -23,25 +23,21 @@ LENGTH_RULES: dict[str, str] = {
 - simpleExplanation: 1-2 plain-language sentences (null for HR / personal questions).
 - keyDetails (WHAT THE INTERVIEWER EXPECTS): the COMPLETE checklist of expected points — every concept, step, term, benefit, limitation and trade-off an interviewer would tick off (typically 5-8 items, 5-15 words each). Do not leave an expected point out.
 - example: 3-4 sentences, one realistic project scenario with outcome.
-- followUps: 3-4 likely next questions with 1-2 sentence answers.
 - Behavioral questions: complete STAR. Coding: complete runnable solution plus complexity and edge cases (see CODING CARD).""",
     "short": """- answerPoints (Best Answer): 2-3 short spoken sentences (max ~20 words each). Direct and confident.
 - simpleExplanation: null, or ONE plain sentence if the topic is abstract.
 - keyDetails: 0-3 items (3-10 words each). example: null.
-- followUps: 1-2 items, answer max ~15 words.
-- CODING: codeHint AND humanCode still hold COMPLETE runnable solutions (see CODING CARD).""",
+- CODING: codeHint still holds a COMPLETE runnable solution (see CODING CARD).""",
     "medium": """- answerPoints (Best Answer): 3-5 spoken sentences (12-30 words each).
 - simpleExplanation: 1-2 plain-language sentences, or null when the Best Answer is already simple (HR).
 - keyDetails: 3-5 scannable items (5-15 words each). example: 2-3 sentences, or null.
-- followUps: 2-3 items, answer 1-2 sentences.
-- CODING: codeHint AND humanCode hold COMPLETE runnable solutions (see CODING CARD).""",
+- CODING: codeHint holds a COMPLETE runnable solution (see CODING CARD).""",
     "long": """You are a SENIOR ENGINEER / SENIOR ANALYST mentoring the candidate. Be thorough and specific.
 - answerPoints (Best Answer): 5-8 spoken sentences (15-40 words each) a senior candidate would say: core idea -> how it works -> trade-off -> impact. Concrete substance (class names, patterns, protocols, metrics) — no filler.
 - simpleExplanation: 2-3 plain-language sentences (an analogy is welcome).
 - keyDetails: 5-8 items covering mechanism, benefits, limitations, trade-offs and when NOT to use it.
 - example: DETAILED project scenario (4-6 sentences) with services, scale, outcomes.
-- followUps: 3-4 sharp probes at increasing depth; deeper technical detail goes HERE, answer 1-3 sentences.
-- CODING: codeHint AND humanCode hold COMPLETE runnable solutions (see CODING CARD).""",
+- CODING: codeHint holds a COMPLETE runnable solution (see CODING CARD).""",
 }
 
 # Output token caps per depth. These are CAPS, not targets — the model stops
@@ -78,19 +74,21 @@ COMMON_RULES = """RULES:
 
 INTERVIEW ANSWER CARD (one adaptive card — fill ONLY the sections that help THIS question):
 - answerPoints = BEST ANSWER: what the candidate says aloud, in natural first-person spoken English, one sentence per item, in speaking order. answerPoints[0] is the DIRECT answer — no warm-up, no restating the question. Concise for simple questions, fuller for conceptual / senior questions.
+- MULTI-PART / LIST questions (core concepts, principles, pillars, properties, types, layers, steps — e.g. OOP, SOLID, ACID, SQL joins, HTTP methods): COVER EVERY MEMBER of the well-known set — never drop one (OOP = Encapsulation, Inheritance, Polymorphism AND Abstraction). answerPoints[0] names the set in one sentence ("Java has four core OOP concepts."), then exactly ONE item per member that STARTS with "**Member name:** " followed by a crisp definition plus how it is done in practice (keyword, annotation or short example). Members come before anything else; the item count may exceed the depth's sentence range so no member is missing.
 - simpleExplanation = EXPLAIN IT SIMPLY: the idea in plain language for a quick understanding; briefly explain any technical term you must use. null when nothing needs simplifying.
 - keyDetails = WHAT THE INTERVIEWER EXPECTS: the important concepts, process, benefits, limitations or trade-offs as short scannable fragments (not paragraphs). [] when not useful.
+- comparison = QUICK REFERENCE TABLE, for MULTI-PART / LIST and COMPARE questions only: headers = the item column first, then 2-3 useful columns (e.g. ["Concept", "Example", "Key keyword"] or ["Aspect", "X", "Y"]); rows = one row per member / dimension, every cell short (max ~8 words; `code` allowed). null for single-concept, HR, behavioral and coding questions.
 - example = PRACTICAL EXAMPLE: ONE realistic project/industry example the candidate can narrate credibly ("On our order service we..."), or null.
-- followUps = IF THEY ASK FURTHER: the likely next questions THIS interviewer asks, each with a short, strong answer. Deeper technical detail belongs here, not in the Best Answer.
-- star, approach, codeHint, humanCode, complexity, edgeCases: null / [] unless the question type below asks for them.
+- followUps = ALWAYS [] in this card: "If they ask further" is generated separately, only when the candidate asks for it. Still keep deeper technical detail OUT of the Best Answer.
+- star, approach, codeHint, complexity, edgeCases: null / [] unless the question type below asks for them.
 - Do NOT force every section. Empty sections are better than filler.
 
 ADAPT TO THE QUESTION TYPE (decide what the interviewer is really testing, then answer THAT):
-- HR / personal ("tell me about yourself", strengths, why this role) -> questionType "general" (or "behavioral" for past-experience stories): a natural, personalized-sounding Best Answer built from the resume, 1-3 keyDetails at most, simpleExplanation null, followUps focused on how to handle the probe.
-- THEORY / concept -> "technical": clarity first, simpleExplanation, keyDetails with trade-offs, a practical example.
+- HR / personal ("tell me about yourself", strengths, why this role) -> questionType "general" (or "behavioral" for past-experience stories): a natural, personalized-sounding Best Answer built from the resume, 1-3 keyDetails at most, simpleExplanation null.
+- THEORY / concept -> "technical": clarity first, simpleExplanation, keyDetails with trade-offs, a practical example. A multi-part concept (a known set of members) follows the MULTI-PART / LIST rule and fills "comparison".
 - SCENARIO / behavioral ("tell me about a time", "what would you do if") -> "behavioral": Best Answer told as Situation -> Action -> Result with a quantified result; ALSO fill "star". simpleExplanation null.
 - SYSTEM DESIGN -> "technical": Best Answer covers requirements -> components -> scaling -> trade-offs; keyDetails lists bottlenecks and choices.
-- COMPARE / DIFFERENCE / VS -> "technical": Best Answer states the key difference first; keyDetails contrasts the dimensions as "**X**: ... vs **Y**: ..." and ends with when to pick each.
+- COMPARE / DIFFERENCE / VS -> "technical": Best Answer states the key difference first; keyDetails contrasts the dimensions as "**X**: ... vs **Y**: ..." and ends with when to pick each; "comparison" holds the side-by-side table (["Aspect", "X", "Y"]).
 - CODING -> "coding": see CODING CARD.
 - Be correct over impressive; if a resume fact is missing, advise how to frame it instead of inventing it.
 
@@ -109,11 +107,52 @@ HUMAN VOICE (sound like a person, not an AI):
 
 CODING CARD (coding questions, EVERY depth):
 - approach = the reasoning FIRST, 1-3 sentences: brute force -> the insight -> the optimal idea.
-- codeHint = PROGRAM 1 (the polished AI solution): COMPLETE working solution to the exact problem — never pseudo-code or sketches. Runnable code in the best-fit language (resume's primary, else Python): full signature, algorithm body, concise comments on the key steps. Self-contained, copy-paste ready ("\\n" for line breaks). codeHint is NEVER null for coding, at ANY depth — SHORT still ships complete code, only prose shrinks.
-- humanCode = PROGRAM 2, ALWAYS present for coding (NEVER null, at ANY depth): the SAME correct solution, rewritten the way an experienced developer naturally types it live in an interview — plain descriptive variable names, simple loops/ifs instead of clever one-liners, no docstring boilerplate, small helper only if a person would write one. Comments are short, casual and explain the WHY in the candidate's own words ("# remember what we've seen so far", "# found the pair, done"), one every few lines — not on every line, no "Step 1:" labels. Same language as codeHint, also complete and runnable.
+- codeHint = THE PROGRAM (exactly ONE solution): COMPLETE working solution to the exact problem — never pseudo-code or sketches. Runnable code in the best-fit language (resume's primary, else Python): full signature, algorithm body, concise comments on the key steps. Self-contained, copy-paste ready ("\\n" for line breaks). codeHint is NEVER null for coding, at ANY depth — SHORT still ships complete code, only prose shrinks.
 - complexity = "Time: O(..) — why. Space: O(..) — why."
 - edgeCases = 2-4 short items (empty input, duplicates, overflow, ...).
 - answerPoints = how to explain the solution in interview language while coding."""
+
+
+# "If they ask further" is generated ON DEMAND (the candidate clicks "Show
+# follow-ups"), not inside every answer: follow-ups were 15-37% of each
+# answer's output tokens, so dropping them makes the main answer finish sooner
+# and cost less. These are the per-depth follow-up rules that used to live in
+# LENGTH_RULES, unchanged in substance.
+FOLLOWUP_RULES: dict[str, str] = {
+    "default": "3-4 likely next questions, each answered in 1-2 sentences.",
+    "short": "1-2 items, each answer max ~15 words.",
+    "medium": "2-3 items, each answer 1-2 sentences.",
+    "long": "3-4 sharp probes at increasing depth; deeper technical detail goes HERE, each answer 1-3 sentences.",
+}
+FOLLOWUP_LIMIT: dict[str, int] = {"default": 4, "short": 2, "medium": 3, "long": 4}
+# Caps, not targets (reasoning models need headroom to think AND emit JSON).
+FOLLOWUP_MAX_TOKENS = 1400
+
+
+def build_followup_prompt(response_length: str = "medium") -> str:
+    level = response_length if response_length in FOLLOWUP_RULES else "medium"
+    return (
+        "You are an AI interview coach. The candidate has just been coached on an "
+        "interview question (their Best Answer is given). Predict what THIS interviewer "
+        "asks next — IF THEY ASK FURTHER — and give a short, strong answer to each.\n"
+        'Respond with STRICT JSON only: {"followUps": [{"question": str, "answer": str}]}\n\n'
+        f"DEPTH LEVEL: {level.upper()}\n- followUps: {FOLLOWUP_RULES[level]}\n\n"
+        "RULES:\n"
+        "- STRICT JSON only. No fences, preamble, or commentary.\n"
+        "- Each question is a realistic probe on THIS topic (why / trade-offs / failure "
+        "cases / scale / an example / the alternative), building on the Best Answer — "
+        "never repeat what it already says. Deeper technical detail belongs here.\n"
+        "- HR / personal questions: follow-ups focus on how to handle the probe.\n"
+        "- Behavioral questions: probe the decisions, the candidate's own role and the "
+        "measurable result.\n"
+        "- Tailor answers to the candidate's ACTUAL resume + the job description; name "
+        "their real stack. Never invent resume facts; advise how to frame them.\n"
+        "- Answers are SAY OUT LOUD ready: natural first-person spoken English, concrete "
+        "tools and numbers, no listicle filler. BANNED: \"as an AI\", \"delve\", "
+        "\"furthermore\", \"moreover\", \"it's important to note\", \"in conclusion\".\n"
+        "- You MAY mark 1-3 key terms per item with **double asterisks** and identifiers "
+        "with `backticks`."
+    )
 
 
 def format_history(history: list[dict] | None) -> str:
@@ -409,24 +448,6 @@ class MockLLMProvider(LLMProvider):
                 "Brute force checks every pair in O(n²). The insight: remember what you've "
                 "already seen in a hash map, so each lookup is O(1) and one pass is enough."
             )
-            # Program 2: the same solution, typed the way a person writes it live.
-            human_code = (
-                "def solve(nums):\n"
-                "    # nothing to do for an empty list\n"
-                "    if len(nums) == 0:\n"
-                "        return None\n"
-                "\n"
-                "    # remember each number and where we saw it\n"
-                "    positions = {}\n"
-                "    for index in range(len(nums)):\n"
-                "        current = nums[index]\n"
-                "        if current in positions:\n"
-                "            # seen it before, so we have our pair\n"
-                "            return [positions[current], index]\n"
-                "        positions[current] = index\n"
-                "\n"
-                "    return None  # no match found"
-            )
             complexity = "Time: O(n) — single pass. Space: O(n) — the hash map."
             edge_cases = [
                 "Empty or single-element input",
@@ -555,13 +576,25 @@ class MockLLMProvider(LLMProvider):
             star=star,
             approach=approach if is_coding else None,
             codeHint=code_hint if is_coding else None,
-            humanCode=human_code if is_coding else None,
             complexity=complexity if is_coding else None,
             edgeCases=edge_cases if is_coding else [],
             example=example if level != "short" else None,
             followUps=follow_ups,
             responseLength=level,
         )
+
+
+    async def generate_follow_ups(
+        self,
+        resume: str,
+        job_description: str,
+        question: str,
+        answer_points: list[str],
+        response_length: str = "medium",
+    ) -> list[FollowUp]:
+        """Template follow-ups (the same ones the template answer carries)."""
+        card = await self.analyze_question(resume, job_description, question, response_length)
+        return card.followUps
 
 
 class LLMQuotaError(RuntimeError):
@@ -580,10 +613,14 @@ class OpenAICompatibleLLMProvider(LLMProvider):
         low = body.lower()
         # 402 Payment Required is a billing state by definition; DeepSeek spells
         # it "Insufficient Balance" (OpenAI/Groq use "insufficient_quota").
+        # Vercel AI Gateway answers 403 "customer_verification_required" until
+        # a card is on file — billing, not a bad key.
         if (
             "insufficient_quota" in low
             or "insufficient balance" in low
             or "billing" in low
+            or "customer_verification_required" in low
+            or "credit card" in low
             or status == 402
         ):
             return "quota"
@@ -701,6 +738,11 @@ class OpenAICompatibleLLMProvider(LLMProvider):
     def _friendly_error(status: int, body: str, model: str = "") -> str:
         detail = body[:300]
         low = body.lower()
+        if "customer_verification_required" in low or "credit card" in low:
+            return (
+                "AI provider account needs billing set up — add a payment card in the "
+                f"provider dashboard (e.g. Vercel → AI Gateway) (HTTP {status}). {detail}"
+            )
         if (
             "insufficient_quota" in low
             or "insufficient balance" in low
@@ -1146,6 +1188,114 @@ class OpenAICompatibleLLMProvider(LLMProvider):
             logger.warning("LLM response unusable (%.2fs), falling back to mock: %s",
                            time.perf_counter() - t0, exc)
             return await self._mock.analyze_question(resume, job_description, question)
+
+
+    async def generate_follow_ups(
+        self,
+        resume: str,
+        job_description: str,
+        question: str,
+        answer_points: list[str],
+        response_length: str = "medium",
+    ) -> list[FollowUp]:
+        """On-demand "If they ask further" items (one small JSON request).
+
+        Uses the same model, key and reasoning setting as the answer, plus the
+        Best Answer as context so follow-ups build on it instead of repeating
+        it. Raises LLMQuotaError when the provider cannot answer.
+        """
+        import asyncio
+        import time
+
+        level = response_length if response_length in FOLLOWUP_RULES else "medium"
+        best_answer = " ".join(str(p) for p in (answer_points or []))[:1500]
+
+        def payload() -> dict:
+            body: dict = {
+                "model": self.model,
+                "messages": [
+                    {"role": "system", "content": build_followup_prompt(level)},
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Resume:\n{resume[:4000]}\n\n"
+                            f"Job description:\n{job_description[:4000]}\n\n"
+                            f"Interviewer question:\n{question}\n\n"
+                            f"Best Answer already given:\n{best_answer}"
+                        ),
+                    },
+                ],
+                self.max_tokens_param: FOLLOWUP_MAX_TOKENS,
+            }
+            if self.supports_temperature:
+                body["temperature"] = 0.4
+            if self.reasoning_effort and not self._reasoning_disabled:
+                body["reasoning_effort"] = self.reasoning_effort
+            return body
+
+        logger.info("LLM follow-ups request: model=%s level=%s qlen=%d", self.model, level, len(question))
+        t0 = time.perf_counter()
+        attempts = self.max_retries + 1 + (1 if self.reasoning_effort else 0)
+        async with shared_http() as client:
+            for attempt in range(attempts):
+                try:
+                    resp = await client.post(
+                        f"{self.base_url}/chat/completions",
+                        headers=self._headers(),
+                        json=payload(),
+                        timeout=20.0,
+                    )
+                    if resp.status_code >= 400:
+                        raise httpx.HTTPStatusError(
+                            f"HTTP {resp.status_code}", request=resp.request, response=resp
+                        )
+                    body_json = resp.json()
+                    usage = body_json.get("usage") or {}
+                    self.last_input_tokens = usage.get("prompt_tokens")
+                    self.last_output_tokens = usage.get("completion_tokens")
+                    self.last_latency_ms = (time.perf_counter() - t0) * 1000
+                    content = ((body_json["choices"][0].get("message") or {}).get("content") or "").strip()
+                    try:
+                        data = _extract_json(content)
+                    except ValueError:
+                        if attempt < self.max_retries:
+                            continue  # one more try: malformed JSON is usually a one-off
+                        self.last_error_category = "bad_response"
+                        raise LLMQuotaError("Follow-up suggestions came back unreadable.") from None
+                    items = data.get("followUps") if isinstance(data, dict) else None
+                    follow_ups = [
+                        FollowUp(question=str(f.get("question", "")), answer=str(f.get("answer", "")))
+                        for f in (items if isinstance(items, list) else [])
+                        if isinstance(f, dict) and str(f.get("question", "")).strip()
+                    ][: FOLLOWUP_LIMIT[level]]
+                    self.last_error_category = "ok"
+                    logger.info(
+                        "LLM follow-ups ok: %.2fs, %d items, model=%s",
+                        time.perf_counter() - t0, len(follow_ups), self.model,
+                    )
+                    return follow_ups
+                except httpx.HTTPStatusError as exc:
+                    status = exc.response.status_code
+                    body = exc.response.text or ""
+                    self.last_error_category = self._categorize_status(status, body)
+                    self.last_latency_ms = (time.perf_counter() - t0) * 1000
+                    logger.warning("LLM follow-ups HTTP %d: %s", status, body[:300])
+                    if self._suppress_reasoning_effort(status):
+                        continue
+                    if status in (500, 502, 503, 504) and attempt < self.max_retries:
+                        await asyncio.sleep(RETRY_BACKOFF_BASE * (2**attempt))
+                        continue
+                    raise LLMQuotaError(self._friendly_error(status, body, self.model)) from exc
+                except (httpx.TimeoutException, httpx.RequestError) as exc:
+                    self.last_error_category = (
+                        "timeout" if isinstance(exc, httpx.TimeoutException) else "network"
+                    )
+                    self.last_latency_ms = (time.perf_counter() - t0) * 1000
+                    if attempt < self.max_retries:
+                        await asyncio.sleep(RETRY_BACKOFF_BASE * (2**attempt))
+                        continue
+                    raise LLMQuotaError("Unable to reach the AI service.") from exc
+        raise LLMQuotaError("Follow-up suggestions are unavailable right now.")
 
 
 def get_llm_provider() -> LLMProvider:

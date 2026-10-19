@@ -90,6 +90,10 @@ export class ScreenshotAnalysisComponent implements OnInit, OnDestroy {
         if (this.destroyed) off();
         else this.disableHotkey = off;
       });
+    // Opened by Ctrl+Shift+S from another page: show the picker right away, so
+    // one press + Enter captures and analyzes (no second press needed).
+    const pending = this.capture.takePendingPick();
+    if (pending) void this.onHotkey(pending, null);
     try {
       await this.config.load();
     } catch (e) {
@@ -130,7 +134,7 @@ export class ScreenshotAnalysisComponent implements OnInit, OnDestroy {
     setTimeout(() => this.pickerModal()?.nativeElement.focus());
   }
 
-  /** Picker keyboard: arrows move the highlight, Enter captures it, Esc cancels. */
+  /** Picker keyboard: arrows move the highlight, Enter captures + analyzes at once, Esc cancels. */
   onPickerKey(event: KeyboardEvent): void {
     const count = this.sources().length;
     switch (event.key) {
@@ -148,7 +152,9 @@ export class ScreenshotAnalysisComponent implements OnInit, OnDestroy {
         break;
       case 'Enter': {
         const source = this.sources()[this.selectedIndex()];
-        if (source && !this.capturing() && !this.loadingSources()) void this.takeCapture(source);
+        if (source && !this.capturing() && !this.loadingSources()) {
+          void this.takeCapture(source, { analyzeNow: true });
+        }
         break;
       }
       case 'Escape':
@@ -194,10 +200,16 @@ export class ScreenshotAnalysisComponent implements OnInit, OnDestroy {
     if (!this.capturing()) this.picker.set(null);
   }
 
-  async takeCapture(source: CaptureSource): Promise<void> {
+  /**
+   * Capture the chosen source. With `analyzeNow` (the Enter key) the analysis
+   * starts right after a successful capture — no extra click on "Analyze".
+   * A mouse click only captures, so several screenshots can be collected first.
+   */
+  async takeCapture(source: CaptureSource, opts: { analyzeNow?: boolean } = {}): Promise<void> {
     const mode = this.picker();
     if (!mode) return;
-    await this.captureInto(source.id, mode);
+    const captured = await this.captureInto(source.id, mode);
+    if (captured && opts.analyzeNow) await this.analyze();
   }
 
   /** Ctrl+Shift+S: open the picker with the screen under the cursor preselected. */
@@ -218,8 +230,9 @@ export class ScreenshotAnalysisComponent implements OnInit, OnDestroy {
     await this.openPicker({ kind: 'add' }, sourceId);
   }
 
-  private async captureInto(sourceId: string, mode: PickerMode): Promise<void> {
-    if (this.capturing()) return;
+  /** True when a screenshot was captured and added. */
+  private async captureInto(sourceId: string, mode: PickerMode): Promise<boolean> {
+    if (this.capturing()) return false;
     this.capturing.set(true);
     this.error.set('');
     try {
@@ -233,8 +246,10 @@ export class ScreenshotAnalysisComponent implements OnInit, OnDestroy {
       this.captureNotice.set(`Captured “${image.sourceName}” (${image.width}×${image.height})`);
       setTimeout(() => this.captureNotice.set(''), 3000);
       this.picker.set(null);
+      return true;
     } catch (e) {
       this.error.set(this.message(e));
+      return false;
     } finally {
       this.capturing.set(false);
     }

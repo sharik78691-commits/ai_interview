@@ -21,7 +21,7 @@ export interface StarBreakdown {
   [k: string]: unknown;
 }
 
-export type ResponseLength = 'default' | 'short' | 'medium' | 'long';
+export type ResponseLength = 'default' | 'short';
 
 /** Legacy side-by-side table (older stored answers only; no longer rendered). */
 export interface ComparisonTable {
@@ -89,6 +89,4 @@ export interface AppSettings {
 export const RESPONSE_LENGTH_LABELS: Record<ResponseLength, string> = {
   default: 'Default — covers everything the interviewer expects',
   short: 'Short — quick bullets',
-  medium: 'Medium — structured answer',
-  long: 'Long — detailed + examples',
 };

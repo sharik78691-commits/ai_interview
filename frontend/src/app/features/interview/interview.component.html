@@ -57,7 +57,7 @@
         <div class="field">
           @if (isDesktop) {
             <h4 class="field-title">Interviewer audio</h4>
-            <button class="btn-primary btn-block" (click)="openAutoSelectInfo()">
+            <button class="btn-primary btn-block" (click)="startSystemAudio()" [disabled]="capturingInterviewer">
               ⚡ Auto Select Meeting Audio
             </button>
             @if (capturingInterviewer) {
@@ -109,10 +109,10 @@
               </button>
               <p class="muted small hint sub">Manual — you pick the meeting tab. No setup needed.</p>
               <div class="audio-divider"><span>or automatic</span></div>
-              <button class="btn-primary btn-block" (click)="openAutoSelectInfo()">
+              <button class="btn-primary btn-block" (click)="autoSelectMeetingAudio()">
                 ⚡ Auto Select Meeting Audio
               </button>
-              <p class="muted small hint sub">Hears the meeting by itself, even on headphones. One-time sound setup.</p>
+              <p class="muted small hint sub">Listens to your computer's sound and turns the interviewer's speech into questions.</p>
             } @else {
               <p class="muted small hint">🎧 The AI is listening to the meeting. Keep this tab open.</p>
               <button class="btn-ghost btn-block" (click)="stopInterviewerAudio()">
@@ -331,17 +331,11 @@
                 }
                 @if (guidance.codeHint) {
                   <section class="csec">
-                    <h4 class="csec-title">Program 1 · AI solution</h4>
+                    <h4 class="csec-title">Program</h4>
                     <pre class="code">{{ guidance.codeHint }}</pre>
                     @if (guidance.complexity) {
                       <p class="complexity" [innerHTML]="guidance.complexity | richText"></p>
                     }
-                  </section>
-                }
-                @if (guidance.humanCode) {
-                  <section class="csec">
-                    <h4 class="csec-title">Program 2 · Human-style version</h4>
-                    <pre class="code">{{ guidance.humanCode }}</pre>
                   </section>
                 }
                 @if (guidance.edgeCases?.length) {
@@ -367,8 +361,23 @@
                 <section class="csec best">
                   <h4 class="csec-title">Best answer</h4>
                   <div class="say">
-                    @for (p of card.bestAnswer; track $index) {
-                      <p [innerHTML]="p | richText"></p>
+                    @if (card.bestItems.length) {
+                      <!-- List-style answer: one numbered item per concept. -->
+                      @for (p of card.bestIntro; track $index) {
+                        <p [innerHTML]="p | richText"></p>
+                      }
+                      <ol class="best-items" data-testid="best-items">
+                        @for (p of card.bestItems; track $index) {
+                          <li [innerHTML]="p | richText"></li>
+                        }
+                      </ol>
+                      @for (p of card.bestOutro; track $index) {
+                        <p [innerHTML]="p | richText"></p>
+                      }
+                    } @else {
+                      @for (p of card.bestAnswer; track $index) {
+                        <p [innerHTML]="p | richText"></p>
+                      }
                     }
                   </div>
                 </section>
@@ -410,6 +419,33 @@
                   </section>
                 }
 
+                <!-- Quick reference table (multi-part / compare questions). -->
+                @if (card.table; as t) {
+                  <section class="csec">
+                    <h4 class="csec-title">Quick reference</h4>
+                    <div class="qref-wrap">
+                      <table class="qref" data-testid="quick-reference">
+                        <thead>
+                          <tr>
+                            @for (h of t.headers; track $index) {
+                              <th [innerHTML]="h | richText"></th>
+                            }
+                          </tr>
+                        </thead>
+                        <tbody>
+                          @for (r of t.rows; track $index) {
+                            <tr>
+                              @for (c of r; track $index) {
+                                <td [innerHTML]="c | richText"></td>
+                              }
+                            </tr>
+                          }
+                        </tbody>
+                      </table>
+                    </div>
+                  </section>
+                }
+
                 <!-- 4. Practical Example -->
                 @if (guidance.example) {
                   <section class="csec">
@@ -433,6 +469,23 @@
                       </li>
                     }
                   </ul>
+                </section>
+              } @else {
+                <!-- Generated on demand: answers no longer carry follow-ups,
+                     so the Best Answer arrives sooner and costs less. -->
+                <section class="csec followups-ondemand" data-testid="followups-ondemand">
+                  <button
+                    type="button"
+                    class="btn-ghost sm"
+                    (click)="showFollowUps()"
+                    [disabled]="followUpsLoading"
+                    data-testid="show-followups"
+                  >
+                    {{ followUpsLoading ? 'Loading follow-ups…' : (followUpsError ? 'Retry follow-ups' : 'Show follow-ups') }}
+                  </button>
+                  @if (followUpsError && !followUpsLoading) {
+                    <span class="muted small" role="status">{{ followUpsError }}</span>
+                  }
                 </section>
               }
             </article>

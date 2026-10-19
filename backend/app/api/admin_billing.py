@@ -28,8 +28,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.auth.dependencies import require_admin, require_csrf
-from app.core.ratelimit import rate_limit
+from app.auth.dependencies import require_admin, require_admin_rate_limited, require_csrf
 from app.db.session import get_db
 from app.models.billing import (
     Payment,
@@ -60,7 +59,13 @@ from app.services.billing_views import audit_out, payment_out, plan_admin, subsc
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/admin", tags=["admin-billing"])
+# Every /admin route: admin only + per-admin-user rate limit (see
+# require_admin_rate_limited). Applied once here so no endpoint can miss it.
+router = APIRouter(
+    prefix="/admin",
+    tags=["admin-billing"],
+    dependencies=[Depends(require_admin_rate_limited)],
+)
 
 SubStatusFilter = Literal["active", "scheduled", "expired", "revoked"]
 
@@ -72,7 +77,6 @@ SubStatusFilter = Literal["active", "scheduled", "expired", "revoked"]
 def list_plans(
     request: Request, _admin: User = Depends(require_admin), db: Session = Depends(get_db)
 ) -> list[PlanAdmin]:
-    rate_limit(request, "admin")
     return [plan_admin(p) for p in subs.list_plans(db, include_inactive=True)]
 
 
@@ -103,7 +107,6 @@ def create_plan(
     _csrf: None = Depends(require_csrf),
     db: Session = Depends(get_db),
 ) -> PlanAdmin:
-    rate_limit(request, "admin")
     plan = SubscriptionPlan(code=body.code, name=body.name, price_minor=body.price_minor,
                             currency=body.currency, duration_days=body.duration_days)
     _apply_plan_fields(plan, body)
@@ -129,7 +132,6 @@ def update_plan(
     _csrf: None = Depends(require_csrf),
     db: Session = Depends(get_db),
 ) -> PlanAdmin:
-    rate_limit(request, "admin")
     plan = db.get(SubscriptionPlan, plan_id)
     if plan is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Plan not found.")
@@ -172,7 +174,6 @@ def list_subscriptions(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=25, ge=1, le=200),
 ) -> AdminSubscriptionsPage:
-    rate_limit(request, "admin")
     now = subs.utcnow()
     stmt = select(UserSubscription, Payment.gateway).outerjoin(
         Payment, Payment.id == UserSubscription.payment_id
@@ -223,7 +224,6 @@ def list_payments(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=25, ge=1, le=200),
 ) -> AdminPaymentsPage:
-    rate_limit(request, "admin")
     stmt = select(Payment)
     if q.strip():
         ref = q.strip()
@@ -252,7 +252,6 @@ def list_payments(
 def user_billing(
     user_id: int, request: Request, _admin: User = Depends(require_admin), db: Session = Depends(get_db)
 ) -> AdminUserBilling:
-    rate_limit(request, "admin")
     user = db.get(User, user_id)
     if user is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found.")
@@ -285,7 +284,6 @@ def grant_subscription(
     _csrf: None = Depends(require_csrf),
     db: Session = Depends(get_db),
 ) -> SubscriptionOut:
-    rate_limit(request, "admin")
     user = db.get(User, user_id)
     if user is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found.")
@@ -312,7 +310,6 @@ def extend_subscription(
     _csrf: None = Depends(require_csrf),
     db: Session = Depends(get_db),
 ) -> SubscriptionOut:
-    rate_limit(request, "admin")
     try:
         sub = subs.extend(db, admin, _get_sub(db, sub_id), days=body.days, reason=body.reason)
     except subs.SubscriptionError as exc:
@@ -329,7 +326,6 @@ def revoke_subscription(
     _csrf: None = Depends(require_csrf),
     db: Session = Depends(get_db),
 ) -> SubscriptionOut:
-    rate_limit(request, "admin")
     try:
         sub = subs.revoke(db, admin, _get_sub(db, sub_id), reason=body.reason)
     except subs.SubscriptionError as exc:
@@ -345,7 +341,6 @@ async def reconcile_payment(
     _csrf: None = Depends(require_csrf),
     db: Session = Depends(get_db),
 ) -> VerifyResponse:
-    rate_limit(request, "admin")
     try:
         result = await payment_service.reconcile(db, payment_id)
     except payment_service.PaymentError as exc:
@@ -365,7 +360,6 @@ def audit_log(
     action: Optional[str] = Query(default=None, max_length=30),
     limit: int = Query(default=100, ge=1, le=500),
 ) -> list[AuditOut]:
-    rate_limit(request, "admin")
     stmt = select(SubscriptionAuditLog)
     if user_id:
         stmt = stmt.where(SubscriptionAuditLog.user_id == user_id)
@@ -388,7 +382,6 @@ def users_billing_summary(
     ids: str = Query(default="", max_length=2000, description="Comma-separated user ids"),
 ) -> dict[str, dict]:
     """Current access end + plan for a page of users (admin user table)."""
-    rate_limit(request, "admin")
     wanted = [int(x) for x in ids.split(",") if x.strip().isdigit()][:200]
     if not wanted:
         return {}

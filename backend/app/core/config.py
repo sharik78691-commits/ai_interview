@@ -87,6 +87,29 @@ class Settings:
         self.deepseek_v4_pro_model: str = os.getenv(
             "DEEPSEEK_V4_PRO_MODEL", "deepseek-v4-pro"
         )
+        # Vercel AI Gateway (OpenAI-compatible, https://ai-gateway.vercel.sh/v1):
+        # one key, billed through Vercel. Serves DeepSeek V4.1 Flash without a
+        # DeepSeek account balance. Model ids are "<provider>/<model>".
+        self.ai_gateway_api_key: str = os.getenv("AI_GATEWAY_API_KEY", "")
+        self.ai_gateway_base_url: str = (
+            os.getenv("AI_GATEWAY_BASE_URL", "") or "https://ai-gateway.vercel.sh/v1"
+        )
+        self.gateway_deepseek_flash_model: str = (
+            os.getenv("GATEWAY_DEEPSEEK_FLASH_MODEL", "") or "deepseek/deepseek-v4.1-flash-1017"
+        )
+        self.gateway_gpt_oss_model: str = (
+            os.getenv("GATEWAY_GPT_OSS_MODEL", "") or "openai/gpt-oss-120b"
+        )
+        # Cerebras Inference (OpenAI-compatible, https://api.cerebras.ai/v1).
+        # Fastest measured host for GPT-OSS 120B (~1s full answer). Developer
+        # tier limits: 5 requests/min, 150/hour, 2400/day, 30k tokens/min.
+        self.cerebras_api_key: str = os.getenv("CEREBRAS_API_KEY", "")
+        self.cerebras_base_url: str = (
+            os.getenv("CEREBRAS_BASE_URL", "") or "https://api.cerebras.ai/v1"
+        )
+        self.cerebras_gpt_oss_model: str = (
+            os.getenv("CEREBRAS_GPT_OSS_MODEL", "") or "gpt-oss-120b"
+        )
         self.stt_api_key: str = os.getenv("STT_API_KEY", "")
         self.stt_model: str = os.getenv("STT_MODEL", "whisper-large-v3-turbo")
         # Forcing the language skips Whisper's auto-detect (faster, and stops
@@ -96,6 +119,9 @@ class Settings:
         self.stt_model_2: str = os.getenv("STT_MODEL_2", "gpt-4o-mini-transcribe")
         # Third STT model (Google's Gemini 3.5 Transcribe).
         self.stt_model_3: str = os.getenv("STT_MODEL_3", "gemini-3.5-transcribe")
+        # Fourth STT model (Google's Gemini 3.5 Transcribe Live — streaming
+        # Live API / bidiGenerateContent over a WebSocket; uses GEMINI_API_KEY).
+        self.stt_model_4: str = os.getenv("STT_MODEL_4", "") or "gemini-3.5-transcribe-live"
         # Server-side STT only. Browsers cannot transcribe tab/meeting audio
         # locally, so that audio is streamed to the backend for transcription.
         # Defaults to the LLM endpoint (Groq serves Whisper on the same base URL).
@@ -240,6 +266,15 @@ class Settings:
             )
         except ValueError:
             self.ai_rate_limit_per_minute = 30
+        # Per-ADMIN-USER cap on /api/admin/* (dashboard reads + admin actions).
+        # The admin page fires several requests per load and polls costs, so
+        # it must not share the tiny per-IP login limit above.
+        try:
+            self.admin_rate_limit_per_minute: int = int(
+                os.getenv("ADMIN_RATE_LIMIT_PER_MINUTE", "120")
+            )
+        except ValueError:
+            self.admin_rate_limit_per_minute = 120
         # Number of reverse proxies in front of the app that APPEND to
         # X-Forwarded-For. 0 (default) keeps the legacy behaviour (left-most
         # entry). Set it to the real hop count (e.g. 2 for Vercel -> Render) so
@@ -313,6 +348,8 @@ class Settings:
         logger.info("  gemini_configured= %s", self.gemini_configured)
         logger.info("  openrouter_conf  = %s", self.openrouter_configured)
         logger.info("  deepseek_conf    = %s", self.deepseek_configured)
+        logger.info("  ai_gateway_conf  = %s", self.ai_gateway_configured)
+        logger.info("  cerebras_conf    = %s", self.cerebras_configured)
         logger.info("  stt_configured   = %s", self.stt_configured)
         logger.info("  demo_mode        = %s", self.demo_mode)
         logger.info("  google_oauth     = %s", self.google_configured)
@@ -434,6 +471,14 @@ class Settings:
     @property
     def deepseek_configured(self) -> bool:
         return bool(self.deepseek_api_key)
+
+    @property
+    def ai_gateway_configured(self) -> bool:
+        return bool(self.ai_gateway_api_key)
+
+    @property
+    def cerebras_configured(self) -> bool:
+        return bool(self.cerebras_api_key)
 
     @property
     def stt_configured(self) -> bool:

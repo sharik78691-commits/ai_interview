@@ -266,6 +266,10 @@ export class AdminComponent implements OnInit, OnDestroy {
       this.forbidden = true;
       return;
     }
+    if (status === 429) {
+      this.error = 'Too many admin requests in a short time — wait a few seconds and refresh.';
+      return;
+    }
     this.error = 'Could not load admin data — is the backend running?';
   }
 

@@ -32,7 +32,7 @@ describe('InterviewApiService', () => {
     expect(prep.request.body).toEqual({ resumeText: 'r', jobDescription: 'j', responseLength: 'short' });
     prep.flush({ status: 'ready' });
 
-    api.analyze({ question: 'q', resumeText: 'r', jobDescription: 'j', responseLength: 'medium', model: 'm' })
+    api.analyze({ question: 'q', resumeText: 'r', jobDescription: 'j', responseLength: 'short', model: 'm' })
       .subscribe();
     const an = http.expectOne('https://api.example.test/api/interview/analyze');
     expect(an.request.body.model).toBe('m');
