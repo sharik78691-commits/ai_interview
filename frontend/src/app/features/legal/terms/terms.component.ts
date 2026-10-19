@@ -1,15 +1,14 @@
 import { Component } from '@angular/core';
+import { RouterLink } from '@angular/router';
 
 /**
- * Public Terms & Conditions page.
- *
- * Reached via /terms-and-conditions. Public (no auth guard) and indexed for
- * SEO, matching the other legal/marketing pages.
+ * Public Terms of Service (/terms; /terms-and-conditions redirects here).
+ * Draft — see docs/LEGAL_REVIEW.md.
  */
 @Component({
   selector: 'app-terms',
   standalone: true,
+  imports: [RouterLink],
   templateUrl: './terms.component.html',
-  styleUrl: './terms.component.css',
 })
 export class TermsComponent {}

@@ -86,6 +86,25 @@ function createCapture({ desktopCapturer, screen, BrowserWindow }) {
     };
   }
 
+  /**
+   * Screen source id of the display under the mouse cursor (used by the
+   * Ctrl+Shift+S hotkey, which captures "the screen I'm looking at").
+   * This app's own windows are content-protected, so they never appear in it.
+   */
+  async function screenSourceAtCursor() {
+    const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+    const sources = await desktopCapturer.getSources({
+      types: ['screen'],
+      thumbnailSize: { width: 1, height: 1 },
+    });
+    const match =
+      sources.find((s) => String(s.display_id) === String(display?.id)) || sources[0];
+    if (!match) {
+      throw Object.assign(new Error('No screen available to capture.'), { code: 'SOURCE_GONE' });
+    }
+    return match.id;
+  }
+
   /** Brief border flash on the captured display — the visible "a capture happened" cue. */
   function flashDisplay(displayId) {
     try {
@@ -104,6 +123,9 @@ function createCapture({ desktopCapturer, screen, BrowserWindow }) {
         show: false,
       });
       win.setIgnoreMouseEvents(true);
+      // Local-only cue: keep the flash out of screen share like every other
+      // app window, so the meeting never sees a capture happen.
+      win.setContentProtection(true);
       const html =
         '<body style="margin:0;background:transparent"><div style="position:fixed;inset:0;' +
         'box-sizing:border-box;border:6px solid #4f8cff;box-shadow:inset 0 0 40px #4f8cff;' +
@@ -118,7 +140,7 @@ function createCapture({ desktopCapturer, screen, BrowserWindow }) {
     }
   }
 
-  return { listSources, captureSource, flashDisplay };
+  return { listSources, captureSource, flashDisplay, screenSourceAtCursor };
 }
 
 module.exports = { createCapture, MAX_LONG_EDGE };

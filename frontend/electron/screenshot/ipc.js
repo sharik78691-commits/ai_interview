@@ -1,8 +1,9 @@
-// IPC surface for screenshot analysis. Everything privileged (capture, key
-// decrypt, network) happens here in the main process; the renderer gets only
-// results. Every handler rejects callers other than the main app window.
-const { DEFAULT_MODEL_KEY, listModels, getModel, resolveModel } = require('./model-config');
-const { analyzeScreenshots, AnalysisError } = require('./analysis');
+// IPC surface for screenshot analysis. Everything privileged (capture,
+// network) happens here in the main process; the renderer gets only results.
+// Every handler rejects callers other than the main app window. No AI key
+// exists on this machine: analysis runs on the backend with the server's key.
+const { DEFAULT_MODEL_KEY, listModels, resolveModel } = require('./model-config');
+const { analyzeScreenshots, fetchServerReady, AnalysisError } = require('./analysis');
 const { validateImages } = require('./image-validation');
 
 const fail = (err) => ({
@@ -13,12 +14,13 @@ const fail = (err) => ({
   },
 });
 
+const CAPTURE_HOTKEY = 'CommandOrControl+Shift+S';
+
 /**
- * @param {{ ipcMain: any, getMainWindow: () => any, capture: ReturnType<import('./capture').createCapture>, keyStore: ReturnType<import('./key-store').createKeyStore>, fetchImpl?: typeof fetch }} deps
+ * @param {{ ipcMain: any, getMainWindow: () => any, globalShortcut?: any, capture: ReturnType<import('./capture').createCapture>, apiBase: string, fetchImpl?: typeof fetch }} deps
+ *   fetchImpl must carry the signed-in session (cookies + CSRF header).
  */
-function registerScreenshotIpc({ ipcMain, getMainWindow, capture, keyStore, envKeys, envHint, fetchImpl }) {
-  // A key the user saved in the app wins; otherwise fall back to .env / environment.
-  const resolveKey = (provider) => keyStore.get(provider) || envKeys?.get(provider) || null;
+function registerScreenshotIpc({ ipcMain, getMainWindow, globalShortcut, capture, apiBase, fetchImpl }) {
   const trusted = (event) => {
     const win = getMainWindow();
     return !!win && !win.isDestroyed() && event.sender === win.webContents;
@@ -34,14 +36,6 @@ function registerScreenshotIpc({ ipcMain, getMainWindow, capture, keyStore, envK
     });
 
   handle('screenshot:get-config', async () => {
-    const providers = {};
-    const sources = {};
-    for (const m of listModels()) {
-      const stored = keyStore.has(m.provider);
-      const env = !!envKeys?.has(m.provider);
-      providers[m.provider] = stored || env;
-      sources[m.provider] = stored ? 'stored' : env ? 'env' : null;
-    }
     return {
       ok: true,
       models: listModels().map(({ key, provider, displayName, limits }) => ({
@@ -51,10 +45,8 @@ function registerScreenshotIpc({ ipcMain, getMainWindow, capture, keyStore, envK
         limits,
       })),
       defaultModel: DEFAULT_MODEL_KEY,
-      keyStored: providers,
-      keySources: sources,
-      envHint: envHint || '',
-      encryptionAvailable: keyStore.encryptionAvailable(),
+      // true/false = server has / lacks GEMINI_API_KEY; null = not reachable now.
+      serverReady: await fetchServerReady({ apiBase, fetchImpl }),
     };
   });
 
@@ -76,18 +68,64 @@ function registerScreenshotIpc({ ipcMain, getMainWindow, capture, keyStore, envK
     return { ok: true, image };
   });
 
-  handle('screenshot:set-key', async (modelKey, apiKey) => {
-    const model = getModel(modelKey);
-    if (!model) throw Object.assign(new Error('Unknown model.'), { code: 'UNKNOWN_MODEL' });
-    keyStore.set(model.provider, apiKey);
-    return { ok: true };
-  });
+  // Ctrl+Shift+S works app-wide while the app runs. On the Screenshots page it
+  // opens the source picker with the screen under the cursor preselected
+  // (arrow keys change it, Enter captures). Anywhere else it brings the app
+  // forward and opens the Screenshots page; the next press then captures.
+  let hotkeyOn = false;
+  let pageActive = false;
+  const bringForward = (win) => {
+    // So the picker / page receives arrow and Enter keys.
+    if (win.isMinimized?.()) win.restore?.();
+    win.show?.();
+    win.focus?.();
+  };
+  const onHotkey = async () => {
+    const win = getMainWindow();
+    if (!win || win.isDestroyed()) return;
+    if (!pageActive) {
+      bringForward(win);
+      win.webContents.send('screenshot:open-page');
+      return;
+    }
+    try {
+      const sourceId = await capture.screenSourceAtCursor();
+      bringForward(win);
+      win.webContents.send('screenshot:hotkey', sourceId);
+    } catch (err) {
+      win.webContents.send('screenshot:hotkey', null, fail(err).error);
+    }
+  };
+  const registerHotkey = () => {
+    if (!globalShortcut || hotkeyOn) return hotkeyOn;
+    try {
+      hotkeyOn = globalShortcut.register(CAPTURE_HOTKEY, onHotkey);
+    } catch {
+      hotkeyOn = false;
+    }
+    if (!hotkeyOn) console.warn(`[hotkey] ${CAPTURE_HOTKEY} is taken by another app.`);
+    return hotkeyOn;
+  };
+  registerHotkey();
 
-  handle('screenshot:clear-key', async (modelKey) => {
-    const model = getModel(modelKey);
-    if (!model) throw Object.assign(new Error('Unknown model.'), { code: 'UNKNOWN_MODEL' });
-    keyStore.clear(model.provider);
-    return { ok: true };
+  // A full reload/navigation drops the page's listener — mark the page gone.
+  // (Angular hash-route changes are in-place and don't trigger this.)
+  const watched = new WeakSet();
+  const watchReloads = () => {
+    const wc = getMainWindow()?.webContents;
+    if (!wc || watched.has(wc)) return;
+    watched.add(wc);
+    wc.on('did-start-navigation', (_e, _url, isInPlace, isMainFrame) => {
+      if (isMainFrame && !isInPlace) pageActive = false;
+    });
+    wc.once('destroyed', () => (pageActive = false));
+  };
+
+  // The Screenshots page reports when it opens (true) and closes (false).
+  handle('screenshot:set-hotkey', async (enabled) => {
+    watchReloads();
+    pageActive = !!enabled;
+    return { ok: true, active: registerHotkey() && pageActive };
   });
 
   handle('screenshot:analyze', async (modelKey, images) => {
@@ -96,14 +134,9 @@ function registerScreenshotIpc({ ipcMain, getMainWindow, capture, keyStore, envK
     if (!check.ok) {
       throw new AnalysisError('VALIDATION', check.errors.map((e) => e.message).join(' '));
     }
-    const result = await analyzeScreenshots({
-      model,
-      images,
-      apiKey: resolveKey(model.provider),
-      fetchImpl,
-    });
+    const result = await analyzeScreenshots({ model, images, apiBase, fetchImpl });
     return { ok: true, result, model: model.displayName };
   });
 }
 
-module.exports = { registerScreenshotIpc };
+module.exports = { registerScreenshotIpc, CAPTURE_HOTKEY };

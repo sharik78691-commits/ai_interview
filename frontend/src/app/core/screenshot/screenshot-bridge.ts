@@ -17,22 +17,25 @@ export interface ScreenshotBridge {
     BridgeResult<{
       models: ScreenshotModel[];
       defaultModel: string;
-      keyStored: Record<string, boolean>;
-      /** Where each provider's key comes from: saved in-app, or auto-loaded from .env. */
-      keySources?: Record<string, 'stored' | 'env' | null>;
-      /** Where to put a .env file for automatic key loading. */
-      envHint?: string;
-      encryptionAvailable: boolean;
+      /**
+       * The AI key lives only on the server (GEMINI_API_KEY in its .env).
+       * true/false = server is / is not set up; null = server not reachable now.
+       */
+      serverReady: boolean | null;
     }>
   >;
   listSources(): Promise<BridgeResult<{ sources: CaptureSource[] }>>;
   capture(sourceId: string): Promise<BridgeResult<{ image: CapturedImage }>>;
-  setKey(modelKey: string, apiKey: string): Promise<BridgeResult<object>>;
-  clearKey(modelKey: string): Promise<BridgeResult<object>>;
   analyze(
     modelKey: string,
     images: Omit<CapturedImage, 'sourceName'>[],
   ): Promise<BridgeResult<{ result: AnalysisResult; model: string }>>;
+  /** Register / unregister the Ctrl+Shift+S capture hotkey (older builds lack it). */
+  setHotkey?(enabled: boolean): Promise<BridgeResult<{ active: boolean }>>;
+  /** Hotkey pressed: screen source under the cursor, or an error. Returns an unsubscribe fn. */
+  onHotkey?(cb: (sourceId: string | null, error: { code: string; message: string } | null) => void): () => void;
+  /** Hotkey pressed while another page is open: show the Screenshots page. Returns an unsubscribe fn. */
+  onOpenPage?(cb: () => void): () => void;
 }
 
 /**

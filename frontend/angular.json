@@ -60,7 +60,7 @@
               "sourceMap": true
             },
             "electron": {
-              "baseHref": "./",
+              "baseHref": "./index.html",
               "optimization": true,
               "extractLicenses": false,
               "outputHashing": "all",

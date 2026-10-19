@@ -40,11 +40,22 @@ _WS_TICKET_SALT = "aia-ws-ticket"
 UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
 
+# Public, well-known fallback for LOCAL development only.
+_DEV_FALLBACK_SECRET = "dev-insecure-session-secret-change-me"
+# Per-process random secret used when production starts WITHOUT
+# SESSION_SECRET. The public dev fallback would let anyone who has read this
+# file forge a session cookie for any user id; a random secret cannot be
+# forged (logins simply do not survive a restart until SESSION_SECRET is set).
+_EPHEMERAL_SECRET = secrets.token_urlsafe(48)
+
+
 def _secret() -> str:
     settings = get_settings()
-    # The fallback keeps local development working, but it is shared by every
-    # install, so production MUST set SESSION_SECRET (warned at startup).
-    return settings.session_secret or "dev-insecure-session-secret-change-me"
+    if settings.session_secret:
+        return settings.session_secret
+    if settings.is_production:
+        return _EPHEMERAL_SECRET
+    return _DEV_FALLBACK_SECRET
 
 
 def _serializer() -> URLSafeTimedSerializer:
@@ -58,6 +69,12 @@ def create_session_token(user_id: int) -> str:
 
 def read_session_token(token: str) -> int | None:
     """Return the user id from a valid, unexpired session token, else None."""
+    payload = read_session_payload(token)
+    return payload[0] if payload else None
+
+
+def read_session_payload(token: str) -> tuple[int, int] | None:
+    """Return ``(user_id, issued_at_epoch)`` for a valid session token, else None."""
     settings = get_settings()
     try:
         data = _serializer().loads(token, max_age=settings.session_max_age)
@@ -73,8 +90,26 @@ def read_session_token(token: str) -> int | None:
     except Exception:  # pragma: no cover - defensive
         logger.exception("Session token rejected: unexpected error")
         return None
-    uid = data.get("uid") if isinstance(data, dict) else None
-    return int(uid) if isinstance(uid, int) else None
+    if not isinstance(data, dict):
+        return None
+    uid, iat = data.get("uid"), data.get("iat")
+    if not isinstance(uid, int):
+        return None
+    return uid, iat if isinstance(iat, int) else 0
+
+
+def session_issued_before_revocation(iat: int, revoked_at: datetime | None) -> bool:
+    """True when a session was minted before the user's "sign out everywhere".
+
+    ``revoked_at`` is set on password reset; every session issued earlier
+    (e.g. one an attacker copied) stops working. Second granularity: a session
+    minted in the same second as the revocation is still accepted.
+    """
+    if revoked_at is None:
+        return False
+    if revoked_at.tzinfo is None:  # SQLite returns naive UTC datetimes
+        revoked_at = revoked_at.replace(tzinfo=timezone.utc)
+    return iat < int(revoked_at.timestamp())
 
 
 # --------------------------------------------------------------- WebSocket auth
@@ -144,9 +179,16 @@ def _cookie_kwargs(max_age: int) -> dict:
     }
     if settings.cookie_domain:
         kwargs["domain"] = settings.cookie_domain
-    
-    logger.debug(f"Setting cookie with: secure={kwargs['secure']}, samesite={kwargs['samesite']}, domain={kwargs.get('domain', 'None')}")
     return kwargs
+
+
+def set_csrf_cookie(response: Response) -> str:
+    """Issue a fresh readable CSRF cookie (same attributes as the session)."""
+    token = new_csrf_token()
+    kwargs = _cookie_kwargs(get_settings().session_max_age)
+    kwargs["httponly"] = False
+    response.set_cookie(CSRF_COOKIE, token, **kwargs)
+    return token
 
 
 def set_session_cookies(response: Response, user_id: int) -> str:

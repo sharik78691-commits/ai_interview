@@ -155,7 +155,12 @@ def test_provider_without_reasoning_config_omits_the_field() -> None:
     assert "reasoning_effort" not in body
 
 
-def test_registry_passes_reasoning_effort_through() -> None:
+def test_registry_passes_reasoning_effort_through(monkeypatch) -> None:
+    # A fake key builds the real provider class without any network call
+    # (the suite blanks live keys, which would otherwise yield the mock).
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "groq_api_key", "test-key")
     p = registry.get_llm_provider("groq-gpt-oss")
     assert getattr(p, "reasoning_effort", None) == "low"
     p2 = registry.get_llm_provider("gemini-flash")

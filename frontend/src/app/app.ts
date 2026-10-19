@@ -1,18 +1,20 @@
 import { Component, OnDestroy, OnInit, inject } from '@angular/core';
-import { NavigationEnd, Router, RouterLink, RouterOutlet } from '@angular/router';
+import { NavigationEnd, Router, RouterOutlet } from '@angular/router';
 import { Subscription, filter } from 'rxjs';
 import { AuthService } from './core/auth/auth.service';
+import { ScreenCaptureService } from './core/screenshot/screen-capture.service';
 import { InterviewWsService } from './core/services/interview-ws.service';
 import { InterviewerAudioService } from './core/services/interviewer-audio.service';
 import { ResumeService } from './core/services/resume.service';
 import { SeoConfig, SeoService } from './core/services/seo.service';
 import { TranscriptionService } from './core/services/transcription.service';
 import { NavbarComponent } from './shared/components/navbar/navbar.component';
+import { SiteFooterComponent } from './shared/components/site-footer/site-footer.component';
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [RouterOutlet, RouterLink, NavbarComponent],
+  imports: [RouterOutlet, NavbarComponent, SiteFooterComponent],
   templateUrl: './app.html',
   styleUrl: './app.css',
 })
@@ -24,8 +26,10 @@ export class App implements OnInit, OnDestroy {
   private interviewWs = inject(InterviewWsService);
   private interviewerAudio = inject(InterviewerAudioService);
   private transcription = inject(TranscriptionService);
+  private screenCapture = inject(ScreenCaptureService);
   private navSub?: Subscription;
   private logoutSub?: Subscription;
+  private offScreenshotHotkey?: () => void;
 
   ngOnInit(): void {
     // Restore the session from the HttpOnly cookie on startup so guards and
@@ -49,9 +53,16 @@ export class App implements OnInit, OnDestroy {
       .subscribe(() => this.applySeo());
     // Handle the very first load, where NavigationEnd may already have fired.
     this.applySeo();
+
+    // Desktop only (no-op on web): Ctrl+Shift+S on any other page opens the
+    // Screenshots page; pressing it again there captures.
+    this.offScreenshotHotkey = this.screenCapture.onOpenPageRequest(
+      () => void this.router.navigate(['/screenshot-analysis']),
+    );
   }
 
   ngOnDestroy(): void {
+    this.offScreenshotHotkey?.();
     this.navSub?.unsubscribe();
     this.logoutSub?.unsubscribe();
   }

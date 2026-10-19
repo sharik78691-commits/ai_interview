@@ -49,3 +49,23 @@
   .plans { grid-template-columns: 1fr; }
   .grid3 { grid-template-columns: 1fr; }
 }
+
+/* ---- dynamic pricing + checkout panel ---- */
+.center { text-align: center; }
+.plans.few { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.plan .cta { border: 1px solid var(--border-strong); color: inherit; cursor: pointer; font: inherit; font-weight: 700; }
+.promo { color: var(--green); margin: -2px 0 10px; }
+.checkout-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, .55); z-index: 40; }
+.checkout {
+  position: fixed; z-index: 41; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: min(460px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto;
+  display: grid; gap: 14px; padding: 24px;
+}
+.checkout h2 { font-size: 1.15rem; font-weight: 800; }
+.checkout-total { display: flex; justify-content: space-between; align-items: baseline; font-size: 1.05rem; }
+.checkout-total strong { font-size: 1.5rem; }
+.gw { border: 0; display: grid; gap: 8px; }
+.gw-opt { display: flex; gap: 10px; align-items: center; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; cursor: pointer; }
+.field { display: grid; gap: 6px; }
+.field input { padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--bg2); color: var(--text); }
+.checkout-actions { display: flex; gap: 10px; justify-content: flex-end; }

@@ -1,49 +1,65 @@
 <section class="hero container">
   <div class="hero-badge">Real-time interview copilot</div>
   <h1>AI Interview Assistant<br><span class="grad">Your real-time AI companion</span></h1>
-  <p class="sub">Resume-aware guidance for technical, behavioral and coding questions — live transcription, STAR answers and code hints while you talk.</p>
+  <p class="sub">Resume-aware guidance for technical, behavioral and coding questions — interviewer audio detection, STAR outlines and code hints while you talk.</p>
   <div class="cta">
     <a routerLink="/login" class="btn-primary">Get Started →</a>
     <button class="btn-ghost" (click)="tryDemo()">▶ Try Demo</button>
   </div>
   <div class="hero-stats">
-    <div><strong>3</strong><span>easy steps</span></div>
-    <div><strong>6</strong><span>core features</span></div>
-    <div><strong>100%</strong><span>browser mic privacy</span></div>
+    <div><strong>3</strong><span>steps to set up</span></div>
+    <div><strong>Prepaid</strong><span>no auto-renewal</span></div>
+    <div><strong>Yours</strong><span>resume-aware answers</span></div>
   </div>
 </section>
 
 <section class="container section">
   <h2>What is OyeInterview?</h2>
   <p class="muted lead">
-    OyeInterview is a real-time <strong>AI interview assistant</strong> that listens to your
-    interview, detects the interviewer's questions, and instantly drafts structured answers
-    tailored to your resume and the job description. Whether you are preparing for a
-    <strong>technical interview</strong>, a <strong>behavioral interview</strong>, or a live
-    <strong>coding interview</strong>, OyeInterview acts as your private interview copilot —
-    surfacing bullet answers, STAR stories, complexity notes and follow-up questions the moment
-    you need them.
+    OyeInterview is a real-time <strong>AI interview assistant</strong>. It detects the
+    interviewer's questions from the meeting audio you share (or questions you type) and drafts
+    structured answer suggestions grounded in your resume and the job description. It helps
+    with <strong>technical</strong>, <strong>behavioral</strong> and <strong>coding</strong>
+    interviews — bullet answers, STAR outlines, complexity notes and likely follow-ups.
   </p>
 </section>
 
-<section class="container section">
-  <h2>How it works</h2>
+<section class="container section" id="how-it-works">
+  <div class="sec-head">
+    <h2>How it works</h2>
+    <a routerLink="/how-it-works" class="sec-link">Full walkthrough →</a>
+  </div>
   <div class="grid3">
-    <div class="card"><div class="step">1</div><h3>Upload resume + role</h3><p class="muted">Add your resume (PDF/DOCX/TXT) and paste the job description on the dashboard.</p></div>
-    <div class="card"><div class="step">2</div><h3>Go live</h3><p class="muted">Grant mic access. The app transcribes the interviewer in real time and detects questions.</p></div>
-    <div class="card"><div class="step">3</div><h3>Get guidance</h3><p class="muted">Receive bullet answers, STAR stories, code hints and follow-ups tuned to your background.</p></div>
+    <div class="card"><div class="step">1</div><h3>Add resume + role</h3><p class="muted">Upload or paste your resume (PDF/DOCX/TXT) and save the job description you're targeting.</p></div>
+    <div class="card"><div class="step">2</div><h3>Share interviewer audio</h3><p class="muted">Pick the meeting tab or window. Short clips are transcribed to detect questions — or just type them.</p></div>
+    <div class="card"><div class="step">3</div><h3>Review the guidance</h3><p class="muted">Answer points stream in within seconds. Check them and answer in your own words.</p></div>
   </div>
 </section>
 
-<section class="container section">
-  <h2>Key features</h2>
+<section class="container section" id="features">
+  <div class="sec-head">
+    <h2>Key features</h2>
+    <a routerLink="/features" class="sec-link">All features →</a>
+  </div>
   <div class="feat-grid">
-    <div class="card"><h3>⚙ Technical depth</h3><p class="muted">System design, DSA and tradeoff-first answers with follow-up anticipation.</p></div>
-    <div class="card"><h3>💬 Behavioral STAR</h3><p class="muted">Situation-Task-Action-Result scaffolds mapped to your real experience.</p></div>
-    <div class="card"><h3>📄 Resume-aware</h3><p class="muted">Every suggestion references your skills and the target role.</p></div>
-    <div class="card"><h3>⚡ Real-time</h3><p class="muted">WebSocket streaming: question in, guidance back in seconds.</p></div>
-    <div class="card"><h3>🔒 Privacy-first</h3><p class="muted">Transcripts stay local; only detected questions are sent to the backend.</p></div>
-    <div class="card"><h3>🎙 Browser mic</h3><p class="muted">No installs — uses the Web Speech API plus typed fallback. Chrome recommended.</p></div>
+    <div class="card"><h3>🎧 Interviewer audio detection</h3><p class="muted">Meeting or tab audio is transcribed in short clips to spot complete questions automatically.</p></div>
+    <div class="card"><h3>⚡ Streaming answers</h3><p class="muted">Answer points appear while the model writes, then the full structured answer.</p></div>
+    <div class="card"><h3>📄 Resume-aware</h3><p class="muted">Suggestions reference your saved resume and the target role's job description.</p></div>
+    <div class="card"><h3>💬 Behavioral STAR</h3><p class="muted">Situation-Task-Action-Result outlines mapped to your real experience.</p></div>
+    <div class="card"><h3>⚙ Technical &amp; coding</h3><p class="muted">Trade-off-first answers, code hints and complexity notes.</p></div>
+    <div class="card"><h3>📏 Your pace</h3><p class="muted">Short, medium or long answers, and a choice of available AI models.</p></div>
+  </div>
+</section>
+
+<section class="container section" id="trust">
+  <div class="sec-head">
+    <h2>Trust &amp; transparency</h2>
+    <a routerLink="/trust" class="sec-link">Data practices →</a>
+  </div>
+  <div class="grid3">
+    <div class="card"><h3>✖ Not stored</h3><p class="muted">Interview transcripts, your questions and AI answers, audio, and card or bank details.</p></div>
+    <div class="card"><h3>↗ Shared only to work</h3><p class="muted">Questions with your resume/JD go to the AI model you choose; interviewer clips go to a speech-to-text provider.</p></div>
+    <div class="card"><h3>🔐 Verified payments</h3><p class="muted">Plans activate only after Razorpay or Cashfree confirms the payment to our server. No auto-renewal.</p></div>
   </div>
 </section>
 
@@ -55,49 +71,34 @@
       <p class="muted">Practise system design, data structures and algorithms with answers that reference your own projects and stack.</p>
     </div>
     <div class="card">
-      <h3>Job seekers & career switchers</h3>
+      <h3>Job seekers &amp; career switchers</h3>
       <p class="muted">Turn your experience into confident STAR stories for behavioral and competency-based interviews.</p>
     </div>
     <div class="card">
-      <h3>Students & new grads</h3>
-      <p class="muted">Rehearse technical and coding interviews with a real-time copilot that explains the reasoning, not just the answer.</p>
+      <h3>Students &amp; new grads</h3>
+      <p class="muted">Rehearse technical and coding interviews with a copilot that explains the reasoning, not just the answer.</p>
     </div>
   </div>
 </section>
 
 <section class="container section">
-  <h2>Why choose OyeInterview</h2>
-  <ul class="muted lead">
-    <li><strong>Real-time, not post-hoc.</strong> Guidance appears while the question is being asked, not after the interview ends.</li>
-    <li><strong>Personalised to you.</strong> Answers are grounded in your resume and the specific job description you are targeting.</li>
-    <li><strong>Privacy-first by design.</strong> Microphone audio is transcribed in your browser; only detected question text reaches the backend.</li>
-    <li><strong>No installs.</strong> Runs entirely in Chrome or Edge using the Web Speech API, with a typed fallback for every browser.</li>
-    <li><strong>Practice responsibly.</strong> Built as a preparation and practice companion — always check your interview's rules first.</li>
-  </ul>
-</section>
-
-<section class="container section">
-  <div class="banner info">🔒 Privacy notice: microphone audio is transcribed locally in your browser. Only the text of detected questions (plus your resume and job description) is sent to the backend for guidance.</div>
+  <div class="banner info">
+    Use responsibly: follow the rules of every interview process. AI suggestions can be wrong — always check them.
+    <a routerLink="/acceptable-use">Acceptable use</a>
+  </div>
 </section>
 
 <section class="container section">
   <h2>Frequently asked questions</h2>
-  <details class="card faq"><summary>Do I need a microphone?</summary><p class="muted">No. You can type questions manually or run the one-click demo simulation. A microphone enables live transcription of the interviewer.</p></details>
-  <details class="card faq"><summary>Which browsers work best?</summary><p class="muted">Chrome or Edge — they support the Web Speech recognition API. Other browsers fall back to typing.</p></details>
-  <details class="card faq"><summary>Where does my data go?</summary><p class="muted">Resume text and job description are stored in your browser's localStorage and sent to the backend only to generate guidance.</p></details>
-  <details class="card faq"><summary>Can I use it in a real interview?</summary><p class="muted">Check the interview rules first. It's designed as a practice and preparation companion.</p></details>
+  <details class="card faq"><summary>Do I need a microphone?</summary><p class="muted">No. Interviewer questions come from the meeting audio you share, and you can always type questions. Your own microphone is optional.</p></details>
+  <details class="card faq"><summary>Which browsers work best?</summary><p class="muted">Chrome or Edge — they support speech recognition for your microphone and sharing tab audio. Typed questions work in other modern browsers.</p></details>
+  <details class="card faq"><summary>Where does my data go?</summary><p class="muted">Saved resumes and target roles are stored in your account. During a session, questions with your resume and job description go to the selected AI provider, and interviewer audio clips go to a speech-to-text provider. Transcripts and answers are not stored. See the <a routerLink="/privacy-policy">Privacy Policy</a>.</p></details>
+  <details class="card faq"><summary>Can I use it in a real interview?</summary><p class="muted">Only where the interview's rules allow assistance tools. Check first — see our <a routerLink="/acceptable-use">Acceptable Use Policy</a>.</p></details>
   <details class="card faq"><summary>Does it write code for me?</summary><p class="muted">It gives hints, complexity notes and skeletons — you still own the final answer.</p></details>
-  <details class="card faq"><summary>Is OyeInterview free to try?</summary><p class="muted">Yes. You can create a free account and run the built-in demo without any setup.</p></details>
+  <details class="card faq"><summary>How does pricing work?</summary><p class="muted">One-time payments for a fixed number of days — no auto-renewal and no stored cards. You can create an account and try the demo first. <a routerLink="/pricing">See pricing</a>.</p></details>
 </section>
 
-<footer class="container foot2">
+<section class="container foot2">
   <a routerLink="/pricing" class="btn-primary">See pricing →</a>
-  <nav class="legal-links" aria-label="Legal">
-    <a routerLink="/pricing">Pricing</a>
-    <a routerLink="/terms-and-conditions">Terms &amp; Conditions</a>
-    <a routerLink="/privacy-policy">Privacy Policy</a>
-    <a routerLink="/refund-policy">Refund &amp; Cancellation</a>
-    <a routerLink="/contact">Contact</a>
-  </nav>
-  <p class="muted small">© 2026 OyeInterview. All rights reserved.</p>
-</footer>
+  <a routerLink="/how-it-works" class="btn-ghost">How it works</a>
+</section>

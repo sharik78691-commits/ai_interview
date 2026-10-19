@@ -4,13 +4,12 @@
 // Dev:   run `ng serve`, then `npm run electron` (loads http://localhost:4200).
 // Prod:  `npm run dist:win` / `dist:mac` builds a packaged app (electron-builder)
 //        that loads the built files from dist/frontend/browser.
-const { app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, safeStorage, screen, session, Tray, Menu, nativeImage } = require('electron');
+const { app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, screen, session, shell, Tray, Menu, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { createCapture } = require('./screenshot/capture');
-const { createKeyStore } = require('./screenshot/key-store');
 const { registerScreenshotIpc } = require('./screenshot/ipc');
-const { createEnvKeys } = require('./screenshot/env-key');
+const { recoverableFolderHash } = require('./reload-recovery');
 
 // Known Windows issue: with GPU acceleration, a content-protected window can
 // render BLACK on the local screen too (not just in captures). Software
@@ -18,6 +17,10 @@ const { createEnvKeys } = require('./screenshot/env-key');
 app.disableHardwareAcceleration();
 
 const DEV_URL = process.env.ELECTRON_START_URL || 'http://localhost:4200';
+// Backend origin for main-process API calls (screenshot analysis). Same origin
+// the renderer uses, so the login cookie applies: the public site when packaged,
+// the ng-serve proxy in dev.
+const API_BASE = (process.env.OYE_API_BASE || (app.isPackaged ? 'https://www.oyeinterview.com' : DEV_URL)).replace(/\/+$/, '');
 
 let mainWindow = null;
 let copilotWindow = null;
@@ -41,23 +44,52 @@ function isOldWebsitePage(url) {
   }
 }
 
-/** Where to look for a .env holding GEMINI_API_KEY (priority order). */
-function envFileCandidates() {
-  return [
-    path.join(app.getPath('userData'), '.env'),
-    path.join(path.dirname(process.execPath), '.env'),
-    path.join(process.resourcesPath || '', '.env'),
-    // Dev (`npm run electron`): the repo's own env files.
-    path.join(__dirname, '..', '.env'),
-    path.join(__dirname, '..', '..', 'backend', '.env'),
-    path.join(__dirname, '..', '..', '.env'),
-  ];
+/**
+ * fetch() for main-process calls to OUR backend as the signed-in user: the
+ * app session's cookies ride along and the double-submit CSRF header is added
+ * (the cookie is not readable from file:// in the renderer either). The AI key
+ * lives only in the server .env — this app never holds one.
+ */
+async function sessionFetch(url, init = {}) {
+  const ses = session.defaultSession;
+  const headers = { ...(init.headers || {}) };
+  const method = String(init.method || 'GET').toUpperCase();
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+    try {
+      const [csrf] = await ses.cookies.get({ url, name: 'aia_csrf' });
+      if (csrf?.value) headers['X-CSRF-Token'] = csrf.value;
+    } catch {
+      // No cookie yet (signed out) — the server answers 401/403 clearly.
+    }
+  }
+  return ses.fetch(url, { ...init, headers, credentials: 'include' });
 }
 
-function loadDesktopApp() {
+/**
+ * Deny every renderer-initiated popup (window.open / target=_blank). The app
+ * never opens one; an injected script must not be able to spawn a new window.
+ * Plain https links are handed to the user's default browser instead.
+ */
+function denyPopups(win) {
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    try {
+      if (new URL(url).protocol === 'https:') shell.openExternal(url);
+    } catch {
+      // Malformed URL — just deny.
+    }
+    return { action: 'deny' };
+  });
+}
+
+/** True when an IPC message comes from the given (live) window. */
+function isFrom(event, win) {
+  return !!win && !win.isDestroyed() && event.sender === win.webContents;
+}
+
+function loadDesktopApp(hash = '/interview') {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   // Land on the interview screen. The auth guard sends signed-out users to #/login.
-  mainWindow.loadFile(INDEX_HTML, { hash: '/interview' });
+  mainWindow.loadFile(INDEX_HTML, { hash });
 }
 
 function createMainWindow() {
@@ -73,6 +105,9 @@ function createMainWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      // Explicit (also Electron's default): the renderer has no Node access
+      // even if the preload is ever extended carelessly.
+      sandbox: true,
       // The packaged app is loaded from file:// (no dev-server proxy). Disabling
       // webSecurity lets (a) Angular's ES-module bundle load from file:// and
       // (b) the renderer call the deployed backend cross-origin without CORS
@@ -85,6 +120,8 @@ function createMainWindow() {
       backgroundThrottling: false,
     },
   });
+
+  denyPopups(mainWindow);
 
   // "Whole app invisible by default": hide the MAIN window from screen capture
   // too (not just the copilot). The interviewer sees this app as black in
@@ -99,6 +136,9 @@ function createMainWindow() {
   mainWindow.on('show', () => {
     try {
       mainWindow.setSkipTaskbar(true);
+      // Re-assert screen-share invisibility on every show (hide/show from the
+      // tray or Ctrl+Shift+A) so it can never silently drop off.
+      mainWindow.setContentProtection(true);
     } catch {
       // Window gone mid-shutdown — safe to ignore.
     }
@@ -125,6 +165,16 @@ function createMainWindow() {
     if (!isOldWebsitePage(url)) return;
     event.preventDefault();
     loadDesktopApp();
+  });
+  // Reload (Ctrl+R / F5 / location.reload) from …/browser/#/route used to fail
+  // and leave a blank window. Load index.html again on the same route instead.
+  mainWindow.webContents.on('did-fail-load', (_event, _code, _desc, url, isMainFrame) => {
+    if (!isMainFrame) return;
+    const hash = recoverableFolderHash(url, INDEX_HTML);
+    // Defer: navigating from inside did-fail-load left the window unpainted
+    // (black) on Windows. The electron build's <base href="./index.html">
+    // keeps the address on index.html, so this is only a safety net now.
+    if (hash) setImmediate(() => loadDesktopApp(hash));
   });
   mainWindow.webContents.on('did-navigate', bounceOffOldSite);
   mainWindow.webContents.on('did-redirect-navigation', bounceOffOldSite);
@@ -183,14 +233,19 @@ function createCopilotWindow() {
       preload: path.join(__dirname, 'copilot-preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
     },
   });
+  denyPopups(copilotWindow);
 
   // THE key line: exclude this window from screen capture.
   //   Windows -> SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)
   //   macOS   -> NSWindowSharingNone
   // Zoom / Meet / Teams / OBS see this window as black.
   copilotWindow.setContentProtection(true);
+  copilotWindow.on('show', () => {
+    if (copilotWindow && !copilotWindow.isDestroyed()) copilotWindow.setContentProtection(true);
+  });
 
   // Float it near the bottom-right of the primary display.
   const { workArea } = screen.getPrimaryDisplay();
@@ -219,13 +274,37 @@ function createCopilotWindow() {
 
 function showMainWindow() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow.show();
-  mainWindow.focus();
+  // Windows refuses to steal foreground for a background app, so a plain
+  // show()+focus() can leave the window BEHIND whatever else is open. Briefly
+  // pinning it always-on-top forces it above every other window, then we drop
+  // the pin so it behaves like a normal window again.
+  try {
+    mainWindow.setAlwaysOnTop(true, 'screen-saver');
+    mainWindow.moveTop();
+    mainWindow.focus();
+    mainWindow.webContents.focus();
+  } finally {
+    setTimeout(() => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setAlwaysOnTop(false);
+    }, 200);
+  }
+}
+
+// Tray icon / tray menu: clicking the tray itself takes focus away from the
+// window, so these keep the simple visible → hide rule.
+function toggleMainWindowFromTray() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isVisible()) mainWindow.hide();
+  else showMainWindow();
 }
 
 function toggleMainWindow() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  if (mainWindow.isVisible()) mainWindow.hide();
+  // Hide only when the user is actually looking at it (visible AND focused).
+  // Visible-but-buried under other windows → bring it to the front instead.
+  if (mainWindow.isVisible() && mainWindow.isFocused()) mainWindow.hide();
   else showMainWindow();
 }
 
@@ -269,7 +348,7 @@ function createTray() {
       },
       {
         label: 'Show / Hide (Ctrl+Shift+A)',
-        click: () => toggleMainWindow(),
+        click: () => toggleMainWindowFromTray(),
       },
       { type: 'separator' },
       {
@@ -281,41 +360,50 @@ function createTray() {
       },
     ]),
   );
-  tray.on('click', () => toggleMainWindow());
+  tray.on('click', () => toggleMainWindowFromTray());
 }
 
 // ---- IPC: main window (Angular) <-> main process <-> copilot window ----
+// Every channel checks WHICH window sent it: the main window drives the
+// copilot and the opacity; the copilot may only read state and close itself.
 
-ipcMain.handle('copilot:start', () => {
+ipcMain.handle('copilot:start', (event) => {
+  if (!isFrom(event, mainWindow)) return false;
   createCopilotWindow();
   return true;
 });
 
-ipcMain.handle('copilot:stop', () => {
+ipcMain.handle('copilot:stop', (event) => {
+  if (!isFrom(event, mainWindow)) return false;
   copilotWindow?.close();
   copilotWindow = null;
   return true;
 });
 
 // The copilot window pulls the current state when it loads.
-ipcMain.handle('copilot:get-state', () => lastPayload);
+ipcMain.handle('copilot:get-state', (event) =>
+  isFrom(event, copilotWindow) || isFrom(event, mainWindow) ? lastPayload : null,
+);
 
 // Relay transcript + guidance from the main window to the copilot window.
-ipcMain.on('copilot:update', (_event, payload) => {
+ipcMain.on('copilot:update', (event, payload) => {
+  if (!isFrom(event, mainWindow)) return;
   lastPayload = payload;
   if (copilotWindow && !copilotWindow.isDestroyed()) {
     copilotWindow.webContents.send('copilot:update', payload);
   }
 });
 
-ipcMain.on('copilot:close', () => {
+ipcMain.on('copilot:close', (event) => {
+  if (!isFrom(event, copilotWindow) && !isFrom(event, mainWindow)) return;
   copilotWindow?.close();
 });
 
 // Transparency slider (top bar): 0% = solid window, 100% = fully see-through
 // so the user can watch windows behind the app. Visual only — the window
 // still receives mouse input.
-ipcMain.handle('window:set-opacity', (_event, opacity) => {
+ipcMain.handle('window:set-opacity', (event, opacity) => {
+  if (!isFrom(event, mainWindow)) return false;
   const value = Number(opacity);
   if (!Number.isFinite(value)) return false;
   if (!mainWindow || mainWindow.isDestroyed()) return false;
@@ -384,16 +472,16 @@ app.whenReady().then(async () => {
     callback(['media', 'audioCapture', 'videoCapture'].includes(permission));
   });
 
-  // Screenshot analysis (capture + encrypted API key + AI request). All
-  // privileged work stays in the main process; see electron/screenshot/*.
+  // Screenshot analysis (capture + backend AI request). All privileged work
+  // stays in the main process; see electron/screenshot/*.
   registerScreenshotIpc({
     ipcMain,
     getMainWindow: () => mainWindow,
+    globalShortcut,
     capture: createCapture({ desktopCapturer, screen, BrowserWindow }),
-    keyStore: createKeyStore({ safeStorage, fs, userDataDir: app.getPath('userData') }),
-    // AI key is picked up automatically from the environment or a .env file.
-    envKeys: createEnvKeys({ fs, candidates: envFileCandidates() }),
-    envHint: path.join(app.getPath('userData'), '.env'),
+    // Analysis runs on the backend with the SERVER's Gemini key.
+    apiBase: API_BASE,
+    fetchImpl: sessionFetch,
   });
 
   createMainWindow();

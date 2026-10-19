@@ -1,23 +1,13 @@
 import { HttpClient } from '@angular/common/http';
-import { Injectable } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
 import { Observable, catchError, map, of, switchMap, tap } from 'rxjs';
 import { AIInterviewResponse, ResumeData } from '../models/interview.models';
-import { environment } from '../../../environments/environment';
+import { API_BASE_URL } from '../api/api-config';
+import { HealthInfo, InterviewApiService } from './interview-api.service';
 
-// Relative base in web builds (dev-server proxy / same-origin), absolute URL in
-// the Electron build where no proxy exists under file://.
-const BASE = environment.apiBaseUrl;
-
-/** Shape returned by GET /api/health. */
-export interface HealthInfo {
-  status: string;
-  model?: string;
-  demo_mode?: boolean;
-  llm_configured?: boolean;
-  /** Server-side speech-to-text for interviewer meeting/tab audio. */
-  stt_configured?: boolean;
-  stt_model?: string;
-}
+// Re-exported for existing importers; the interview endpoints now live in
+// InterviewApiService.
+export type { HealthInfo } from './interview-api.service';
 
 /** One resume in the server-side library (list view — no heavy text). */
 export interface StoredResume {
@@ -45,6 +35,9 @@ export interface StoredResumeDetail extends StoredResume {
 
 @Injectable({ providedIn: 'root' })
 export class ResumeService {
+  private readonly base = inject(API_BASE_URL);
+  private readonly interviewApi = inject(InterviewApiService);
+
   constructor(private http: HttpClient) {}
 
   /** Id of the row created by the latest upload (null when unknown). */
@@ -61,7 +54,7 @@ export class ResumeService {
     const form = new FormData();
     form.append('file', file);
     this.lastStoredId = null;
-    return this.http.post<{ filename: string; chars: number; resume: Record<string, unknown> }>(`${BASE}/api/resume/upload`, form).pipe(
+    return this.http.post<{ filename: string; chars: number; resume: Record<string, unknown> }>(`${this.base}/api/resume/upload`, form).pipe(
       tap((d) => {
         const r = (d?.resume ?? {}) as Record<string, unknown>;
         const raw = (r['raw_text'] as string) ?? (r['rawText'] as string) ?? '';
@@ -138,15 +131,11 @@ export class ResumeService {
   ): Observable<{ status: string }> {
     this.saveResumeText(resumeText);
     this.saveJobDescription(jobDescription);
-    return this.http.post<{ status: string }>(`${BASE}/api/interview/prepare`, {
-      resumeText,
-      jobDescription,
-      responseLength,
-    });
+    return this.interviewApi.prepare({ resumeText, jobDescription, responseLength });
   }
 
   analyzeQuestion(question: string, responseLength: string = 'medium', model?: string): Observable<AIInterviewResponse> {
-    return this.http.post<AIInterviewResponse>(`${BASE}/api/interview/analyze`, {
+    return this.interviewApi.analyze({
       question,
       resumeText: this.resumeText,
       jobDescription: this.jobDescription,
@@ -157,38 +146,38 @@ export class ResumeService {
 
   /** Backend health, including whether meeting-audio transcription is available. */
   checkHealth(): Observable<HealthInfo> {
-    return this.http.get<HealthInfo>(`${BASE}/api/health`);
+    return this.interviewApi.health();
   }
 
   // ------------------------------------------------- server resume library
 
   /** The signed-in user's stored resumes, newest first. Empty when signed out. */
   listResumes(): Observable<StoredResume[]> {
-    return this.http.get<StoredResume[]>(`${BASE}/api/resumes`).pipe(
+    return this.http.get<StoredResume[]>(`${this.base}/api/resumes`).pipe(
       catchError(() => of([])),
     );
   }
 
   /** Full stored resume with parsed sections and source text. */
   getResume(id: number): Observable<StoredResumeDetail> {
-    return this.http.get<StoredResumeDetail>(`${BASE}/api/resumes/${id}`);
+    return this.http.get<StoredResumeDetail>(`${this.base}/api/resumes/${id}`);
   }
 
   /** Make a stored resume the active one for interviews. */
   selectResume(id: number): Observable<StoredResumeDetail> {
-    return this.http.patch<StoredResumeDetail>(`${BASE}/api/resumes/${id}`, {
+    return this.http.patch<StoredResumeDetail>(`${this.base}/api/resumes/${id}`, {
       is_active: true,
     });
   }
 
   /** Delete a stored resume (the newest remaining one becomes active). */
   deleteResume(id: number): Observable<{ message: string }> {
-    return this.http.delete<{ message: string }>(`${BASE}/api/resumes/${id}`);
+    return this.http.delete<{ message: string }>(`${this.base}/api/resumes/${id}`);
   }
 
   /** Original-file download URL (session cookie travels on navigation). */
   downloadUrl(id: number): string {
-    return `${BASE}/api/resumes/${id}/download`;
+    return `${this.base}/api/resumes/${id}/download`;
   }
 
   /**
@@ -213,7 +202,7 @@ export class ResumeService {
 
   /** Store pasted/typed editor text as a resume (becomes the active one). */
   createFromText(filename: string, rawText: string): Observable<StoredResumeDetail> {
-    return this.http.post<StoredResumeDetail>(`${BASE}/api/resumes/from-text`, {
+    return this.http.post<StoredResumeDetail>(`${this.base}/api/resumes/from-text`, {
       filename,
       raw_text: rawText,
     });
@@ -221,7 +210,7 @@ export class ResumeService {
 
   /** Save editor corrections onto a stored resume (re-parses skills). */
   updateResumeText(id: number, rawText: string): Observable<StoredResumeDetail> {
-    return this.http.patch<StoredResumeDetail>(`${BASE}/api/resumes/${id}`, {
+    return this.http.patch<StoredResumeDetail>(`${this.base}/api/resumes/${id}`, {
       raw_text: rawText,
     });
   }

@@ -57,6 +57,11 @@ class User(Base):
     # Total successful sign-ins (password + Google + register). Powers the
     # admin panel's "how much login" counters.
     login_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # "Sign out everywhere": sessions issued before this instant are rejected.
+    # Set on password reset so a copied cookie dies with the old password.
+    sessions_revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     reset_tokens: Mapped[list["PasswordResetToken"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"

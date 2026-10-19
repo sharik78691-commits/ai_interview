@@ -6,14 +6,28 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api import admin, ai_models, auth, health, interview, resume, roles, websocket
+from app.api import (
+    admin,
+    admin_billing,
+    ai_models,
+    auth,
+    billing,
+    health,
+    interview,
+    resume,
+    roles,
+    screenshots,
+    websocket,
+)
 from app.core.config import get_settings
 from app.core.logging import setup_logging
 from app.core.middleware import (
     RequestLoggingMiddleware,
     SecurityHeadersMiddleware,
 )
-from app.db.session import init_db
+from app.auth.service import ensure_admin
+from app.db.session import SessionLocal, init_db
+from app.services.subscription_service import seed_default_plans
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -49,17 +63,34 @@ async def lifespan(app: FastAPI):
     )
     logger.info("=" * 72)
     init_db()
+    # Seed the admin login when ADMIN_PASSWORD is configured (idempotent).
+    db = SessionLocal()
+    try:
+        ensure_admin(db)
+        # First start only: the plans the pricing page has always shown.
+        seed_default_plans(db)
+    finally:
+        db.close()
     yield
 
 
-app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
+# Interactive docs reveal the full API surface; production hides them unless
+# ENABLE_API_DOCS=true (see core/config.py).
+_docs_kwargs = (
+    {}
+    if settings.enable_api_docs
+    else {"docs_url": None, "redoc_url": None, "openapi_url": None}
+)
+app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan, **_docs_kwargs)
 
-# Explicit CORS. Credentialed auth forbids allow_origins=["*"].
+# Explicit CORS. Credentialed auth forbids allow_origins=["*"]. Methods and
+# headers are limited to what the SPA actually sends.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "X-CSRF-Token", "Authorization", "Accept"],
+    expose_headers=["Content-Disposition", "X-Request-ID"],
     # Browsers must be told the response may be exposed cross-origin for the
     # credentialed (cookie-bearing) requests the SPA makes from Vercel to
     # Render. Without this, fetch/logout from the SPA fails preflight.
@@ -101,9 +132,12 @@ app.include_router(health.router)
 app.include_router(auth.router, prefix="/api")
 app.include_router(ai_models.router, prefix="/api")
 app.include_router(admin.router, prefix="/api")
+app.include_router(admin_billing.router, prefix="/api")
+app.include_router(billing.router, prefix="/api")
 app.include_router(resume.router, prefix="/api")
 app.include_router(roles.router, prefix="/api")
 app.include_router(interview.router, prefix="/api")
+app.include_router(screenshots.router, prefix="/api")
 app.include_router(websocket.router)
 
 
@@ -112,5 +146,5 @@ async def root() -> dict:
     return {
         "name": settings.app_name,
         "version": "0.1.0",
-        "docs": "/docs",
+        "docs": "/docs" if settings.enable_api_docs else None,
     }

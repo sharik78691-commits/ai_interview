@@ -127,12 +127,12 @@ describe('ScreenshotAnalysisComponent (desktop flow)', () => {
   });
 
   it('shows a clear error and recovers when analysis fails', async () => {
-    await setup({ analyze: async () => ({ ok: false, error: { code: 'INVALID_KEY', message: 'The API key was rejected.' } }) });
+    await setup({ analyze: async () => ({ ok: false, error: { code: 'PROVIDER_ERROR', message: 'The AI provider is having trouble. Try again shortly.' } }) });
     await cmp.openPicker({ kind: 'add' });
     await cmp.takeCapture(cmp.sources()[0]);
     await cmp.analyze();
     await settle();
-    expect(cmp.error()).toBe('The API key was rejected.');
+    expect(cmp.error()).toBe('The AI provider is having trouble. Try again shortly.');
     expect(cmp.analyzing()).toBeFalse();
     expect(cmp.result()).toBeNull();
     expect(cmp.history.entries().length).toBe(0);
@@ -153,28 +153,115 @@ describe('ScreenshotAnalysisComponent (desktop flow)', () => {
     expect(cmp.shots().length).toBe(0);
   });
 
-  it('requires an API key before analysis and reports key-save errors', async () => {
+  it('has no API key input: analysis runs on the server', async () => {
+    await setup();
+    expect(q('#apikey')).toBeNull();
+    expect(el().textContent).not.toContain('Paste your API key');
+    expect(q('[data-testid="server-status"]')!.textContent).toContain('Ready');
+    await cmp.openPicker({ kind: 'add' });
+    await cmp.takeCapture(cmp.sources()[0]);
+    await settle();
+    expect(cmp.canAnalyze()).toBeTrue();
+  });
+
+  it('blocks analysis with a clear note when the server is not set up', async () => {
     await setup({
-      getConfig: async () => ({ ok: true, models: cmp ? cmp.config.models() : [], defaultModel: 'gemini-3.5-flash-lite', keyStored: {}, encryptionAvailable: true }),
-      setKey: async () => ({ ok: false, error: { code: 'ENCRYPTION_UNAVAILABLE', message: 'Secure storage is not available.' } }),
+      getConfig: async () => ({ ok: true, models: cmp.config.models(), defaultModel: 'gemini-3.5-flash-lite', serverReady: false }),
     });
     await cmp.openPicker({ kind: 'add' });
     await cmp.takeCapture(cmp.sources()[0]);
     await settle();
-    expect(cmp.config.hasKey()).toBeFalse();
     expect(cmp.canAnalyze()).toBeFalse();
-    cmp.keyInput = 'AIzaSECRET_KEY_123456';
-    await cmp.saveKey();
-    expect(cmp.keyError()).toBe('Secure storage is not available.');
-    expect(cmp.config.hasKey()).toBeFalse();
+    expect(q('[data-testid="server-status"]')!.textContent).toContain('not set up on the server');
+  });
+  it('Ctrl+Shift+S hotkey: picker mode only while the page is open; opens the picker, arrows choose, Enter captures', async () => {
+    const calls: boolean[] = [];
+    let press: ((id: string | null, err: { code: string; message: string } | null) => void) | null = null;
+    const captured: string[] = [];
+    const sources = [
+      { id: 'screen:1:0', name: 'Screen 1', kind: 'screen', thumbnail: 'data:image/png;base64,AAAA' },
+      { id: 'screen:2:0', name: 'Screen 2', kind: 'screen', thumbnail: 'data:image/png;base64,AAAA' },
+      { id: 'window:9:0', name: 'Editor', kind: 'window', thumbnail: 'data:image/png;base64,AAAA' },
+    ];
+    await setup({
+      setHotkey: async (on: boolean) => {
+        calls.push(on);
+        return { ok: true, active: on };
+      },
+      onHotkey: (cb) => {
+        press = cb;
+        return () => (press = null);
+      },
+      listSources: async () => ({ ok: true, sources }),
+      capture: async (id: string) => {
+        captured.push(id);
+        return { ok: true, image: shot() };
+      },
+    } as Parameters<typeof installDesktopBridge>[0]);
+    expect(calls).toEqual([true]);
+    expect(q('[data-testid="capture-hotkey-tip"]')!.textContent).toContain('Shift');
+    expect(q('[data-testid="title-hotkey-hint"]')!.textContent!.replace(/\s/g, '')).toBe('Ctrl+Shift+S');
+    expect(q('[data-testid="title-hotkey-steps"]')!.textContent).toContain('Enter');
+
+    // Hotkey opens the picker with the screen under the cursor preselected — nothing captured yet.
+    press!('screen:2:0', null);
+    await new Promise((r) => setTimeout(r, 20));
+    fixture.detectChanges();
+    const modal = q('[data-testid="source-picker"]')!;
+    expect(modal).not.toBeNull();
+    expect(captured).toEqual([]);
+    expect(cmp.selectedIndex()).toBe(1);
+    expect(el().querySelectorAll('.source.selected').length).toBe(1);
+
+    const key = (k: string) => modal.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true }));
+    key('ArrowRight');
+    expect(cmp.selectedIndex()).toBe(2);
+    key('ArrowRight');
+    expect(cmp.selectedIndex()).toBe(0); // wraps
+    key('ArrowLeft');
+    expect(cmp.selectedIndex()).toBe(2);
+    // Up/Down move by grid row, falling back to the next/previous item at the edges.
+    key('ArrowDown');
+    expect(cmp.selectedIndex()).toBe(0);
+    key('ArrowUp');
+    expect(cmp.selectedIndex()).toBe(2);
+    key('ArrowLeft');
+    expect(cmp.selectedIndex()).toBe(1);
+    key('Enter');
+    await new Promise((r) => setTimeout(r, 20));
+    fixture.detectChanges();
+    expect(captured).toEqual(['screen:2:0']);
+    expect(cmp.shots().length).toBe(1);
+    expect(q('[data-testid="source-picker"]')).toBeNull();
+
+    // Escape cancels without capturing.
+    press!('screen:1:0', null);
+    await new Promise((r) => setTimeout(r, 20));
+    fixture.detectChanges();
+    q('[data-testid="source-picker"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    fixture.detectChanges();
+    expect(q('[data-testid="source-picker"]')).toBeNull();
+    expect(captured).toEqual(['screen:2:0']);
+
+    fixture.destroy();
+    expect(calls).toEqual([true, false]);
+    expect(press).toBeNull();
   });
 
-  it('shows that the key was loaded automatically from .env, with no key input', async () => {
+  it('Ctrl+Shift+S hotkey reports errors instead of capturing', async () => {
+    let press: ((id: string | null, err: { code: string; message: string } | null) => void) | null = null;
     await setup({
-      getConfig: async () => ({ ok: true, models: cmp.config.models(), defaultModel: 'gemini-3.5-flash-lite', keyStored: { google: true }, keySources: { google: 'env' }, envHint: '/data/.env', encryptionAvailable: true }),
+      setHotkey: async (on: boolean) => ({ ok: true, active: on }),
+      onHotkey: (cb) => {
+        press = cb;
+        return () => (press = null);
+      },
     });
-    expect(q('[data-testid="key-status"]')!.textContent).toContain('loaded automatically from .env');
-    expect(q('#apikey')).toBeNull();
-    expect(cmp.config.hasKey()).toBeTrue();
+    await cmp.onHotkey(null, null);
+    expect(cmp.error()).toContain('Could not find a screen');
+    expect(cmp.shots().length).toBe(0);
+    press!(null, { code: 'SOURCE_GONE', message: 'No screen available to capture.' });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(cmp.shots().length).toBe(0);
   });
 });

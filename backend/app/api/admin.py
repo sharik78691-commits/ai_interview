@@ -10,9 +10,11 @@ GET  /api/admin/users/export    — full user list as CSV download
 GET  /api/admin/ai-models       — model catalog + provider error stats
 PATCH /api/admin/ai-models/{key} — admin-editable model flags
 
-Every route requires an admin session (401 anonymous, 403 non-admin).
-Aggregations are computed in Python over small result sets so the same code
-runs unchanged on SQLite and PostgreSQL.
+Every route requires an admin session (401 anonymous, 403 non-admin);
+mutating routes also require the CSRF header. Aggregations are computed in
+Python over small result sets so the same code runs unchanged on SQLite and
+PostgreSQL. Handlers are plain ``def`` (threadpool) because every one of them
+does blocking database work.
 """
 import csv
 import io
@@ -24,12 +26,11 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from app.auth.dependencies import require_admin
+from app.auth.dependencies import require_admin, require_csrf
 from app.core.config import get_settings
 from app.core.ratelimit import rate_limit
 from app.db.session import get_db
 from app.models.activity_log import ANALYZE, LLM_USAGE, PREPARE, ActivityLog
-from app.models.ai_model_config import AIModelConfig
 from app.models.user import User
 from app.providers.llm import registry
 from app.providers.stt.provider import (
@@ -38,6 +39,7 @@ from app.providers.stt.provider import (
     list_stt_models,
 )
 from app.services.ai_cost import build_cost_report
+from app.services.model_config_service import apply_model_update
 from app.services.business_analytics import EventRow, UserRow, build_report
 from app.schemas.admin import (
     AIModelUpdateRequest,
@@ -126,7 +128,7 @@ def _row(user: User) -> AdminUserRow:
 
 
 @router.get("/stats", response_model=AdminStats)
-async def stats(
+def stats(
     request: Request,
     _admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
@@ -137,7 +139,19 @@ async def stats(
     d0, d1 = _parse_range(from_date, to_date)
 
     users = db.scalars(select(User)).all()
-    acts = db.scalars(select(ActivityLog)).all()
+    # Only the three kinds this view reports, and only around the window
+    # (one day of slack each side for naive-vs-aware timestamps; the exact
+    # bounds are still applied by _in_range below). Previously the WHOLE
+    # activity log — which grows with every answered question — was loaded.
+    window_lo = datetime.combine(d0 - timedelta(days=1), datetime.min.time())
+    window_hi = datetime.combine(d1 + timedelta(days=2), datetime.min.time())
+    acts = db.scalars(
+        select(ActivityLog).where(
+            ActivityLog.kind.in_((PREPARE, ANALYZE, LLM_USAGE)),
+            ActivityLog.created_at >= window_lo,
+            ActivityLog.created_at < window_hi,
+        )
+    ).all()
 
     # --- lifetime account counters (states, not events) ---
     totals = Totals(
@@ -225,7 +239,7 @@ async def stats(
 
 
 @router.get("/business")
-async def business(
+def business(
     request: Request,
     _admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
@@ -260,7 +274,7 @@ DEMO_EMAIL_SUFFIX = "@demo.oyeinterview.test"
 
 
 @router.get("/ai-costs")
-async def ai_costs(
+def ai_costs(
     request: Request,
     _admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
@@ -292,7 +306,7 @@ async def ai_costs(
 
 
 @router.get("/users", response_model=AdminUsersPage)
-async def list_users(
+def list_users(
     request: Request,
     _admin: User = Depends(require_admin),
     q: str = Query(default="", max_length=200),
@@ -317,12 +331,13 @@ async def list_users(
 
 
 @router.patch("/users/{user_id}", response_model=AdminUserRow)
-async def set_active(
+def set_active(
     user_id: int,
     body: SetActiveRequest,
     request: Request,
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
+    _csrf: None = Depends(require_csrf),
 ) -> AdminUserRow:
     rate_limit(request, "admin")
     if body.is_active is None and body.is_admin is None:
@@ -358,8 +373,24 @@ async def set_active(
     return _row(user)
 
 
+# Characters that make Excel / Sheets treat a cell as a formula.
+_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _csv_safe(value: object) -> object:
+    """Neutralise CSV/formula injection for user-controlled text cells.
+
+    A signup name such as ``=HYPERLINK("http://evil", "x")`` would otherwise
+    execute when an admin opens the export in a spreadsheet (OWASP "CSV
+    Injection"). Prefixing a quote keeps the text visible but inert.
+    """
+    if isinstance(value, str) and value.startswith(_FORMULA_PREFIXES):
+        return "'" + value
+    return value
+
+
 @router.get("/users/export")
-async def export_users(
+def export_users(
     request: Request,
     _admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
@@ -375,7 +406,7 @@ async def export_users(
     )
     for u in users:
         writer.writerow(
-            [u.id, u.email, u.name or "", u.username or "",
+            [u.id, _csv_safe(u.email), _csv_safe(u.name or ""), _csv_safe(u.username or ""),
              u.auth_provider, int(bool(u.is_admin)), int(bool(u.is_active)),
              u.login_count or 0, u.last_login_at or "", u.created_at or ""]
         )
@@ -405,7 +436,7 @@ def _llm_error_stats(db: Session) -> dict[str, dict[str, int]]:
 
 
 @router.get("/ai-models")
-async def list_ai_models_admin(
+def list_ai_models_admin(
     request: Request,
     _admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
@@ -420,12 +451,13 @@ async def list_ai_models_admin(
 
 
 @router.patch("/ai-models/{key}")
-async def update_ai_model(
+def update_ai_model(
     key: str,
     body: AIModelUpdateRequest,
     request: Request,
     _admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
+    _csrf: None = Depends(require_csrf),
 ) -> dict:
     """Update admin-editable model flags. ``key`` is validated against the
     server allowlist — arbitrary/executable config can never be injected."""
@@ -435,32 +467,8 @@ async def update_ai_model(
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    record = db.get(AIModelConfig, key)
-    if record is None:
-        record = AIModelConfig(key=key)
-        db.add(record)
-
-    if body.enabled is not None:
-        record.enabled = body.enabled
-    if body.is_default is not None:
-        record.is_default = body.is_default
-        if body.is_default:
-            # Exactly one default: clear the flag on every other model.
-            for other in db.scalars(select(AIModelConfig)).all():
-                if other.key != key:
-                    other.is_default = False
-    if body.display_name is not None:
-        record.display_name = body.display_name.strip()[:120]
-    if body.description is not None:
-        record.description = body.description.strip()[:2000]
-    if body.free_tier is not None:
-        record.free_tier = body.free_tier
-    if body.priority is not None:
-        record.priority = max(-1000, min(1000, body.priority))
-
-    db.commit()
-    # Cached overrides would otherwise hide this change for up to the TTL.
-    registry.invalidate_model_overrides()
+    # Exactly one default across the whole catalogue.
+    record = apply_model_update(db, key, body, None, allow_catalog_fields=True)
     logger.info("Admin updated AI model config key=%s enabled=%s default=%s",
                 key, record.enabled, record.is_default)
     return {"models": registry.list_models(), "default": registry.default_model_key()}
@@ -470,7 +478,7 @@ async def update_ai_model(
 
 
 @router.get("/stt-models")
-async def list_stt_models_admin(
+def list_stt_models_admin(
     request: Request,
     _admin: User = Depends(require_admin),
 ) -> dict:
@@ -484,12 +492,13 @@ async def list_stt_models_admin(
 
 
 @router.patch("/stt-models/{key}")
-async def update_stt_model(
+def update_stt_model(
     key: str,
     body: AIModelUpdateRequest,
     request: Request,
     _admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
+    _csrf: None = Depends(require_csrf),
 ) -> dict:
     """Enable/disable a speech-to-text model or change the STT default."""
     rate_limit(request, "admin")
@@ -497,26 +506,9 @@ async def update_stt_model(
     if key not in valid_keys:
         raise HTTPException(status_code=404, detail=f"unknown STT model '{key}'")
 
-    record = db.get(AIModelConfig, key)
-    if record is None:
-        record = AIModelConfig(key=key)
-        db.add(record)
-
-    if body.enabled is not None:
-        record.enabled = body.enabled
-    if body.is_default is not None:
-        record.is_default = body.is_default
-        if body.is_default:
-            # Exactly one STT default: clear the flag only on other STT models
-            # (never touch the LLM models sharing this table).
-            for other in db.scalars(select(AIModelConfig)).all():
-                if other.key != key and other.key in valid_keys:
-                    other.is_default = False
-
-    db.commit()
-    # The overrides cache covers this shared table — drop it so both the LLM
-    # and STT reads see the fresh rows immediately.
-    registry.invalidate_model_overrides()
+    # Exactly one STT default: only other STT keys compete (never the LLM
+    # models sharing this table); catalogue fields are LLM-only.
+    record = apply_model_update(db, key, body, valid_keys, allow_catalog_fields=False)
     logger.info("Admin updated STT model key=%s enabled=%s default=%s",
                 key, record.enabled, record.is_default)
     return {"models": list_stt_models(), "default": default_stt_key()}

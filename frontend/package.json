@@ -11,7 +11,7 @@
     "build:electron": "ng build --configuration electron",
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
-    "test:electron": "node --test electron/screenshot/__tests__/screenshot.test.js",
+    "test:electron": "node --test electron/screenshot/__tests__/screenshot.test.js electron/__tests__/reload-recovery.test.js",
     "electron": "electron electron/main.js",
     "electron:dev": "electron electron/main.js",
     "dist": "ng build --configuration electron && electron-builder",
@@ -39,6 +39,8 @@
     },
     "files": [
       "electron/**/*",
+      "!electron/**/__tests__/**",
+      "!electron/make-tray-icon.js",
       "dist/frontend/browser/**/*",
       "package.json"
     ],

@@ -1,9 +1,7 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable, catchError, map, of, switchMap, tap } from 'rxjs';
-import { environment } from '../../../environments/environment';
-
-const BASE = environment.apiBaseUrl;
+import { API_BASE_URL } from '../api/api-config';
 
 /** One saved target role in the server-side library (list view). */
 export interface TargetRole {
@@ -28,6 +26,7 @@ export interface TargetRoleDetail extends TargetRole {
 @Injectable({ providedIn: 'root' })
 export class TargetRoleService {
   private http = inject(HttpClient);
+  private readonly base = inject(API_BASE_URL);
 
   /** Local inputs (the editor). Empty = nothing typed yet. */
   get localPosition(): string {
@@ -45,19 +44,19 @@ export class TargetRoleService {
 
   /** The signed-in user's saved roles, newest first. Empty when signed out. */
   listRoles(): Observable<TargetRole[]> {
-    return this.http.get<TargetRole[]>(`${BASE}/api/roles`).pipe(
+    return this.http.get<TargetRole[]>(`${this.base}/api/roles`).pipe(
       catchError(() => of([])),
     );
   }
 
   /** Full saved role with job description. */
   getRole(id: number): Observable<TargetRoleDetail> {
-    return this.http.get<TargetRoleDetail>(`${BASE}/api/roles/${id}`);
+    return this.http.get<TargetRoleDetail>(`${this.base}/api/roles/${id}`);
   }
 
   /** Save the current inputs as a role (becomes the active one). */
   createRole(position: string, jobDescription: string): Observable<TargetRoleDetail> {
-    return this.http.post<TargetRoleDetail>(`${BASE}/api/roles`, {
+    return this.http.post<TargetRoleDetail>(`${this.base}/api/roles`, {
       position,
       job_description: jobDescription,
     });
@@ -65,14 +64,14 @@ export class TargetRoleService {
 
   /** Make a saved role the active one. */
   selectRole(id: number): Observable<TargetRoleDetail> {
-    return this.http.patch<TargetRoleDetail>(`${BASE}/api/roles/${id}`, {
+    return this.http.patch<TargetRoleDetail>(`${this.base}/api/roles/${id}`, {
       is_active: true,
     });
   }
 
   /** Delete a saved role (newest remaining one becomes active). */
   deleteRole(id: number): Observable<{ message: string }> {
-    return this.http.delete<{ message: string }>(`${BASE}/api/roles/${id}`);
+    return this.http.delete<{ message: string }>(`${this.base}/api/roles/${id}`);
   }
 
   /**

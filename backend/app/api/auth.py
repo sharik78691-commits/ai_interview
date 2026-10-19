@@ -1,9 +1,5 @@
 """Authentication REST endpoints.
 
-
-
-
-
 Endpoints
 ---------
 POST /api/auth/register
@@ -16,14 +12,19 @@ POST /api/auth/forgot-password
 POST /api/auth/reset-password
 
 Responses never expose password hashes, OAuth tokens or internal security data.
+
+Handlers that hash passwords (Argon2id), query the database or send mail are
+plain ``def`` on purpose: FastAPI runs them in its threadpool, so that blocking
+work never stalls the event loop that also serves the live-interview
+WebSocket.
 """
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import RedirectResponse
+from starlette.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
-from app.api.interview import clear_context
 from app.auth import oauth, security
 from app.auth.dependencies import get_current_user, require_user
 from app.auth.service import (
@@ -36,11 +37,12 @@ from app.auth.service import (
     upsert_google_user,
 )
 from app.core.config import get_settings
-from app.core.ratelimit import rate_limit
+from app.core.ratelimit import rate_limit, rate_limit_key
 from app.db.session import get_db
 from app.models.user import User
 from app.services.email_service import send_password_reset_email
 from app.services.activity import log_event
+from app.services.interview_context import context_store
 from app.schemas.auth import (
     AuthStatus,
     ForgotPasswordRequest,
@@ -75,7 +77,7 @@ def _public(user: User) -> UserPublic:
 
 
 @router.post("/register", response_model=AuthStatus, status_code=status.HTTP_201_CREATED)
-async def register(
+def register(
     req: RegisterRequest,
     request: Request,
     response: Response,
@@ -100,13 +102,20 @@ async def register(
 
 
 @router.post("/login", response_model=AuthStatus)
-async def login(
+def login(
     req: LoginRequest,
     request: Request,
     response: Response,
     db: Session = Depends(get_db),
 ) -> AuthStatus:
     rate_limit(request, "login")
+    # Per-account throttle on top of the per-IP one: rotating (or spoofing)
+    # addresses must not allow unlimited guesses against a single account.
+    rate_limit_key(
+        "login-account",
+        (req.email or "").strip().lower(),
+        get_settings().rate_limit_per_minute,
+    )
     logger.info(
         "Login attempt (origin=%s, host=%s)",
         request.headers.get("origin", "-"),
@@ -135,7 +144,7 @@ async def login(
 
 
 @router.post("/logout", response_model=MessageResponse)
-async def logout(
+def logout(
     request: Request,
     response: Response,
     db: Session = Depends(get_db),
@@ -152,14 +161,14 @@ async def logout(
         user_id = security.read_session_token(token)
         if user_id is not None:
             revoke_session_token(db, token)
-            clear_context(user_id)
+            context_store.clear(user_id)
             logger.info("Logout succeeded (user_id=%s)", user_id)
     security.clear_session_cookies(response)
     return MessageResponse(message="Signed out.")
 
 
 @router.get("/me", response_model=AuthStatus)
-async def me(
+def me(
     request: Request,
     user: User | None = Depends(get_current_user),
 ) -> AuthStatus:
@@ -261,7 +270,9 @@ async def google_callback(
         logger.warning("Google OAuth failed: %s", exc)
         return _fail("google_failed")
 
-    user = upsert_google_user(
+    # Blocking DB work runs in the threadpool, off the event loop.
+    user = await run_in_threadpool(
+        upsert_google_user,
         db,
         subject=identity.subject,
         email=identity.email,
@@ -271,7 +282,7 @@ async def google_callback(
 
     redirect = RedirectResponse(f"{frontend}/dashboard", status_code=status.HTTP_302_FOUND)
     security.set_session_cookies(redirect, user.id)
-    log_event("user_login", user.id)
+    await run_in_threadpool(log_event, "user_login", user.id)
     # Clear the one-time state cookie.
     redirect.delete_cookie(security.OAUTH_STATE_COOKIE, path="/")
     return redirect
@@ -281,12 +292,16 @@ async def google_callback(
 
 
 @router.post("/forgot-password", response_model=MessageResponse)
-async def forgot_password(
+def forgot_password(
     req: ForgotPasswordRequest,
     request: Request,
     db: Session = Depends(get_db),
 ) -> MessageResponse:
     rate_limit(request, "forgot")
+    # Per-address throttle: stops a mail-bombing loop against one inbox.
+    rate_limit_key(
+        "forgot-account", req.email.strip().lower(), get_settings().rate_limit_per_minute
+    )
     user = get_user_by_email(db, req.email)
     if user is not None and user.is_active:
         raw = create_reset_token(db, user)
@@ -297,21 +312,26 @@ async def forgot_password(
         emailed = send_password_reset_email(user.email, link)
         if emailed:
             logger.info("Password reset link emailed (user_id=%s)", user.id)
+        elif settings.is_production:
+            # The link is a live credential: never write it to production logs
+            # (log retention / log-search access would turn into account takeover).
+            logger.error(
+                "Password reset link NOT emailed (user_id=%s). Check SMTP_* settings.",
+                user.id,
+            )
         else:
-            # SMTP unconfigured or failed: keep the local-dev escape hatch —
-            # full link in the server log — so testing is never blocked.
+            # Local-dev escape hatch: full link in the server log so testing
+            # is never blocked when SMTP is not configured.
             logger.info(
                 "Password reset link generated (user_id=%s, emailed=False): %s",
                 user.id, link,
             )
     # Always the same response — never reveal whether the email exists.
     return MessageResponse(message=_GENERIC_FORGOT)
-    # Always the same response — never reveal whether the email exists.
-    return MessageResponse(message=_GENERIC_FORGOT)
 
 
 @router.post("/reset-password", response_model=MessageResponse)
-async def reset_password(
+def reset_password(
     req: ResetPasswordRequest,
     request: Request,
     db: Session = Depends(get_db),
@@ -327,19 +347,14 @@ async def reset_password(
 
 
 @router.get("/csrf", response_model=MessageResponse)
-async def csrf_bootstrap(response: Response, user: User = Depends(require_user)) -> MessageResponse:
-    """Issue a fresh CSRF cookie for an authenticated session (e.g. after reload)."""
-    token = security.new_csrf_token()
-    settings = get_settings()
-    response.set_cookie(
-        security.CSRF_COOKIE,
-        token,
-        max_age=settings.session_max_age,
-        httponly=False,
-        secure=settings.cookie_secure,
-        samesite=settings.cookie_samesite,
-        path="/",
-    )
+def csrf_bootstrap(response: Response, user: User = Depends(require_user)) -> MessageResponse:
+    """Issue a fresh CSRF cookie for an authenticated session (e.g. after reload).
+
+    Uses the SAME attributes as the login-time cookie (SameSite/Domain); the
+    previous hand-rolled call used a different SameSite in production, which
+    left two competing ``aia_csrf`` cookies in the browser.
+    """
+    security.set_csrf_cookie(response)
     return MessageResponse(message="ok")
 
 
@@ -347,7 +362,7 @@ async def csrf_bootstrap(response: Response, user: User = Depends(require_user))
 
 
 @router.post("/ws-ticket", response_model=WsTicketResponse)
-async def ws_ticket(user: User = Depends(require_user)) -> WsTicketResponse:
+def ws_ticket(user: User = Depends(require_user)) -> WsTicketResponse:
     """Mint a short-lived ticket for the live-interview WebSocket.
 
     Why this exists

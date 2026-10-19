@@ -1,3 +1,4 @@
+import { TestBed } from '@angular/core/testing';
 import { InterviewWsService } from './interview-ws.service';
 
 /**
@@ -106,7 +107,7 @@ describe('InterviewWsService keepalive', () => {
   };
 
   it('pings on a ~30s cadence while the socket is open', async () => {
-    const svc = new InterviewWsService();
+    const svc = TestBed.runInInjectionContext(() => new InterviewWsService());
     const ws = await connect(svc);
 
     // No keepalive before the handshake completes.
@@ -125,7 +126,7 @@ describe('InterviewWsService keepalive', () => {
   });
 
   it('does not ping once the socket has closed', async () => {
-    const svc = new InterviewWsService();
+    const svc = TestBed.runInInjectionContext(() => new InterviewWsService());
     const ws = await connect(svc);
 
     ws.onopen!();
@@ -143,7 +144,7 @@ describe('InterviewWsService keepalive', () => {
   });
 
   it('stops keepalive on disconnect', async () => {
-    const svc = new InterviewWsService();
+    const svc = TestBed.runInInjectionContext(() => new InterviewWsService());
     const ws = await connect(svc);
 
     ws.onopen!();
