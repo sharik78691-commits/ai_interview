@@ -17,6 +17,16 @@ test('reload of the app folder without a route lands on the default screen', () 
   assert.equal(recoverableFolderHash(folderUrl(), INDEX), DEFAULT_HASH);
 });
 
+test('desktop build keeps the address on index.html so a reload never hits the folder (black screen)', () => {
+  const angular = require('../../angular.json');
+  const project = Object.values(angular.projects)[0];
+  const href = project.architect.build.configurations.electron.baseHref;
+  assert.equal(href, './index.html');
+  // Angular's hash router resolves '#/route' against the base URL.
+  const base = pathToFileURL(INDEX).href;
+  assert.equal(new URL('#/interview', base).href, base + '#/interview');
+});
+
 test('other failed loads are left alone (no reload loop, no hijacking)', () => {
   assert.equal(recoverableFolderHash(pathToFileURL(INDEX).href + '#/interview', INDEX), null);
   assert.equal(recoverableFolderHash('https://www.oyeinterview.com/#/interview', INDEX), null);

@@ -171,7 +171,10 @@ function createMainWindow() {
   mainWindow.webContents.on('did-fail-load', (_event, _code, _desc, url, isMainFrame) => {
     if (!isMainFrame) return;
     const hash = recoverableFolderHash(url, INDEX_HTML);
-    if (hash) loadDesktopApp(hash);
+    // Defer: navigating from inside did-fail-load left the window unpainted
+    // (black) on Windows. The electron build's <base href="./index.html">
+    // keeps the address on index.html, so this is only a safety net now.
+    if (hash) setImmediate(() => loadDesktopApp(hash));
   });
   mainWindow.webContents.on('did-navigate', bounceOffOldSite);
   mainWindow.webContents.on('did-redirect-navigation', bounceOffOldSite);
