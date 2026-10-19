@@ -1,6 +1,8 @@
 """Concrete STT providers.
 
 - GroqWhisperSTTProvider: real transcription (whisper-large-v3-turbo).
+- GeminiTranscribeSTTProvider / GeminiLiveSTTProvider: Google Gemini models
+  (native generateContent / Live API WebSocket).
 - MockSTTProvider: used when no STT credentials exist, so the UI still works
   and can explain that transcription is unavailable.
 """
@@ -377,11 +379,179 @@ class GeminiTranscribeSTTProvider(STTProvider):
         raise STTRequestError(last_error or "Transcription failed.")
 
 
+GEMINI_LIVE_URL = (
+    "wss://generativelanguage.googleapis.com/ws/"
+    "google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
+)
+# 100 ms of 16-bit mono audio per realtimeInput message (at the clip's rate).
+_LIVE_CHUNK_SECONDS = 0.1
+# WebSocket close codes that mean "transient — try again".
+_LIVE_RETRY_CLOSE_CODES = {1011, 1012, 1013, 1014}
+
+
+def wav_to_pcm16_mono(audio_bytes: bytes) -> tuple[bytes, int] | None:
+    """(raw PCM, sample rate) for a 16-bit mono WAV clip, else None."""
+    import io
+    import wave
+
+    try:
+        with wave.open(io.BytesIO(audio_bytes), "rb") as w:
+            if w.getnchannels() != 1 or w.getsampwidth() != 2 or w.getcomptype() != "NONE":
+                return None
+            return w.readframes(w.getnframes()), w.getframerate()
+    except (wave.Error, EOFError):
+        return None
+
+
+def _live_connect(api_key: str):
+    """Open the Live API socket (separate so tests can swap it out).
+
+    The key goes in a header, never the URL, so it cannot leak via logs.
+    """
+    from websockets.asyncio.client import connect
+
+    return connect(
+        GEMINI_LIVE_URL,
+        additional_headers={"x-goog-api-key": api_key},
+        max_size=None,
+        open_timeout=10,
+    )
+
+
+class GeminiLiveSTTProvider(STTProvider):
+    """Transcription via Google's Gemini Live API (bidiGenerateContent).
+
+    `gemini-3.5-transcribe-live` ONLY exposes bidiGenerateContent (a WebSocket
+    stream), not generateContent. Each clip opens one Live session: the WAV's
+    16-bit mono PCM is streamed as realtimeInput, then audioStreamEnd. The
+    server answers with provisional `interimInputTranscription` updates and a
+    final `inputTranscription`; only FINAL text is returned, so a provisional
+    transcript can never be treated as the question.
+
+    Clips that are not 16-bit mono WAV (e.g. the WebM fallback) are sent to
+    the non-live Gemini Transcribe model instead, so no clip is dropped.
+    """
+
+    name = "gemini-live"
+
+    def __init__(self, api_key: str = "", model: str = "") -> None:
+        settings = get_settings()
+        self.api_key = api_key or settings.gemini_api_key
+        self.model = model or settings.stt_model_4
+
+    @property
+    def available(self) -> bool:
+        return bool(self.api_key)
+
+    async def transcribe(
+        self,
+        audio_bytes: bytes,
+        filename: str = "audio.wav",
+        mime_type: str = "audio/wav",
+    ) -> str:
+        if not self.available:
+            raise STTUnavailableError(
+                "No Google Gemini credentials configured (set GEMINI_API_KEY in backend/.env)."
+            )
+        if not audio_bytes:
+            return ""
+        decoded = wav_to_pcm16_mono(audio_bytes)
+        if decoded is None:
+            logger.info("STT (gemini-live): %s clip is not PCM WAV, using %s", mime_type, get_settings().stt_model_3)
+            return await GeminiTranscribeSTTProvider(api_key=self.api_key).transcribe(
+                audio_bytes, filename=filename, mime_type=mime_type
+            )
+        pcm, rate = decoded
+        if not pcm:
+            return ""
+
+        logger.info(
+            "STT request (gemini-live): %d bytes PCM @ %d Hz, model=%s", len(pcm), rate, self.model
+        )
+        t0 = time.perf_counter()
+        last_error = ""
+        for attempt in range(MAX_ATTEMPTS):
+            try:
+                text = await asyncio.wait_for(
+                    self._session(pcm, rate), timeout=REQUEST_TIMEOUT_SECONDS
+                )
+                logger.info(
+                    "STT ok (gemini-live): %d chars in %.2fs", len(text), time.perf_counter() - t0
+                )
+                return text
+            except STTRequestError:
+                raise
+            except Exception as exc:  # network, timeout, transient close
+                code = getattr(getattr(exc, "rcvd", None), "code", None)
+                reason = str(getattr(getattr(exc, "rcvd", None), "reason", "") or "")
+                logger.warning(
+                    "STT failed (gemini-live) attempt %s/%s: %s %s",
+                    attempt + 1,
+                    MAX_ATTEMPTS,
+                    type(exc).__name__,
+                    (reason or str(exc))[:200].replace(self.api_key, "[redacted]"),
+                )
+                if code == 1008 or "api key" in reason.lower():
+                    raise STTRequestError(
+                        "Speech-to-text authentication failed — check GEMINI_API_KEY in backend/.env."
+                    ) from None
+                if code is not None and code not in _LIVE_RETRY_CLOSE_CODES:
+                    raise STTRequestError(
+                        f"Transcription failed (Live API closed: {reason[:120] or code})."
+                    ) from None
+                last_error = "Speech-to-text service error. Try again in a moment."
+                if attempt < MAX_ATTEMPTS - 1:
+                    await asyncio.sleep(BACKOFF_SECONDS[min(attempt, len(BACKOFF_SECONDS) - 1)])
+        raise STTRequestError(last_error or "Transcription failed.")
+
+    async def _session(self, pcm: bytes, rate: int) -> str:
+        """One Live session: setup -> stream PCM -> collect FINAL transcription."""
+        import base64
+        import json
+
+        async with _live_connect(self.api_key) as ws:
+            await ws.send(
+                json.dumps({"setup": {"model": f"models/{self.model}", "inputAudioTranscription": {}}})
+            )
+            first = json.loads(await ws.recv())
+            if "setupComplete" not in first:
+                raise STTRequestError("Transcription failed (Live API setup was not accepted).")
+
+            chunk = max(2, int(rate * _LIVE_CHUNK_SECONDS) * 2)
+            mime = f"audio/pcm;rate={rate}"
+            for i in range(0, len(pcm), chunk):
+                await ws.send(
+                    json.dumps(
+                        {
+                            "realtimeInput": {
+                                "audio": {
+                                    "data": base64.b64encode(pcm[i : i + chunk]).decode(),
+                                    "mimeType": mime,
+                                }
+                            }
+                        }
+                    )
+                )
+            await ws.send(json.dumps({"realtimeInput": {"audioStreamEnd": True}}))
+
+            finals: list[str] = []
+            async for raw in ws:
+                msg = json.loads(raw)
+                content = msg.get("serverContent") or {}
+                # interimInputTranscription is provisional and deliberately ignored.
+                final = (content.get("inputTranscription") or {}).get("text")
+                if final:
+                    finals.append(str(final).strip())
+                if content.get("generationComplete") or content.get("turnComplete"):
+                    break
+            return " ".join(t for t in finals if t).strip()
+
+
 def get_stt_provider() -> STTProvider:
     """Pick the enabled+default STT provider, or mock when none is usable.
 
-    Three models are offered (Groq Whisper + OpenAI gpt-4o-mini-transcribe +
-    Google Gemini 3.5 Transcribe).
+    Four models are offered (Groq Whisper + OpenAI gpt-4o-mini-transcribe +
+    Google Gemini 3.5 Transcribe + Google Gemini 3.5 Transcribe Live).
     Admin can enable/disable either and set a default via the ai_model_config
     table (see /api/admin/stt-models). A model is used only when it is enabled
     AND its provider key is present.
@@ -396,8 +566,11 @@ def get_stt_provider() -> STTProvider:
         enabled = ov.enabled if ov else True
         if not enabled or not sp["api_key"]:
             continue
-        # Gemini transcription uses the native generateContent API; everything
-        # else rides the OpenAI-compatible /audio/transcriptions path.
+        # Gemini transcription uses the native generateContent API (or the
+        # Live WebSocket API); everything else rides the OpenAI-compatible
+        # /audio/transcriptions path.
+        if sp.get("api_style") == "gemini_live":
+            return GeminiLiveSTTProvider(api_key=sp["api_key"], model=sp["model_id"])
         if sp.get("api_style") == "gemini_native":
             return GeminiTranscribeSTTProvider(
                 api_key=sp["api_key"], base_url=sp["base_url"], model=sp["model_id"]
@@ -443,6 +616,16 @@ def _stt_specs() -> list[dict]:
             # gemini-3.5-transcribe only exposes the native generateContent
             # method (not the OpenAI /audio/transcriptions path).
             "api_style": "gemini_native",
+        },
+        {
+            "key": "gemini-3.5-transcribe-live",
+            "provider": "Google",
+            "display_name": "Gemini 3.5 Transcribe Live — Google",
+            "model_id": s.stt_model_4,
+            "base_url": GEMINI_LIVE_URL,
+            "api_key": s.gemini_api_key,
+            # Only exposes bidiGenerateContent (Live API over a WebSocket).
+            "api_style": "gemini_live",
         },
     ]
 
@@ -498,7 +681,7 @@ def active_stt_model() -> str | None:
     provider = get_stt_provider()
     if isinstance(provider, MockSTTProvider):
         return None
-    # Both real providers (OpenAI-compat + Gemini native) expose `.model`.
+    # Every real provider (OpenAI-compat, Gemini native, Gemini Live) exposes `.model`.
     if provider.available and hasattr(provider, "model"):
         return provider.model
     return None

@@ -28,6 +28,9 @@ python-docx>=1.1
 
 # --- HTTP client (LLM + STT + Google OAuth calls) ---
 httpx>=0.27
+# WebSocket client for the Gemini Live STT model (gemini-3.5-transcribe-live).
+# Also pulled in by uvicorn[standard]; pinned so the asyncio client API exists.
+websockets>=14
 
 # --- Authentication / persistence ---
 # SQLAlchemy 2.x ORM. SQLite for local dev, PostgreSQL in production.

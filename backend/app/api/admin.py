@@ -26,9 +26,8 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from app.auth.dependencies import require_admin, require_csrf
+from app.auth.dependencies import require_admin, require_admin_rate_limited, require_csrf
 from app.core.config import get_settings
-from app.core.ratelimit import rate_limit
 from app.db.session import get_db
 from app.models.activity_log import ANALYZE, LLM_USAGE, PREPARE, ActivityLog
 from app.models.user import User
@@ -57,7 +56,13 @@ from app.schemas.admin import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/admin", tags=["admin"])
+# Every /admin route: admin only + per-admin-user rate limit (see
+# require_admin_rate_limited). Applied once here so no endpoint can miss it.
+router = APIRouter(
+    prefix="/admin",
+    tags=["admin"],
+    dependencies=[Depends(require_admin_rate_limited)],
+)
 
 _DEFAULT_DAYS = 30
 _MAX_DAYS = 365
@@ -135,7 +140,6 @@ def stats(
     from_date: str | None = Query(default=None, alias="from", max_length=10),
     to_date: str | None = Query(default=None, alias="to", max_length=10),
 ) -> AdminStats:
-    rate_limit(request, "admin")
     d0, d1 = _parse_range(from_date, to_date)
 
     users = db.scalars(select(User)).all()
@@ -248,7 +252,6 @@ def business(
 ) -> dict:
     """Owner-level business report: growth, funnel, retention, segments,
     usage heatmap, AI reliability, who to contact, and ranked next actions."""
-    rate_limit(request, "admin")
     d0, d1 = _parse_range(from_date, to_date)
     users = [
         UserRow(
@@ -285,7 +288,6 @@ def ai_costs(
     Demo-seeded users (``@demo.oyeinterview.test``) are excluded unless
     ``include_demo`` so seeded sample data never pollutes real spend.
     """
-    rate_limit(request, "admin")
     demo_ids: set[int] = set()
     if not include_demo:
         demo_ids = set(
@@ -314,7 +316,6 @@ def list_users(
     page_size: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
 ) -> AdminUsersPage:
-    rate_limit(request, "admin")
     stmt = select(User)
     needle = (q or "").strip()
     if needle:
@@ -339,7 +340,6 @@ def set_active(
     db: Session = Depends(get_db),
     _csrf: None = Depends(require_csrf),
 ) -> AdminUserRow:
-    rate_limit(request, "admin")
     if body.is_active is None and body.is_admin is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Nothing to update."
@@ -396,7 +396,6 @@ def export_users(
     db: Session = Depends(get_db),
 ) -> StreamingResponse:
     """Download the whole user list as CSV (opens in Excel/Sheets)."""
-    rate_limit(request, "admin")
     users = db.scalars(select(User).order_by(User.id)).all()
     buf = io.StringIO()
     writer = csv.writer(buf)
@@ -442,7 +441,6 @@ def list_ai_models_admin(
     db: Session = Depends(get_db),
 ) -> dict:
     """Model catalog + provider health/error stats (no secrets)."""
-    rate_limit(request, "admin")
     return {
         "models": registry.list_models(),
         "default": registry.default_model_key(),
@@ -461,7 +459,6 @@ def update_ai_model(
 ) -> dict:
     """Update admin-editable model flags. ``key`` is validated against the
     server allowlist — arbitrary/executable config can never be injected."""
-    rate_limit(request, "admin")
     try:
         registry.get_model(key)  # raises ValueError for unknown keys
     except ValueError as exc:
@@ -483,7 +480,6 @@ def list_stt_models_admin(
     _admin: User = Depends(require_admin),
 ) -> dict:
     """STT model catalog + active transcription model (no secrets)."""
-    rate_limit(request, "admin")
     return {
         "models": list_stt_models(),
         "default": default_stt_key(),
@@ -501,7 +497,6 @@ def update_stt_model(
     _csrf: None = Depends(require_csrf),
 ) -> dict:
     """Enable/disable a speech-to-text model or change the STT default."""
-    rate_limit(request, "admin")
     valid_keys = {m["key"] for m in list_stt_models()}
     if key not in valid_keys:
         raise HTTPException(status_code=404, detail=f"unknown STT model '{key}'")

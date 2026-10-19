@@ -96,6 +96,9 @@ class Settings:
         self.stt_model_2: str = os.getenv("STT_MODEL_2", "gpt-4o-mini-transcribe")
         # Third STT model (Google's Gemini 3.5 Transcribe).
         self.stt_model_3: str = os.getenv("STT_MODEL_3", "gemini-3.5-transcribe")
+        # Fourth STT model (Google's Gemini 3.5 Transcribe Live — streaming
+        # Live API / bidiGenerateContent over a WebSocket; uses GEMINI_API_KEY).
+        self.stt_model_4: str = os.getenv("STT_MODEL_4", "") or "gemini-3.5-transcribe-live"
         # Server-side STT only. Browsers cannot transcribe tab/meeting audio
         # locally, so that audio is streamed to the backend for transcription.
         # Defaults to the LLM endpoint (Groq serves Whisper on the same base URL).
@@ -240,6 +243,15 @@ class Settings:
             )
         except ValueError:
             self.ai_rate_limit_per_minute = 30
+        # Per-ADMIN-USER cap on /api/admin/* (dashboard reads + admin actions).
+        # The admin page fires several requests per load and polls costs, so
+        # it must not share the tiny per-IP login limit above.
+        try:
+            self.admin_rate_limit_per_minute: int = int(
+                os.getenv("ADMIN_RATE_LIMIT_PER_MINUTE", "120")
+            )
+        except ValueError:
+            self.admin_rate_limit_per_minute = 120
         # Number of reverse proxies in front of the app that APPEND to
         # X-Forwarded-For. 0 (default) keeps the legacy behaviour (left-most
         # entry). Set it to the real hop count (e.g. 2 for Vercel -> Render) so
