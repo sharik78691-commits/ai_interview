@@ -15,6 +15,7 @@ def test_prepare_requires_auth(client):
     r = client.post(
         "/api/interview/prepare",
         json={"resumeText": RESUME, "jobDescription": JOB},
+        headers=csrf_headers(client),
     )
     assert r.status_code == 401
 
@@ -41,9 +42,14 @@ def test_authenticated_prepare_and_analyze(client):
     r = client.post(
         "/api/interview/prepare",
         json={"resumeText": RESUME, "jobDescription": JOB},
+        headers=csrf_headers(client),
     )
     assert r.status_code == 200
-    r2 = client.post("/api/interview/analyze", json={"question": "Explain REST."})
+    r2 = client.post(
+        "/api/interview/analyze",
+        json={"question": "Explain REST."},
+        headers=csrf_headers(client),
+    )
     assert r2.status_code == 200
     assert r2.json()["answerPoints"]
 
@@ -55,6 +61,7 @@ def test_cross_user_context_isolation(client):
     client.post(
         "/api/interview/prepare",
         json={"resumeText": RESUME, "jobDescription": JOB},
+        headers=csrf_headers(client),
     )
     assert client.get("/api/interview/context").json()["hasContext"] is True
 
@@ -90,6 +97,7 @@ def test_ws_authenticated_analyze_flow(client):
     client.post(
         "/api/interview/prepare",
         json={"resumeText": RESUME, "jobDescription": JOB},
+        headers=csrf_headers(client),
     )
     with client.websocket_connect("/ws/interview") as ws:
         ws.receive_json()  # initial status

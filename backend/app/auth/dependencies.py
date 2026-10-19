@@ -22,13 +22,17 @@ def get_current_user(
     db: Session = Depends(get_db),
 ) -> User | None:
     """Return the authenticated user or None (does not raise)."""
-    user_id = security.get_session_user_id(request)
-    if user_id is None:
+    token = request.cookies.get(security.SESSION_COOKIE)
+    payload = security.read_session_payload(token) if token else None
+    if payload is None:
         return None
-    if is_session_token_revoked(db, request.cookies[security.SESSION_COOKIE]):
+    user_id, issued_at = payload
+    if is_session_token_revoked(db, token):
         return None
     user = get_user_by_id(db, user_id)
     if user is None or not user.is_active:
+        return None
+    if security.session_issued_before_revocation(issued_at, user.sessions_revoked_at):
         return None
     return user
 

@@ -1,6 +1,6 @@
-// Model catalog for screenshot analysis. Add a new entry (and, if the provider
-// is new, an adapter in analysis.js `ADAPTERS`) to support another model — no
-// other module hardcodes a model name.
+// Model catalog for screenshot analysis. The model itself runs on the backend
+// (SCREENSHOT_MODEL / GEMINI_API_KEY in the server .env); this entry only
+// carries the display name and the client-side upload limits.
 const MB = 1024 * 1024;
 
 const MODELS = [
@@ -10,13 +10,13 @@ const MODELS = [
     adapter: 'gemini',
     displayName: 'Gemini 3.5 Flash Lite',
     modelId: 'gemini-3.5-flash-lite',
-    // Conservative client-side caps. Gemini accepts far more images per request
-    // but inline requests are capped at ~20 MB total (base64 adds ~33%), so the
-    // raw-bytes budget below keeps the encoded request safely under that.
+    // Must match backend app/services/screenshot_service.py: requests go
+    // through the Vercel /api rewrite (~4.5 MB body cap) and base64 adds ~33%,
+    // so ~3 MB of image bytes per analysis keeps the body under that.
     limits: {
-      maxImages: 16,
-      maxImageBytes: 7 * MB,
-      maxTotalBytes: 14 * MB,
+      maxImages: 10,
+      maxImageBytes: 3 * MB,
+      maxTotalBytes: 3 * MB,
       minDimension: 32,
       maxDimension: 8192,
     },

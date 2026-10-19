@@ -18,11 +18,12 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import Response
-from sqlalchemy import select
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
-from app.auth.dependencies import require_user
+from app.auth.dependencies import require_user, require_user_csrf
 from app.core.config import get_settings
+from app.core.ratelimit import rate_limit_key
 from app.db.session import get_db
 from app.models.resume import (
     FromTextRequest,
@@ -33,6 +34,7 @@ from app.models.resume import (
 )
 from app.models.resume_record import ResumeRecord
 from app.models.user import User
+from app.repositories.owned_library import OwnedLibraryRepository
 from app.services.resume_service import ResumeService
 
 logger = logging.getLogger(__name__)
@@ -41,8 +43,12 @@ router = APIRouter()
 _service = ResumeService()
 
 # A library holds at most this many resumes per user; storing one more
-# auto-deletes the oldest (see _prune_old_resumes).
+# auto-deletes the oldest (see OwnedLibraryRepository.prune).
 MAX_RESUMES_PER_USER = 4
+_repo = OwnedLibraryRepository(ResumeRecord, MAX_RESUMES_PER_USER, "Resume")
+# Upload is read in chunks so an oversized body is rejected after
+# max+1 bytes instead of being buffered whole in memory first.
+_READ_CHUNK = 1024 * 1024
 
 _DOWNLOAD_MEDIA = {
     ".pdf": "application/pdf",
@@ -92,67 +98,53 @@ def _detail(record: ResumeRecord) -> ResumeDetail:
 
 
 def _get_owned(db: Session, user_id: int, resume_id: int) -> ResumeRecord:
-    record = db.scalar(
-        select(ResumeRecord).where(
-            ResumeRecord.id == resume_id, ResumeRecord.user_id == user_id
-        )
-    )
+    record = _repo.get_owned(db, user_id, resume_id)
     if record is None:
         raise HTTPException(status_code=404, detail="Resume not found.")
     return record
 
 
-def _prune_old_resumes(db: Session, user_id: int) -> None:
-    """Keep only the newest MAX_RESUMES_PER_USER rows; auto-delete the rest.
+async def _read_capped(file: UploadFile, max_bytes: int) -> bytes:
+    """Read at most ``max_bytes + 1`` bytes (enough to detect "too large")."""
+    chunks: list[bytes] = []
+    total = 0
+    while total <= max_bytes:
+        chunk = await file.read(min(_READ_CHUNK, max_bytes + 1 - total))
+        if not chunk:
+            break
+        chunks.append(chunk)
+        total += len(chunk)
+    return b"".join(chunks)
 
-    Runs after every successful store, so the library never grows past the
-    limit. If a deleted row was somehow the active one, the newest remaining
-    row takes over so the library is never left without an active resume.
-    """
-    rows = db.scalars(
-        select(ResumeRecord)
-        .where(ResumeRecord.user_id == user_id)
-        .order_by(ResumeRecord.id.desc())
-    ).all()
-    doomed = rows[MAX_RESUMES_PER_USER:]
-    if not doomed:
-        return
-    active_deleted = any(r.is_active for r in doomed)
-    for r in doomed:
-        db.delete(r)
-    if active_deleted and len(rows) > len(doomed):
-        rows[0].is_active = True
-    db.commit()
-    logger.info(
-        "Resume auto-prune: user=%s deleted=%d (kept newest %d)",
-        user_id, len(doomed), MAX_RESUMES_PER_USER,
-    )
+
+def _extract_and_parse(filename: str, content: bytes):
+    """CPU-bound PDF/DOCX parsing — run in the threadpool, not the event loop."""
+    text = _service.extract_text_sync(filename, content)
+    return text, _service.parse_resume(text)
 
 
 @router.post("/resume/upload", response_model=ResumeUploadResponse)
 async def upload_resume(
     file: UploadFile = File(...),
-    user: User = Depends(require_user),
+    user: User = Depends(require_user_csrf),
     db: Session = Depends(get_db),
 ) -> ResumeUploadResponse:
     # Identity comes from the session; the stored resume is visible only to
     # the caller (user_id is set from the session, never from input).
+    rate_limit_key("resume-upload", str(user.id), get_settings().ai_rate_limit_per_minute)
     filename = file.filename or "upload"
     try:
-        content = await file.read()
         settings = get_settings()
         max_bytes = settings.max_upload_mb * 1024 * 1024
+        content = await _read_capped(file, max_bytes)
         if len(content) > max_bytes:
             logger.warning(
                 "Resume upload rejected: file too large (%d bytes, max %d) user=%s file=%s",
                 len(content), max_bytes, user.id, filename,
             )
-            raise ValueError(
-                f"File too large ({len(content)} bytes). Max is {max_bytes} bytes."
-            )
+            raise ValueError(f"File too large. Max is {max_bytes} bytes.")
         _service.validate_file(filename, len(content))
-        text = await _service.extract_text(filename, content)
-        resume = _service.parse_resume(text)
+        text, resume = await run_in_threadpool(_extract_and_parse, filename, content)
     except ValueError as exc:
         # Expected failure (unsupported type, too large, unparseable) — log the
         # reason so support can distinguish a real bug from a user error.
@@ -169,24 +161,20 @@ async def upload_resume(
         raise HTTPException(status_code=500, detail="Could not process the uploaded file.")
     # The newest upload becomes the active resume for interviews; older ones
     # stay stored and can be re-selected at any time.
-    db.query(ResumeRecord).filter(ResumeRecord.user_id == user.id).update(
-        {ResumeRecord.is_active: False}
+    record = await run_in_threadpool(
+        _repo.add_active,
+        db,
+        ResumeRecord(
+            user_id=user.id,
+            user_email=user.email,
+            filename=filename,
+            extension=f".{filename.rsplit('.', 1)[-1].lower()}" if "." in filename else "",
+            size_bytes=len(content),
+            file_data=content,
+            raw_text=text,
+            parsed_json=resume.model_dump_json(),
+        ),
     )
-    record = ResumeRecord(
-        user_id=user.id,
-        user_email=user.email,
-        filename=filename,
-        extension=f".{filename.rsplit('.', 1)[-1].lower()}" if "." in filename else "",
-        size_bytes=len(content),
-        file_data=content,
-        raw_text=text,
-        parsed_json=resume.model_dump_json(),
-        is_active=True,
-    )
-    db.add(record)
-    db.commit()
-    db.refresh(record)
-    _prune_old_resumes(db, user.id)
     logger.info(
         "Resume stored: user=%s resume_id=%s file=%s extracted_chars=%d",
         user.id, record.id, filename, len(text),
@@ -198,9 +186,9 @@ async def upload_resume(
 
 
 @router.post("/resumes/from-text", response_model=ResumeDetail, status_code=201)
-async def create_from_text(
+def create_from_text(
     body: FromTextRequest,
-    user: User = Depends(require_user),
+    user: User = Depends(require_user_csrf),
     db: Session = Depends(get_db),
 ) -> ResumeDetail:
     """Store pasted/typed editor text as a resume (becomes active).
@@ -215,24 +203,19 @@ async def create_from_text(
         f"Pasted resume - {datetime.now(timezone.utc).date().isoformat()}.txt"
     )
     content = text.encode("utf-8")
-    db.query(ResumeRecord).filter(ResumeRecord.user_id == user.id).update(
-        {ResumeRecord.is_active: False}
+    record = _repo.add_active(
+        db,
+        ResumeRecord(
+            user_id=user.id,
+            user_email=user.email,
+            filename=filename,
+            extension=".txt",
+            size_bytes=len(content),
+            file_data=content,
+            raw_text=text,
+            parsed_json=resume.model_dump_json(),
+        ),
     )
-    record = ResumeRecord(
-        user_id=user.id,
-        user_email=user.email,
-        filename=filename,
-        extension=".txt",
-        size_bytes=len(content),
-        file_data=content,
-        raw_text=text,
-        parsed_json=resume.model_dump_json(),
-        is_active=True,
-    )
-    db.add(record)
-    db.commit()
-    db.refresh(record)
-    _prune_old_resumes(db, user.id)
     logger.info(
         "Resume saved from text: user=%s resume_id=%s chars=%d",
         user.id, record.id, len(text),
@@ -241,20 +224,15 @@ async def create_from_text(
 
 
 @router.get("/resumes", response_model=list[ResumeRow])
-async def list_resumes(
+def list_resumes(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> list[ResumeRow]:
-    rows = db.scalars(
-        select(ResumeRecord)
-        .where(ResumeRecord.user_id == user.id)
-        .order_by(ResumeRecord.id.desc())
-    ).all()
-    return [_row(r) for r in rows]
+    return [_row(r) for r in _repo.list_for_user(db, user.id)]
 
 
 @router.get("/resumes/{resume_id}", response_model=ResumeDetail)
-async def get_resume(
+def get_resume(
     resume_id: int,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
@@ -263,7 +241,7 @@ async def get_resume(
 
 
 @router.get("/resumes/{resume_id}/download")
-async def download_resume(
+def download_resume(
     resume_id: int,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
@@ -291,22 +269,17 @@ async def download_resume(
 
 
 @router.patch("/resumes/{resume_id}", response_model=ResumeDetail)
-async def update_resume(
+def update_resume(
     resume_id: int,
     body: ResumeUpdateRequest,
-    user: User = Depends(require_user),
+    user: User = Depends(require_user_csrf),
     db: Session = Depends(get_db),
 ) -> ResumeDetail:
     if body.is_active is None and body.raw_text is None:
         raise HTTPException(status_code=400, detail="Nothing to update.")
     record = _get_owned(db, user.id, resume_id)
-    if body.is_active is True:
-        db.query(ResumeRecord).filter(ResumeRecord.user_id == user.id).update(
-            {ResumeRecord.is_active: False}
-        )
-        record.is_active = True
-    elif body.is_active is False:
-        record.is_active = False
+    if body.is_active is not None:
+        _repo.set_active(db, record, body.is_active)
     if body.raw_text is not None:
         record.raw_text = body.raw_text
         # Re-parse so skills/sections stay in sync with the corrected text.
@@ -327,25 +300,13 @@ async def update_resume(
 
 
 @router.delete("/resumes/{resume_id}")
-async def delete_resume(
+def delete_resume(
     resume_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_user_csrf),
     db: Session = Depends(get_db),
 ) -> dict:
-    record = _get_owned(db, user.id, resume_id)
-    was_active = record.is_active
-    db.delete(record)
-    db.commit()
-    # Deleting the active resume must not leave the library without one:
-    # promote the newest remaining resume.
-    if was_active:
-        newest = db.scalar(
-            select(ResumeRecord)
-            .where(ResumeRecord.user_id == user.id)
-            .order_by(ResumeRecord.id.desc())
-        )
-        if newest is not None:
-            newest.is_active = True
-            db.commit()
+    # Deleting the active resume promotes the newest remaining one, so the
+    # library is never left without an active resume.
+    _repo.delete(db, _get_owned(db, user.id, resume_id))
     logger.info("Resume deleted: user=%s resume_id=%s", user.id, resume_id)
     return {"message": "Resume deleted."}

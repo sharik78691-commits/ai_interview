@@ -2,8 +2,6 @@ import { Routes } from '@angular/router';
 import { adminGuard, authGuard, guestGuard } from './core/auth/auth.guard';
 import { interviewGuard } from './core/guards/interview.guard';
 import { desktopOnlyGuard } from './core/screenshot/desktop-only.guard';
-import { DashboardComponent } from './features/dashboard/dashboard.component';
-import { InterviewComponent } from './features/interview/interview.component';
 import { LandingComponent } from './features/landing/landing.component';
 import { LoginComponent } from './features/auth/login/login.component';
 import { RegisterComponent } from './features/auth/register/register.component';
@@ -11,10 +9,13 @@ import { RegisterComponent } from './features/auth/register/register.component';
 /**
  * Route map.
  *
- * The landing, auth, dashboard and interview routes stay eagerly loaded —
- * they sit on the critical path (first paint + the core flow). Everything
- * else (admin, settings, legal, pricing, contact, password-recovery) is
- * lazy-loaded so the initial bundle stays small and the app starts fast.
+ * Only the landing and auth pages are eagerly loaded — they are what a first
+ * visit paints. Dashboard and interview are lazy chunks flagged
+ * `data.preload: true`: `SelectivePreloadingStrategy` (app.config.ts) fetches
+ * them in the background right after first paint, so the signed-in flow is
+ * still instant while landing-page visitors no longer download the whole
+ * live-interview pipeline up front. Everything else (admin, settings, legal,
+ * pricing, contact, password recovery) loads only on navigation.
  */
 export const routes: Routes = [
   {
@@ -91,9 +92,11 @@ export const routes: Routes = [
   // Protected application routes — kept out of the search index.
   {
     path: 'dashboard',
-    component: DashboardComponent,
+    loadComponent: () =>
+      import('./features/dashboard/dashboard.component').then((m) => m.DashboardComponent),
     canActivate: [authGuard],
     data: {
+      preload: true,
       seo: {
         title: 'Dashboard — OyeInterview',
         description: 'Your OyeInterview dashboard.',
@@ -104,9 +107,11 @@ export const routes: Routes = [
   },
   {
     path: 'interview',
-    component: InterviewComponent,
+    loadComponent: () =>
+      import('./features/interview/interview.component').then((m) => m.InterviewComponent),
     canActivate: [authGuard, interviewGuard],
     data: {
+      preload: true,
       seo: {
         title: 'Live interview — OyeInterview',
         description: 'Your live OyeInterview session.',
@@ -125,6 +130,20 @@ export const routes: Routes = [
         title: 'Settings — OyeInterview',
         description: 'Manage your OyeInterview settings.',
         path: '/settings',
+        noindex: true,
+      },
+    },
+  },
+  {
+    path: 'billing',
+    loadComponent: () =>
+      import('./features/billing/billing.component').then((m) => m.BillingComponent),
+    canActivate: [authGuard],
+    data: {
+      seo: {
+        title: 'Billing — OyeInterview',
+        description: 'Your OyeInterview plan, expiry date and payment history.',
+        path: '/billing',
         noindex: true,
       },
     },
@@ -165,15 +184,76 @@ export const routes: Routes = [
   },
   // Public legal pages — indexed for SEO.
   {
-    path: 'terms-and-conditions',
+    path: 'terms',
     loadComponent: () =>
       import('./features/legal/terms/terms.component').then((m) => m.TermsComponent),
     data: {
       seo: {
-        title: 'Terms and Conditions — OyeInterview',
+        title: 'Terms of Service — OyeInterview',
         description:
-          'The terms and conditions for OyeInterview, the real-time AI interview assistant: account eligibility, licence, responsible use, and liability.',
-        path: '/terms-and-conditions',
+          'Terms of Service for OyeInterview: accounts, prepaid plans without auto-renewal, acceptable use, AI-generated content and liability.',
+        path: '/terms',
+      },
+    },
+  },
+  // Old URL kept working for existing links and search results.
+  { path: 'terms-and-conditions', redirectTo: 'terms', pathMatch: 'full' },
+  {
+    path: 'acceptable-use',
+    loadComponent: () =>
+      import('./features/legal/acceptable-use/acceptable-use.component').then(
+        (m) => m.AcceptableUseComponent,
+      ),
+    data: {
+      seo: {
+        title: 'Acceptable Use Policy — OyeInterview',
+        description:
+          'What is and is not allowed when using OyeInterview, including following the rules of every interview process.',
+        path: '/acceptable-use',
+      },
+    },
+  },
+  // Public informational pages — indexed for SEO.
+  {
+    path: 'features',
+    loadComponent: () =>
+      import('./features/info/features-page/features-page.component').then(
+        (m) => m.FeaturesPageComponent,
+      ),
+    data: {
+      seo: {
+        title: 'Features — OyeInterview AI Interview Assistant',
+        description:
+          'Interviewer audio detection, streaming resume-aware answers, STAR outlines, code hints, resume library and prepaid plans — what OyeInterview does today.',
+        path: '/features',
+      },
+    },
+  },
+  {
+    path: 'how-it-works',
+    loadComponent: () =>
+      import('./features/info/how-it-works/how-it-works.component').then(
+        (m) => m.HowItWorksComponent,
+      ),
+    data: {
+      seo: {
+        title: 'How it works — OyeInterview',
+        description:
+          'Set up your resume and target role, share interviewer audio, and get streaming AI answer suggestions — plus where your data goes at each step.',
+        path: '/how-it-works',
+      },
+    },
+  },
+  {
+    path: 'trust',
+    loadComponent: () =>
+      import('./features/info/trust/trust.component').then((m) => m.TrustComponent),
+    data: {
+      seo: {
+        title: 'Trust & data practices — OyeInterview',
+        description:
+          'What OyeInterview stores and does not store, which providers process data, and the security controls in place.',
+        path: '/trust',
       },
     },
   },
@@ -198,7 +278,7 @@ export const routes: Routes = [
       seo: {
         title: 'Refund & Cancellation Policy — OyeInterview',
         description:
-          'How cancellations, auto-renewal, and refunds work for OyeInterview subscriptions.',
+          'How cancellations and refunds work for OyeInterview prepaid plans (no auto-renewal).',
         path: '/refund-policy',
       },
     },
@@ -211,7 +291,7 @@ export const routes: Routes = [
       seo: {
         title: 'Pricing — OyeInterview AI Interview Assistant',
         description:
-          'Simple OyeInterview pricing: 3 days ₹150, 7 days ₹300, 1 month ₹900, 3 months ₹2000. Auto-renewing, cancel anytime.',
+          'OyeInterview plans: one-time prepaid payments for a fixed number of days. No auto-renewal, no stored cards.',
         path: '/pricing',
       },
     },

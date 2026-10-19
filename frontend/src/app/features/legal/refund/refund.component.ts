@@ -8,6 +8,5 @@ import { Component } from '@angular/core';
   selector: 'app-refund',
   standalone: true,
   templateUrl: './refund.component.html',
-  styleUrl: './refund.component.css',
 })
 export class RefundComponent {}

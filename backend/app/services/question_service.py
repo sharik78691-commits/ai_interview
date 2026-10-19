@@ -25,7 +25,6 @@ finished utterance is CLASSIFIED instead:
 """
 import re
 import time
-from typing import Optional
 
 ANSWER = "answer"
 PARTIAL = "partial"

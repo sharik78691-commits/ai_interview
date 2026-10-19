@@ -43,16 +43,13 @@ export function installDesktopBridge(overrides: Partial<ScreenshotBridge> = {}) 
       ok: true,
       models: FALLBACK_MODELS,
       defaultModel: DEFAULT_SCREENSHOT_MODEL_KEY,
-      keyStored: { google: true },
-      encryptionAvailable: true,
+      serverReady: true,
     }),
     listSources: async () => ({
       ok: true,
       sources: [{ id: 'screen:1:0', name: 'Entire Screen', kind: 'screen', thumbnail: 'data:image/png;base64,AAAA' }],
     }),
     capture: async () => ({ ok: true, image: shot() }),
-    setKey: async () => ({ ok: true }),
-    clearKey: async () => ({ ok: true }),
     analyze: async () => ({ ok: true, result: RESULT, model: 'Gemini 3.5 Flash Lite' }),
     ...overrides,
   };
@@ -153,8 +150,7 @@ describe('model default selection', () => {
         ok: true,
         models: [...FALLBACK_MODELS, { key: 'future-model', provider: 'acme', displayName: 'Future', limits: LIMITS }],
         defaultModel: DEFAULT_SCREENSHOT_MODEL_KEY,
-        keyStored: {},
-        encryptionAvailable: true,
+        serverReady: true,
       }),
     });
     try {
@@ -162,31 +158,32 @@ describe('model default selection', () => {
       await cfg.load();
       cfg.select('future-model');
       expect(cfg.activeModel().displayName).toBe('Future');
-      expect(cfg.hasKey()).toBeFalse();
+      expect(cfg.canUseServer()).toBeTrue();
     } finally {
       restore();
     }
   });
 
-  it('tracks key presence without ever exposing the key', async () => {
-    let sent = '';
-    const restore = installDesktopBridge({
-      getConfig: async () => ({ ok: true, models: FALLBACK_MODELS, defaultModel: DEFAULT_SCREENSHOT_MODEL_KEY, keyStored: {}, encryptionAvailable: true }),
-      setKey: async (_m, k) => ((sent = k), { ok: true }),
-    });
-    try {
-      const cfg = TestBed.inject(ModelConfigService);
-      await cfg.load();
-      expect(cfg.hasKey()).toBeFalse();
-      await cfg.saveKey('AIzaSECRET_KEY_123456');
-      expect(sent).toBe('AIzaSECRET_KEY_123456');
-      expect(cfg.hasKey()).toBeTrue();
-      expect(JSON.stringify(cfg.keyStored())).not.toContain('AIza');
-      await cfg.clearKey();
-      expect(cfg.hasKey()).toBeFalse();
-    } finally {
-      restore();
+  it('reports server readiness (no client key): ready, not set up, or unknown', async () => {
+    for (const [serverReady, canUse] of [[true, true], [false, false], [null, true]] as const) {
+      const restore = installDesktopBridge({
+        getConfig: async () => ({ ok: true, models: FALLBACK_MODELS, defaultModel: DEFAULT_SCREENSHOT_MODEL_KEY, serverReady }),
+      });
+      try {
+        const cfg = new ModelConfigService();
+        await cfg.load();
+        expect(cfg.serverReady()).toBe(serverReady);
+        expect(cfg.canUseServer()).toBe(canUse);
+        expect('saveKey' in cfg).toBeFalse();
+      } finally {
+        restore();
+      }
     }
+  });
+
+  it('fallback limits match the server budget (10 images, 3 MB)', () => {
+    expect(FALLBACK_MODELS[0].limits.maxImages).toBe(10);
+    expect(FALLBACK_MODELS[0].limits.maxTotalBytes).toBe(3 * 1024 * 1024);
   });
 });
 
@@ -270,6 +267,32 @@ describe('capture service', () => {
     } finally {
       restore();
     }
+  });
+
+  it('routes Ctrl+Shift+S "open the Screenshots page" requests from other pages', () => {
+    let fire: (() => void) | null = null;
+    const restore = installDesktopBridge({
+      onOpenPage: (cb) => {
+        fire = cb;
+        return () => (fire = null);
+      },
+    });
+    try {
+      const svc = TestBed.inject(ScreenCaptureService);
+      let opened = 0;
+      const off = svc.onOpenPageRequest(() => opened++);
+      fire!();
+      expect(opened).toBe(1);
+      off();
+      expect(fire).toBeNull();
+    } finally {
+      restore();
+    }
+  });
+
+  it('open-page requests are a no-op without the desktop bridge (web build)', () => {
+    const svc = TestBed.inject(ScreenCaptureService);
+    expect(() => svc.onOpenPageRequest(() => fail('must not fire'))()).not.toThrow();
   });
 });
 

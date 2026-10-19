@@ -46,8 +46,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getConfig: () => ipcRenderer.invoke('screenshot:get-config'),
     listSources: () => ipcRenderer.invoke('screenshot:list-sources'),
     capture: (sourceId) => ipcRenderer.invoke('screenshot:capture', sourceId),
-    setKey: (modelKey, apiKey) => ipcRenderer.invoke('screenshot:set-key', modelKey, apiKey),
-    clearKey: (modelKey) => ipcRenderer.invoke('screenshot:clear-key', modelKey),
     analyze: (modelKey, images) => ipcRenderer.invoke('screenshot:analyze', modelKey, images),
+    // Ctrl+Shift+S — the Screenshots page reports when it is open (picker mode).
+    setHotkey: (enabled) => ipcRenderer.invoke('screenshot:set-hotkey', !!enabled),
+    // Ctrl+Shift+S pressed while another page is open: go to the Screenshots page.
+    onOpenPage: (cb) => {
+      const listener = () => cb();
+      ipcRenderer.on('screenshot:open-page', listener);
+      return () => ipcRenderer.removeListener('screenshot:open-page', listener);
+    },
+    onHotkey: (cb) => {
+      const listener = (_event, sourceId, error) => cb(sourceId || null, error || null);
+      ipcRenderer.on('screenshot:hotkey', listener);
+      return () => ipcRenderer.removeListener('screenshot:hotkey', listener);
+    },
   },
 });

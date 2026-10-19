@@ -1,13 +1,11 @@
 import { Component } from '@angular/core';
+import { RouterLink } from '@angular/router';
 
-/**
- * Public Privacy Policy — required for Razorpay / Cashfree merchant approval.
- * Indexed for SEO. Public (no auth guard).
- */
+/** Public Privacy Policy (/privacy-policy). Draft — see docs/LEGAL_REVIEW.md. */
 @Component({
   selector: 'app-privacy',
   standalone: true,
+  imports: [RouterLink],
   templateUrl: './privacy.component.html',
-  styleUrl: './privacy.component.css',
 })
 export class PrivacyComponent {}

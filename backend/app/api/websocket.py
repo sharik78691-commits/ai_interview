@@ -21,11 +21,13 @@ import re
 import time
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from starlette.websockets import WebSocketState
 
-from app.api.interview import VALID_LENGTHS, _normalize_length, get_context
 from app.auth import security
 from app.auth.service import get_user_by_id, is_session_token_revoked
+from app.core.config import get_settings
 from app.db.session import SessionLocal
+from app.models.interview import MAX_QUESTION_CHARS
 from app.providers.llm.registry import get_model, validate_model_key
 from app.providers.stt.provider import (
     STTRequestError,
@@ -35,6 +37,7 @@ from app.providers.stt.provider import (
 )
 from app.services.activity import log_llm_usage
 from app.services.ai_service import AIService
+from app.services.interview_context import VALID_LENGTHS, context_store, normalize_length
 from app.services.question_service import QuestionBuffer
 
 logger = logging.getLogger(__name__)
@@ -51,6 +54,10 @@ DEFAULT_AUDIO_MIME = "audio/wav"
 # the next question waited minutes; now they run in parallel, bounded so a
 # fast-talking interviewer cannot hammer the transcription rate limit.
 MAX_CONCURRENT_TRANSCRIPTIONS = 2
+# Longest question sent to the LLM (shared with the REST route): real
+# questions are a few hundred chars; the cap only bounds token spend when a
+# client streams a huge text frame. Here the TAIL is kept (the actual question
+# ends a long monologue); REST rejects oversize input instead.
 
 
 def sniff_audio(data: bytes) -> str:
@@ -125,6 +132,17 @@ def _authenticate_ws(websocket: WebSocket) -> int | None:
         "No ticket supplied; falling back to the session cookie. Cookies received: %s",
         cookie_names or "none",
     )
+    # Cross-Site WebSocket Hijacking guard: browsers attach cookies to a
+    # cross-site WebSocket handshake (SameSite=None in production) and CORS
+    # does not apply to WebSockets. A cookie-authenticated socket must
+    # therefore come from one of OUR origins. (The ticket path above is safe:
+    # a foreign site cannot read a ticket from /api/auth/ws-ticket.)
+    origin = websocket.headers.get("origin")
+    if origin and not get_settings().cors_allows(origin):
+        logger.warning(
+            "WebSocket cookie auth refused: origin %s is not in CORS_ORIGINS", origin
+        )
+        return None
     token = websocket.cookies.get(security.SESSION_COOKIE)
     if not token:
         logger.warning(
@@ -135,13 +153,20 @@ def _authenticate_ws(websocket: WebSocket) -> int | None:
             cookie_names or "none",
         )
         return None
-    user_id = security.read_session_token(token)
-    if user_id is None:
+    payload = security.read_session_payload(token)
+    if payload is None:
         return None
+    user_id, issued_at = payload
     db = SessionLocal()
     try:
         if is_session_token_revoked(db, token):
             logger.warning("WebSocket auth failed: session cookie was logged out")
+            return None
+        user = get_user_by_id(db, user_id)
+        if user is not None and security.session_issued_before_revocation(
+            issued_at, user.sessions_revoked_at
+        ):
+            logger.warning("WebSocket auth failed: session predates a password reset")
             return None
     finally:
         db.close()
@@ -205,7 +230,7 @@ async def ws_interview(websocket: WebSocket) -> None:
     await websocket.accept()
 
     # Per-user interview context (never another user's resume/JD).
-    context = get_context(user_id)
+    context = context_store.get(user_id)
 
     # Existing question/AI pipeline (unchanged behaviour).
     buffer = QuestionBuffer()
@@ -223,7 +248,7 @@ async def ws_interview(websocket: WebSocket) -> None:
 
     def _apply_length(raw: object) -> None:
         """Client may override the answer depth for the next answer."""
-        length = _normalize_length(raw if isinstance(raw, str) else None)
+        length = normalize_length(raw if isinstance(raw, str) else None)
         if length in VALID_LENGTHS:
             service.response_length = length
 
@@ -566,7 +591,11 @@ async def ws_interview(websocket: WebSocket) -> None:
     # ------------------------------------------------------------------
     answer_queue: asyncio.Queue = asyncio.Queue()
     #: Normalized questions currently queued/being answered (duplicate guard).
-    answering: set[str] = set()
+    # In-flight questions: normalised text -> requested depth (None = the
+    # session's current depth). Depth-aware so a deliberate re-ask at another
+    # length is never mistaken for a duplicate, even if it arrives in the gap
+    # between the answer frame and the worker clearing the entry.
+    answering: dict[str, str | None] = {}
     #: Everything spawned for this connection; cancelled on disconnect.
     background: set[asyncio.Task] = set()
     #: Caps concurrent transcriptions (rate-limit protection).
@@ -593,7 +622,7 @@ async def ws_interview(websocket: WebSocket) -> None:
                 else:
                     await _send_guidance(question)
             finally:
-                answering.discard(_norm_question(question))
+                answering.pop(_norm_question(question), None)
                 answer_queue.task_done()
 
     async def _enqueue_answer(
@@ -606,8 +635,11 @@ async def ws_interview(websocket: WebSocket) -> None:
         delivering the same final twice) must never spend a second AI call, and
         the UI gets a status so its spinner does not hang.
         """
+        if len(question) > MAX_QUESTION_CHARS:
+            question = question[-MAX_QUESTION_CHARS:]
         key = _norm_question(question)
-        if key in answering:
+        requested = normalize_length(length_raw) if isinstance(length_raw, str) else None
+        if key in answering and (requested is None or answering[key] == requested):
             logger.info(
                 "Duplicate question suppressed (in flight, %d chars)", len(question)
             )
@@ -619,7 +651,7 @@ async def ws_interview(websocket: WebSocket) -> None:
                 }
             )
             return False
-        answering.add(key)
+        answering[key] = requested
         answer_queue.put_nowait((question, length_raw, model_raw, announce))
         return True
 
@@ -643,6 +675,12 @@ async def ws_interview(websocket: WebSocket) -> None:
                 logger.info("[ws user=%s] client disconnected", user_id)
                 break
             except Exception:
+                # Newer Starlette raises a different error type when receive()
+                # runs after the disconnect frame; that is a normal close, not
+                # a server error (and the socket can no longer be written to).
+                if websocket.client_state == WebSocketState.DISCONNECTED:
+                    logger.info("[ws user=%s] client disconnected", user_id)
+                    break
                 logger.exception("[ws user=%s] receive() failed", user_id)
                 await websocket.send_json(
                     {"type": "error", "message": "Expected JSON message."}
@@ -808,10 +846,14 @@ async def ws_interview(websocket: WebSocket) -> None:
                 )
     except WebSocketDisconnect:
         logger.info("[ws user=%s] disconnected", user_id)
-    except Exception as exc:
+    except Exception:
         logger.exception("[ws user=%s] unhandled websocket error", user_id)
         try:
-            await websocket.send_json({"type": "error", "message": str(exc)})
+            # Never echo exception text to the client (it can carry internal
+            # paths, provider responses or SQL); the traceback is in the log.
+            await websocket.send_json(
+                {"type": "error", "message": "Unexpected server error. Please reconnect."}
+            )
             await websocket.close()
         except Exception:
             logger.debug("[ws user=%s] client already gone; could not send error", user_id)

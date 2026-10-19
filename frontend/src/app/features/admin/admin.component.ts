@@ -17,6 +17,7 @@ import {
 import { AiModel } from '../../core/models/ai-models';
 import { AuthService } from '../../core/auth/auth.service';
 import { ErrorBannerComponent } from '../../shared/components/error-banner/error-banner.component';
+import { AdminBillingComponent } from './billing/admin-billing.component';
 
 function toISODate(d: Date): string {
   const m = `${d.getMonth() + 1}`.padStart(2, '0');
@@ -24,7 +25,7 @@ function toISODate(d: Date): string {
   return `${d.getFullYear()}-${m}-${day}`;
 }
 
-export type AdminTab = 'overview' | 'costs' | 'users' | 'system';
+export type AdminTab = 'overview' | 'costs' | 'users' | 'billing' | 'system';
 export type CostMetric = 'cost' | 'calls';
 
 /** Auto-refresh cadence for the live AI-cost view. */
@@ -49,7 +50,7 @@ const TREND_H = 150;
 @Component({
   selector: 'app-admin',
   standalone: true,
-  imports: [FormsModule, ErrorBannerComponent],
+  imports: [FormsModule, ErrorBannerComponent, AdminBillingComponent],
   templateUrl: './admin.component.html',
   styleUrl: './admin.component.css',
 })

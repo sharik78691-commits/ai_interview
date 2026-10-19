@@ -1,4 +1,4 @@
-<nav class="nav">
+<nav class="nav" [class.desktop]="isDesktop">
   <div class="container nav-inner">
     <a routerLink="/" class="brand"><span class="logo">◈</span> AI Interview Assistant
       @if (mode === 'live') { <span class="live-badge">LIVE AI</span> }
@@ -28,6 +28,7 @@
         @if (isDesktop) {
           <a routerLink="/screenshot-analysis" routerLinkActive="active">Screenshots</a>
         }
+        <a routerLink="/billing" routerLinkActive="active">Billing</a>
         <a routerLink="/settings" routerLinkActive="active">Settings</a>
         @if (user.is_admin) {
           <a routerLink="/admin" routerLinkActive="active">Admin</a>

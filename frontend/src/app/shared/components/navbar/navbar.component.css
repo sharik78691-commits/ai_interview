@@ -87,3 +87,18 @@
   .theme-btn { width: 32px; height: 32px; margin-left: 2px; font-size: .95rem; }
   .nav-inner { flex-wrap: wrap; height: auto; min-height: 62px; padding-top: 8px; padding-bottom: 8px; row-gap: 4px; }
 }
+
+/* Desktop (.exe) header: two tidy rows instead of one overflowing 62px bar.
+   Row 1 = brand + status badges + hotkey hint (single line).
+   Row 2 = transparency slider on the left, navigation + account on the right. */
+.nav.desktop .nav-inner {
+  flex-wrap: wrap; height: auto; min-height: 62px;
+  padding-top: 8px; padding-bottom: 8px; row-gap: 6px;
+}
+.nav.desktop .brand { white-space: nowrap; flex-wrap: nowrap; min-width: 0; }
+.nav.desktop .links {
+  width: 100%; flex-wrap: wrap; justify-content: flex-end; row-gap: 6px;
+  padding-top: 6px; border-top: 1px solid var(--border);
+}
+.nav.desktop .opacity-ctl { margin-right: auto; }
+.nav.desktop .links a { padding: 7px 12px; font-size: .86rem; }

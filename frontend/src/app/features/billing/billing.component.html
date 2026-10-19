@@ -1,0 +1,114 @@
+<div class="container billing">
+  <header class="billing-head">
+    <h1>Billing &amp; subscription</h1>
+    <p class="muted">Your plan, validity and payment history. Only you (and our support admins) can see this.</p>
+  </header>
+
+  @if (notice()) {
+    <div class="banner info">{{ notice() }}</div>
+  }
+
+  @if (loading()) {
+    <p class="muted">Loading…</p>
+  } @else if (error()) {
+    <div class="banner error">{{ error() }}</div>
+  } @else if (data(); as d) {
+    <section class="card current">
+      @if (d.current; as c) {
+        <div class="current-main">
+          <div>
+            <span class="pill live">Active</span>
+            <h2>{{ c.plan_name }}</h2>
+            <p class="muted small">{{ sourceLabel(c.source) }} · started {{ c.starts_at | date: 'mediumDate' }}</p>
+          </div>
+          <div class="validity">
+            <strong>{{ daysLeft(d.access_ends_at) }}</strong>
+            <span class="muted small">days left</span>
+          </div>
+        </div>
+        <p class="small">
+          Access valid until <strong>{{ d.access_ends_at | date: 'medium' }}</strong>
+          @if (d.access_ends_at !== c.expires_at) {
+            <span class="muted">(includes a queued renewal)</span>
+          }
+        </p>
+        <p class="muted small">Plans don't renew automatically. <a routerLink="/pricing">Buy more time</a> whenever you need it — it's added after your current period.</p>
+      } @else {
+        <h2>No active plan</h2>
+        <p class="muted">You can still sign in and use the free parts of the app. <a routerLink="/pricing">See plans</a>.</p>
+      }
+    </section>
+
+    @if (trialPlans().length) {
+      <section class="card trials">
+        <h3>Free trial available</h3>
+        <p class="muted small">One free trial per account. No payment details needed.</p>
+        <div class="trial-list">
+          @for (p of trialPlans(); track p.id) {
+            <button type="button" class="btn-ghost btn-sm" [disabled]="busy()" (click)="startTrial(p)">
+              Start {{ duration(p.trial_days) }} trial of {{ p.name }}
+            </button>
+          }
+        </div>
+      </section>
+    }
+
+    <section class="history">
+      <h3>Payments</h3>
+      @if (d.payments.length === 0) {
+        <p class="muted small">No payments yet.</p>
+      } @else {
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Date</th><th>Plan</th><th>Amount</th><th>Status</th><th>Gateway</th><th>Reference</th></tr>
+            </thead>
+            <tbody>
+              @for (p of d.payments; track p.id) {
+                <tr>
+                  <td>{{ (p.paid_at || p.created_at) | date: 'mediumDate' }}</td>
+                  <td>{{ p.plan_name }} @if (p.is_renewal) {<span class="muted small">(renewal)</span>}</td>
+                  <td>{{ money(p.amount_minor, p.currency) }}</td>
+                  <td><span class="status" [attr.data-status]="p.status">{{ p.status }}</span></td>
+                  <td class="cap">{{ p.gateway }}</td>
+                  <td class="mono small">{{ p.gateway_payment_id || p.gateway_order_id }}</td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      }
+    </section>
+
+    <section class="history">
+      <h3>Subscription periods</h3>
+      @if (d.subscriptions.length === 0) {
+        <p class="muted small">No subscription periods yet.</p>
+      } @else {
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Plan</th><th>Type</th><th>Starts</th><th>Expires</th><th>Status</th></tr>
+            </thead>
+            <tbody>
+              @for (s of d.subscriptions; track s.id) {
+                <tr>
+                  <td>{{ s.plan_name }}</td>
+                  <td>{{ sourceLabel(s.source) }}</td>
+                  <td>{{ s.starts_at | date: 'mediumDate' }}</td>
+                  <td>{{ s.expires_at | date: 'medium' }}</td>
+                  <td><span class="status" [attr.data-status]="s.status">{{ s.status }}</span></td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      }
+    </section>
+
+    <p class="muted small foot">
+      Questions about a payment? <a routerLink="/contact">Contact support</a> with the reference shown above.
+      See the <a routerLink="/refund-policy">Refund &amp; Cancellation Policy</a>.
+    </p>
+  }
+</div>

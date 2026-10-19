@@ -1,6 +1,6 @@
 import { Component, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { Router, RouterLink } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { AuthService } from '../../../core/auth/auth.service';
 
 @Component({
@@ -13,6 +13,7 @@ import { AuthService } from '../../../core/auth/auth.service';
 export class RegisterComponent {
   private auth = inject(AuthService);
   private router = inject(Router);
+  private route = inject(ActivatedRoute);
 
   name = '';
   email = '';
@@ -49,7 +50,10 @@ export class RegisterComponent {
       .subscribe({
         next: () => {
           this.loading = false;
-          this.router.navigate(['/dashboard']);
+          // Internal paths only (e.g. back to /pricing) — never another origin.
+          const redirect = this.route.snapshot.queryParamMap.get('redirect') ?? '';
+          const safe = redirect.startsWith('/') && !redirect.startsWith('//') ? redirect : '/dashboard';
+          this.router.navigateByUrl(safe);
         },
         error: (err) => {
           this.loading = false;

@@ -1,0 +1,276 @@
+<section class="ab">
+  <div class="ab-top">
+    <nav class="ab-tabs" aria-label="Subscription sections">
+      <button type="button" [class.on]="view === 'subscriptions'" (click)="setView('subscriptions')">Subscriptions</button>
+      <button type="button" [class.on]="view === 'payments'" (click)="setView('payments')">Payments</button>
+      <button type="button" [class.on]="view === 'plans'" (click)="setView('plans')">Plans &amp; pricing</button>
+    </nav>
+    <form class="ab-lookup" (ngSubmit)="lookupUser()">
+      <input name="lookup" [(ngModel)]="userLookup" placeholder="User ID or email" aria-label="Find user by ID or email" />
+      <button type="submit" class="btn-ghost btn-sm">Find user</button>
+    </form>
+  </div>
+
+  @if (error()) { <div class="banner error">{{ error() }}</div> }
+  @if (info()) { <div class="banner info">{{ info() }}</div> }
+
+  <!-- ================================================= user detail -->
+  @if (detail(); as d) {
+    <div class="card ab-detail">
+      <div class="ab-detail-head">
+        <div>
+          <h3>{{ d.name || d.email }} <span class="muted small">#{{ d.user_id }}</span></h3>
+          <p class="muted small">{{ d.email }}</p>
+        </div>
+        <button type="button" class="btn-ghost btn-sm" (click)="closeUser()">Close</button>
+      </div>
+      <p class="small">
+        @if (d.current) {
+          Active: <strong>{{ d.current.plan_name }}</strong> · access until <strong>{{ d.access_ends_at | date: 'medium' }}</strong>
+        } @else {
+          <span class="muted">No active subscription.</span>
+        }
+      </p>
+
+      <div class="ab-grant">
+        <h4>Grant access (manual — recorded separately from payments)</h4>
+        <div class="row">
+          <select [(ngModel)]="grantPlanId" aria-label="Plan">
+            <option [ngValue]="null">— custom days —</option>
+            @for (p of plans(); track p.id) { <option [ngValue]="p.id">{{ p.name }} ({{ duration(p.duration_days) }})</option> }
+          </select>
+          <input type="number" min="1" max="3660" [(ngModel)]="grantDays" placeholder="Days (overrides plan)" aria-label="Days" />
+          <input class="grow" [(ngModel)]="grantReason" maxlength="500" placeholder="Reason (required, audited)" aria-label="Reason" />
+          <button type="button" class="btn-primary btn-sm" [disabled]="busy()" (click)="grant()">Grant</button>
+        </div>
+      </div>
+
+      <h4>Subscription periods</h4>
+      <div class="row small">
+        <label>Extend by <input type="number" min="1" max="3660" [(ngModel)]="actionDays" class="w80" /> days</label>
+        <input class="grow" [(ngModel)]="actionReason" maxlength="500" placeholder="Reason for extend / revoke (required, audited)" aria-label="Action reason" />
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Plan</th><th>Source</th><th>Starts</th><th>Expires</th><th>Status</th><th>Amount</th><th></th></tr></thead>
+          <tbody>
+            @for (s of d.subscriptions; track s.id) {
+              <tr>
+                <td>{{ s.plan_name }}</td>
+                <td class="cap">{{ s.source }}</td>
+                <td>{{ s.starts_at | date: 'mediumDate' }}</td>
+                <td>{{ s.expires_at | date: 'medium' }}</td>
+                <td><span class="status" [attr.data-status]="s.status">{{ s.status }}</span></td>
+                <td>{{ s.source === 'payment' ? money(s.amount_minor, s.currency) : '—' }}</td>
+                <td class="actions">
+                  @if (s.status !== 'revoked') {
+                    <button type="button" class="btn-ghost btn-sm" [disabled]="busy()" (click)="extend(s)">Extend</button>
+                    <button type="button" class="btn-ghost btn-sm danger" [disabled]="busy()" (click)="revoke(s)">Revoke</button>
+                  }
+                </td>
+              </tr>
+            } @empty { <tr><td colspan="7" class="muted">None.</td></tr> }
+          </tbody>
+        </table>
+      </div>
+
+      <h4>Payments</h4>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Date</th><th>Plan</th><th>Amount</th><th>Status</th><th>Gateway</th><th>Order / payment ID</th></tr></thead>
+          <tbody>
+            @for (p of d.payments; track p.id) {
+              <tr>
+                <td>{{ (p.paid_at || p.created_at) | date: 'medium' }}</td>
+                <td>{{ p.plan_name }}</td>
+                <td>{{ money(p.amount_minor, p.currency) }}</td>
+                <td><span class="status" [attr.data-status]="p.status">{{ p.status }}</span></td>
+                <td class="cap">{{ p.gateway }}</td>
+                <td class="mono small">{{ p.gateway_order_id }}<br />{{ p.gateway_payment_id || '' }}</td>
+              </tr>
+            } @empty { <tr><td colspan="6" class="muted">None.</td></tr> }
+          </tbody>
+        </table>
+      </div>
+
+      <h4>Audit trail</h4>
+      <ul class="audit small">
+        @for (a of d.audit; track a.id) {
+          <li>
+            <strong class="cap">{{ a.action.replace('_', ' ') }}</strong>
+            · {{ a.created_at | date: 'medium' }}
+            · {{ a.actor_user_id ? 'admin #' + a.actor_user_id : 'system' }}
+            @if (a.reason) { · <em>{{ a.reason }}</em> }
+          </li>
+        } @empty { <li class="muted">No changes recorded.</li> }
+      </ul>
+    </div>
+  }
+
+  <!-- ================================================= subscriptions -->
+  @if (view === 'subscriptions') {
+    <form class="filters" (ngSubmit)="loadSubs()">
+      <input name="q" [(ngModel)]="subFilters.q" placeholder="User ID or email" />
+      <select name="plan" [(ngModel)]="subFilters.plan_id">
+        <option [ngValue]="null">All plans</option>
+        @for (p of plans(); track p.id) { <option [ngValue]="p.id">{{ p.name }}</option> }
+      </select>
+      <select name="status" [(ngModel)]="subFilters.status">
+        <option value="">Any status</option><option value="active">Active</option><option value="scheduled">Scheduled</option>
+        <option value="expired">Expired</option><option value="revoked">Revoked</option>
+      </select>
+      <select name="source" [(ngModel)]="subFilters.source">
+        <option value="">Any source</option><option value="payment">Payment</option><option value="manual">Manual</option><option value="trial">Trial</option>
+      </select>
+      <select name="gateway" [(ngModel)]="subFilters.gateway">
+        <option value="">Any gateway</option><option value="razorpay">Razorpay</option><option value="cashfree">Cashfree</option><option value="mock">Test</option>
+      </select>
+      <label class="small">Expires from <input type="date" name="ef" [(ngModel)]="subFilters.expires_from" /></label>
+      <label class="small">to <input type="date" name="et" [(ngModel)]="subFilters.expires_to" /></label>
+      <button type="submit" class="btn-primary btn-sm">Apply</button>
+    </form>
+    @if (subs(); as s) {
+      <p class="muted small">{{ s.total }} result(s)</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>User</th><th>Plan</th><th>Source</th><th>Gateway</th><th>Amount</th><th>Starts</th><th>Expires</th><th>Status</th></tr></thead>
+          <tbody>
+            @for (r of s.items; track r.id) {
+              <tr class="click" (click)="openUser(r.user_id)" tabindex="0" (keydown.enter)="openUser(r.user_id)">
+                <td>{{ r.user_email }} <span class="muted small">#{{ r.user_id }}</span></td>
+                <td>{{ r.plan_name }}</td>
+                <td class="cap">{{ r.source }}</td>
+                <td class="cap">{{ r.gateway || '—' }}</td>
+                <td>{{ r.source === 'payment' ? money(r.amount_minor, r.currency) : '—' }}</td>
+                <td>{{ r.starts_at | date: 'mediumDate' }}</td>
+                <td>{{ r.expires_at | date: 'mediumDate' }}</td>
+                <td><span class="status" [attr.data-status]="r.status">{{ r.status }}</span></td>
+              </tr>
+            } @empty { <tr><td colspan="8" class="muted">No subscriptions match.</td></tr> }
+          </tbody>
+        </table>
+      </div>
+      <div class="pager">
+        <button type="button" class="btn-ghost btn-sm" [disabled]="s.page <= 1" (click)="loadSubs(s.page - 1)">‹ Prev</button>
+        <span class="small muted">Page {{ s.page }} / {{ pages(s) }}</span>
+        <button type="button" class="btn-ghost btn-sm" [disabled]="s.page >= pages(s)" (click)="loadSubs(s.page + 1)">Next ›</button>
+      </div>
+    }
+  }
+
+  <!-- ====================================================== payments -->
+  @if (view === 'payments') {
+    <form class="filters" (ngSubmit)="loadPayments()">
+      <input name="pq" [(ngModel)]="payFilters.q" placeholder="User ID, email, order or payment ID" class="grow" />
+      <select name="pplan" [(ngModel)]="payFilters.plan_id">
+        <option [ngValue]="null">All plans</option>
+        @for (p of plans(); track p.id) { <option [ngValue]="p.id">{{ p.name }}</option> }
+      </select>
+      <select name="pstatus" [(ngModel)]="payFilters.status">
+        <option value="">Any status</option><option value="paid">Paid</option><option value="created">Created</option>
+        <option value="failed">Failed</option><option value="cancelled">Cancelled</option>
+      </select>
+      <select name="pgw" [(ngModel)]="payFilters.gateway">
+        <option value="">Any gateway</option><option value="razorpay">Razorpay</option><option value="cashfree">Cashfree</option><option value="mock">Test</option>
+      </select>
+      <button type="submit" class="btn-primary btn-sm">Apply</button>
+    </form>
+    @if (payments(); as s) {
+      <p class="muted small">{{ s.total }} payment(s)</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Date</th><th>User</th><th>Plan</th><th>Amount</th><th>Status</th><th>Gateway</th><th>Order / payment ID</th><th></th></tr></thead>
+          <tbody>
+            @for (p of s.items; track p.id) {
+              <tr>
+                <td>{{ (p.paid_at || p.created_at) | date: 'medium' }}</td>
+                <td><button type="button" class="link" (click)="openUser(p.user_id)">{{ p.user_email }}</button></td>
+                <td>{{ p.plan_name }}</td>
+                <td>{{ money(p.amount_minor, p.currency) }}</td>
+                <td>
+                  <span class="status" [attr.data-status]="p.status">{{ p.status }}</span>
+                  @if (p.failure_reason) { <div class="muted small">{{ p.failure_reason }}</div> }
+                </td>
+                <td class="cap">{{ p.gateway }}</td>
+                <td class="mono small">{{ p.gateway_order_id }}<br />{{ p.gateway_payment_id || '' }}</td>
+                <td>
+                  @if (p.status !== 'paid') {
+                    <button type="button" class="btn-ghost btn-sm" [disabled]="busy()" (click)="reconcile(p)" title="Ask the gateway for the current status">Re-check</button>
+                  }
+                </td>
+              </tr>
+            } @empty { <tr><td colspan="8" class="muted">No payments match.</td></tr> }
+          </tbody>
+        </table>
+      </div>
+      <div class="pager">
+        <button type="button" class="btn-ghost btn-sm" [disabled]="s.page <= 1" (click)="loadPayments(s.page - 1)">‹ Prev</button>
+        <span class="small muted">Page {{ s.page }} / {{ pages(s) }}</span>
+        <button type="button" class="btn-ghost btn-sm" [disabled]="s.page >= pages(s)" (click)="loadPayments(s.page + 1)">Next ›</button>
+      </div>
+    }
+  }
+
+  <!-- ========================================================= plans -->
+  @if (view === 'plans') {
+    <div class="row">
+      <p class="muted small grow">Changes apply to new checkouts immediately. Past payments keep the amount actually paid. Plans can be deactivated but never deleted.</p>
+      <button type="button" class="btn-primary btn-sm" (click)="newPlan()">+ New plan</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Order</th><th>Plan</th><th>Price</th><th>Duration</th><th>Trial</th><th>Promo</th><th>Status</th><th></th></tr></thead>
+        <tbody>
+          @for (p of plans(); track p.id) {
+            <tr>
+              <td>{{ p.sort_order }}</td>
+              <td>{{ p.name }} <span class="muted small mono">{{ p.code }}</span></td>
+              <td>{{ money(p.regular_price_minor, p.currency) }}</td>
+              <td>{{ duration(p.duration_days) }}</td>
+              <td>{{ p.trial_days ? duration(p.trial_days) : '—' }}</td>
+              <td>
+                @if (p.promo_price_minor !== null) {
+                  {{ money(p.promo_price_minor, p.currency) }}
+                  <span class="muted small">{{ p.is_promo ? '(live)' : '(not live)' }}</span>
+                } @else { — }
+              </td>
+              <td><span class="status" [attr.data-status]="p.is_active ? 'active' : 'expired'">{{ p.is_active ? 'active' : 'inactive' }}</span></td>
+              <td class="actions">
+                <button type="button" class="btn-ghost btn-sm" (click)="editPlan(p)">Edit</button>
+                <button type="button" class="btn-ghost btn-sm" (click)="togglePlan(p)">{{ p.is_active ? 'Deactivate' : 'Activate' }}</button>
+              </td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+
+    @if (planForm; as f) {
+      <form class="card plan-form" (ngSubmit)="savePlan()">
+        <h4>{{ f.id ? 'Edit plan' : 'New plan' }}</h4>
+        <div class="grid">
+          <label>Code (URL-safe, permanent)<input name="code" [(ngModel)]="f.code" [disabled]="!!f.id" required pattern="[a-z0-9][a-z0-9-]{1,48}" /></label>
+          <label>Name<input name="name" [(ngModel)]="f.name" required maxlength="120" /></label>
+          <label>Price ({{ f.currency }})<input name="price" type="number" min="0" step="0.01" [(ngModel)]="f.price" required /></label>
+          <label>Currency<input name="currency" [(ngModel)]="f.currency" maxlength="3" required /></label>
+          <label>Duration (days)<input name="dur" type="number" min="1" max="3660" [(ngModel)]="f.duration_days" required /></label>
+          <label>Free trial (days, 0 = none)<input name="trial" type="number" min="0" max="365" [(ngModel)]="f.trial_days" /></label>
+          <label>Sort order<input name="sort" type="number" [(ngModel)]="f.sort_order" /></label>
+          <label>Badge<input name="badge" [(ngModel)]="f.badge" maxlength="40" placeholder="e.g. Most popular" /></label>
+          <label class="span2">Description<input name="desc" [(ngModel)]="f.description" maxlength="2000" /></label>
+          <label class="span2">Features (one per line)<textarea name="features" rows="4" [(ngModel)]="f.features"></textarea></label>
+          <label>Promo price (empty = none)<input name="promo" type="number" min="0" step="0.01" [(ngModel)]="f.promo_price" /></label>
+          <label>Promo label<input name="plabel" [(ngModel)]="f.promo_label" maxlength="60" /></label>
+          <label>Promo starts<input name="ps" type="datetime-local" [(ngModel)]="f.promo_starts_at" /></label>
+          <label>Promo ends<input name="pe" type="datetime-local" [(ngModel)]="f.promo_ends_at" /></label>
+          <label class="check"><input name="hl" type="checkbox" [(ngModel)]="f.is_highlighted" /> Highlight on pricing page</label>
+          <label class="check"><input name="act" type="checkbox" [(ngModel)]="f.is_active" /> Active (visible &amp; purchasable)</label>
+        </div>
+        <div class="row end">
+          <button type="button" class="btn-ghost btn-sm" (click)="planForm = null">Cancel</button>
+          <button type="submit" class="btn-primary btn-sm" [disabled]="busy()">Save plan</button>
+        </div>
+      </form>
+    }
+  }
+</section>

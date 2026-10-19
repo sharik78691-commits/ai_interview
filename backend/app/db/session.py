@@ -127,12 +127,14 @@ def _ensure_user_columns() -> None:
             ("username", "VARCHAR(150)"),
             ("is_admin", "BOOLEAN DEFAULT FALSE"),
             ("login_count", "INTEGER DEFAULT 0"),
+            ("sessions_revoked_at", "TIMESTAMP WITH TIME ZONE"),
         ]
         if dialect == "postgresql"
         else [
             ("username", "VARCHAR(150)"),
             ("is_admin", "BOOLEAN DEFAULT 0"),
             ("login_count", "INTEGER DEFAULT 0"),
+            ("sessions_revoked_at", "DATETIME"),
         ]
     )
     with engine.begin() as conn:
@@ -233,8 +235,32 @@ def _drop_activity_noise_columns() -> None:
                 logger.warning("Could not drop activity_log.%s (%s)", name, exc)
 
 
+def _ensure_activity_indexes() -> None:
+    """Composite index for the admin dashboard's range scans.
+
+    ``/api/admin/stats`` filters ``activity_log`` by ``kind`` AND a
+    ``created_at`` window; the single-column indexes force a scan of every
+    row of that kind. ``create_all`` never adds indexes to an EXISTING table,
+    so this creates it idempotently. Rollback:
+    ``DROP INDEX IF EXISTS ix_activity_log_kind_created_at``.
+    """
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_activity_log_kind_created_at "
+                    "ON activity_log (kind, created_at)"
+                )
+            )
+    except Exception as exc:
+        logger.warning("Could not ensure activity_log composite index (%s)", exc)
+
+
 def init_db() -> None:
     """Create the database (when missing), all tables, and missing columns.
+
+    Schema only — data seeding (the admin login) happens in the app startup
+    (``app.main.lifespan``) so the DB layer never depends on auth.
 
     Import models first so they register on ``Base.metadata``.
     """
@@ -245,16 +271,10 @@ def init_db() -> None:
     from app.models import ai_model_config as _aim  # noqa: F401
     from app.models import resume_record as _resumes  # noqa: F401
     from app.models import target_role as _roles  # noqa: F401
+    from app.models import billing as _billing  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
     _ensure_user_columns()
     _ensure_resume_columns()
     _drop_activity_noise_columns()
-    # Seed the admin login when ADMIN_PASSWORD is configured (idempotent).
-    from app.auth.service import ensure_admin
-
-    db = SessionLocal()
-    try:
-        ensure_admin(db)
-    finally:
-        db.close()
+    _ensure_activity_indexes()

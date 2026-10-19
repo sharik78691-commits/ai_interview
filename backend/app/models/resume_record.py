@@ -41,7 +41,11 @@ class ResumeRecord(Base):
     extension: Mapped[str] = mapped_column(String(10), nullable=False, default="")
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     # Exact uploaded bytes so the original file can be re-downloaded.
-    file_data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    # Deferred: list/prune/select queries never need the (up to 10 MB) blob;
+    # it is loaded on first access (download, text-edit of .txt rows).
+    file_data: Mapped[bytes | None] = mapped_column(
+        LargeBinary, nullable=True, deferred=True
+    )
     # Extracted plain text (editable — the source of truth for interviews).
     raw_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
     # JSON string of the parsed ResumeData (skills, experience, ...).

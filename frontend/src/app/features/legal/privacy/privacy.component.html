@@ -1,112 +1,131 @@
+<!--
+  DRAFT POLICY — written from the actual codebase (Oct 2026). Items marked
+  CONFIRM must be checked by the operator (ideally with legal advice) before
+  relying on this page. Angular strips these comments from the built site.
+  See docs/LEGAL_REVIEW.md for the full checklist.
+-->
 <div class="container legal">
   <header class="legal-head">
     <h1>Privacy Policy</h1>
-    <p class="muted">Last updated: October 17, 2026</p>
+    <p class="muted">Last updated: October 19, 2026</p>
     <p class="lead">
-      This policy explains what information OyeInterview collects, how we use
-      it, who we share it with, and the choices you have. We keep collection to
-      the minimum needed to run the service.
+      This policy explains what OyeInterview collects, why, where it goes, how long
+      we keep it, and the choices you have. OyeInterview is an independently
+      developed software product. <!-- CONFIRM: legal name / sole proprietor or company name, and postal address of the operator (data controller). -->
     </p>
   </header>
 
   <section class="legal-section">
-    <h2>1. Information we collect</h2>
-    <ul>
-      <li><strong>Account data:</strong> your name, email address, and the authentication method you use (email/password or Google sign-in).</li>
-      <li><strong>Interview context:</strong> the resume and job description you upload or paste, and the text of questions detected during a session.</li>
-      <li><strong>Usage data:</strong> basic, non-identifying service metrics such as which AI model answered a question and whether a request succeeded.</li>
-      <li><strong>Payment data:</strong> when you subscribe, payment is processed entirely by our third-party payment providers (Razorpay and Cashfree). We receive only a transaction reference and status — we never see or store your full card number, UPI ID, or bank credentials.</li>
-    </ul>
-  </section>
-
-  <section class="legal-section">
-    <h2>2. How we use your information</h2>
-    <ul>
-      <li>To provide and personalise AI interview guidance.</li>
-      <li>To authenticate you and keep your account secure.</li>
-      <li>To process subscriptions and renewals.</li>
-      <li>To respond to support requests.</li>
-      <li>To improve the service and prevent misuse.</li>
-    </ul>
-  </section>
-
-  <section class="legal-section">
-    <h2>3. What we do NOT do</h2>
-    <ul>
-      <li>We do not record or store your microphone audio. Speech is transcribed in your browser; only the detected question text reaches our servers.</li>
-      <li>We do not sell, rent, or share your personal information with advertisers.</li>
-      <li>We do not store full payment-card numbers or banking credentials.</li>
-    </ul>
-  </section>
-
-  <section class="legal-section">
-    <h2>4. Third-party services</h2>
+    <h2>1. Information we store in your account</h2>
+    <table class="legal-table">
+      <thead><tr><th>Data</th><th>Why</th></tr></thead>
+      <tbody>
+        <tr><td>Name, email address, sign-in method (email/password or Google), and for Google sign-in Google's account identifier</td><td>To create and secure your account. We never see your Google password.</td></tr>
+        <tr><td>Password hash (Argon2id) — never the password itself</td><td>To verify email/password sign-in.</td></tr>
+        <tr><td>Sign-in count and last sign-in time</td><td>Account security and basic usage statistics.</td></tr>
+        <tr><td>Resumes you upload or paste: the original file (PDF/DOCX/TXT) and the extracted text, up to 4 per account</td><td>So you can reuse, edit, re-download and select the resume used for interview answers.</td></tr>
+        <tr><td>Target roles: job title and job description, up to 4 per account</td><td>To tailor answers to the role you are preparing for.</td></tr>
+        <tr><td>Activity events: that you signed in, prepared an interview, or asked a question — with a timestamp. For AI requests also the AI provider/model used, response time, token counts and error type</td><td>Service reliability, cost monitoring and aggregate business statistics. <strong>The text of your questions and answers is not stored in these records.</strong></td></tr>
+        <tr><td>Subscriptions and payments: plan, amount, currency, dates, status, the payment gateway used, gateway order/payment reference and payment method type (e.g. "UPI")</td><td>To provide what you paid for, show your history, handle support and meet accounting obligations.</td></tr>
+        <tr><td>Password-reset requests (a hashed, single-use token)</td><td>To let you reset a forgotten password.</td></tr>
+      </tbody>
+    </table>
     <p>
-      We use trusted third parties to operate the service: AI providers (Groq,
-      Google Gemini, OpenRouter) to generate guidance, and payment processors
-      (Razorpay, Cashfree) to handle billing. Each processes data under its own
-      privacy policy and only for the purpose it provides.
+      We do <strong>not</strong> store interview transcripts, the questions you ask, or the
+      AI answers in your account. During a live session your resume, job description and
+      recent questions are held in server memory only for that session.
     </p>
   </section>
 
   <section class="legal-section">
-    <h2>5. Cookies and local storage</h2>
-    <p>
-      We use strictly necessary cookies to keep you signed in, and browser local
-      storage to keep your resume, job description, and preferences on your own
-      device. We do not use advertising or cross-site tracking cookies.
-    </p>
-  </section>
-
-  <section class="legal-section">
-    <h2>6. Data retention</h2>
-    <p>
-      Account and subscription information is kept while your account is active.
-      You may request deletion of your account and its associated data at any
-      time by contacting us. Resume and job-description text stored locally is
-      removed when you sign out or clear your browser data.
-    </p>
-  </section>
-
-  <section class="legal-section">
-    <h2>7. Your rights</h2>
+    <h2>2. Audio and transcription</h2>
     <ul>
-      <li>Access, correct, or delete your personal information.</li>
-      <li>Opt out of auto-renewal at any time.</li>
-      <li>Withdraw consent where processing is based on consent.</li>
+      <li><strong>Your microphone:</strong> transcribed by your browser's built-in speech recognition. We never receive your microphone audio — only the resulting text. Note that some browsers (for example Google Chrome) perform this recognition on the browser vendor's servers under the vendor's own privacy terms.</li>
+      <li><strong>Interviewer audio (meeting or browser tab you choose to share):</strong> short audio clips are sent to our server and passed to a speech-to-text provider to detect questions. We do not save these clips.</li>
+    </ul>
+  </section>
+
+  <section class="legal-section">
+    <h2>3. Who processes your data (third parties)</h2>
+    <p>Only what each service needs is shared, and only to provide OyeInterview:</p>
+    <table class="legal-table">
+      <thead><tr><th>Service</th><th>What it receives</th></tr></thead>
+      <tbody>
+        <tr><td>AI model providers — depending on the model in use: Groq, Google (Gemini), OpenRouter (e.g. Qwen, Llama), OpenAI, DeepSeek</td><td>The question text, your resume and job description, a few recent questions for follow-up context, and your chosen answer length.</td></tr>
+        <tr><td>Speech-to-text provider (Whisper-compatible service such as Groq or OpenAI)</td><td>Interviewer audio clips.</td></tr>
+        <tr><td>Google (only if you use "Sign in with Google")</td><td>Standard sign-in flow; we receive your name, email and verified-email status.</td></tr>
+        <tr><td>Payment gateways — Razorpay and/or Cashfree</td><td>The order amount and your email; for Cashfree also the mobile number you enter at checkout (we pass it on and do not store it). Card, UPI and bank details are entered on the gateway's page and never reach us.</td></tr>
+        <tr><td>Email delivery (SMTP provider)</td><td>Your email address and the password-reset link.</td></tr>
+        <tr><td>Hosting providers (website and API servers, database)</td><td>All of the above, as stored or processed on their infrastructure. <!-- CONFIRM: list hosting providers and regions (e.g. Vercel, Render, database host) and whether data leaves India. --></td></tr>
+      </tbody>
+    </table>
+    <p>These providers process data under their own terms and privacy policies. We do not sell or rent personal data and we do not share it with advertisers.</p>
+  </section>
+
+  <section class="legal-section">
+    <h2>4. Desktop app</h2>
+    <p>
+      If you use the OyeInterview desktop app's screenshot analysis, the screenshots you
+      select are sent directly from your computer to the AI provider (currently Google
+      Gemini) using an API key that you supply. The key is encrypted with your operating
+      system's secure storage on your device. Screenshot history is kept only on your device.
+    </p>
+  </section>
+
+  <section class="legal-section">
+    <h2>5. Cookies and browser storage</h2>
+    <ul>
+      <li><strong>Strictly necessary cookies:</strong> a sign-in session cookie (HttpOnly), a security token that protects against cross-site request forgery, and a short-lived cookie used during Google sign-in.</li>
+      <li><strong>Browser local storage:</strong> your theme and display preferences, and a copy of your current resume text and job description so the interview screen works quickly. Signing out clears the interview data from this browser.</li>
+      <li>We do not use advertising or cross-site tracking cookies. <!-- CONFIRM: no analytics/ads scripts are added outside this codebase (e.g. via the hosting dashboard). --></li>
+    </ul>
+  </section>
+
+  <section class="legal-section">
+    <h2>6. How long we keep data</h2>
+    <ul>
+      <li>Account, resumes and target roles: while your account exists. You can delete individual resumes and roles yourself at any time.</li>
+      <li>Payment and subscription records: kept after a plan ends, because they are financial records. <!-- CONFIRM: retention period required by your accounting/tax obligations (commonly several years in India). --></li>
+      <li>Activity events: <!-- CONFIRM: choose and implement a retention period; currently retained indefinitely. -->retained to understand long-term service usage; we may delete or aggregate older records.</li>
+      <li>Server logs (request metadata such as time, path, status and technical errors): kept for troubleshooting and security. <!-- CONFIRM: log retention period on the hosting provider. --></li>
+    </ul>
+  </section>
+
+  <section class="legal-section">
+    <h2>7. Your choices and rights</h2>
+    <ul>
+      <li>View and edit your resumes and target roles from the dashboard, and see your subscription and payment history on the Billing page.</li>
+      <li>Request a copy, correction or deletion of your personal data, or deletion of your account, by contacting us (account deletion is handled by support today). Payment records may be retained where the law requires it.</li>
+      <li>Withdraw consent where processing relies on consent, and raise a complaint with the authority applicable to you. <!-- CONFIRM: grievance officer details if required under Indian law (DPDP Act / IT Rules). --></li>
     </ul>
   </section>
 
   <section class="legal-section">
     <h2>8. Security</h2>
     <p>
-      We use encryption in transit (HTTPS), salted hashing where identifiers are
-      needed, and least-privilege access to protect your data. No security
-      measure is perfect, but we apply industry-standard practices.
+      We use HTTPS, Argon2id password hashing, HttpOnly session cookies with
+      cross-site-request-forgery protection, rate limiting on sign-in, per-user access
+      checks on every account record, and signature verification for payment
+      notifications. No system is completely secure, and we cannot guarantee absolute
+      security; see our <a routerLink="/trust">Trust page</a> for details.
     </p>
   </section>
 
   <section class="legal-section">
-    <h2>9. Children</h2>
-    <p>
-      OyeInterview is intended for users 18 and older. We do not knowingly
-      collect information from children.
-    </p>
+    <h2>9. Age</h2>
+    <p>OyeInterview is intended for users aged 18 or older. We do not knowingly collect personal data from children.</p>
   </section>
 
   <section class="legal-section">
-    <h2>10. Changes to this policy</h2>
-    <p>
-      We may update this policy. The "Last updated" date above reflects the
-      latest revision. Continued use after a change constitutes acceptance.
-    </p>
+    <h2>10. Changes</h2>
+    <p>When this policy changes we update the "Last updated" date above. Please review it from time to time. <!-- CONFIRM: whether you want to commit to notifying users of material changes (not implemented today). --></p>
   </section>
 
   <section class="legal-section">
-    <h2>11. Contact us</h2>
+    <h2>11. Contact</h2>
     <p>
-      For privacy questions or to exercise your rights, email
-      <a href="mailto:support@oyeinterview.com">support@oyeinterview.com</a>.
+      Privacy questions or requests: <a href="mailto:support@oyeinterview.com">support&#64;oyeinterview.com</a>.
+      <!-- CONFIRM: this mailbox exists and is monitored. -->
     </p>
   </section>
 </div>

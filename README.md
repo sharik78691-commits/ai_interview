@@ -1,20 +1,44 @@
-# AI Interview Assistant — Web MVP
+# OyeInterview — AI Interview Assistant
 
-Real-time, resume-aware interview guidance in the browser.
-Upload a resume, paste the job description, then get concise AI answer points
-as interview questions are detected from live microphone transcription.
+Real-time, resume-aware interview guidance. Upload a resume and a target job
+description, then get concise AI answer points (STAR stories, code hints,
+follow-ups) as interview questions are detected from live microphone or
+meeting-audio transcription.
 
-> Web MVP only. Microphone/audio input depends on browser permissions and
-> capabilities. No system-audio capture, no Zoom/Teams/Webex integrations,
-> no desktop wrapper in this phase.
+Delivered as a **web app** (www.oyeinterview.com) and a **Windows/macOS desktop
+app** (Electron tray app with screen-share-invisible windows).
+
+| Document | Contents |
+|----------|----------|
+| [ARCHITECTURE.md](ARCHITECTURE.md) | System design, request flows, data model, desktop architecture, security boundaries, scalability plan |
+| [backend/README.md](backend/README.md) | API setup, environment variables, API reference, tests, migrations, deployment |
+| [frontend/README.md](frontend/README.md) | Angular app: development, environments, build, performance, Vercel |
+| [frontend/electron/README.md](frontend/electron/README.md) | Desktop app: development, packaging, security model |
+| [docs/AUDIT_REPORT.md](docs/AUDIT_REPORT.md) | Latest security/performance audit, verification results, residual risks |
+| [backend/.env.example](backend/.env.example) | Every configuration variable with safe placeholders |
+
+## Repository layout
+
+```
+backend/            FastAPI service (REST + WebSocket), SQLAlchemy models, providers, tests
+frontend/           Angular 20 SPA (web) — also the desktop renderer
+frontend/electron/  Electron main process, preloads, screenshot analysis
+docs/               Audit report and supporting documents
+vercel.json         Vercel build + /api, /ws rewrites to the Render backend
+```
 
 ## Tech stack
 
-- Frontend: Angular 20 (standalone), TypeScript, RxJS, hand-written CSS
-- Backend: Python 3.10+, FastAPI, WebSocket, Pydantic v2
-- Speech: browser Web Speech API behind a `SpeechToTextProvider` abstraction
-- AI: `LLMProvider` abstraction — mock/demo by default, OpenAI-compatible HTTP provider when `LLM_API_KEY` is set
-- UI: dark/light theme toggle (persisted in `localStorage`), adjustable AI Guidance text size
+- Frontend: Angular 20 (standalone, signals), TypeScript, RxJS, hand-written CSS
+- Backend: Python 3.10+, FastAPI, WebSocket, Pydantic v2, SQLAlchemy 2.x
+  (SQLite locally, PostgreSQL in production)
+- Auth: HttpOnly signed session cookie + double-submit CSRF, Argon2id, Google OIDC
+- Speech: browser Web Speech API (candidate mic) + server-side Whisper-compatible
+  STT (meeting/tab audio)
+- AI: multi-provider LLM registry (Groq, Gemini, OpenRouter, OpenAI, DeepSeek)
+  with a strict-JSON `AIInterviewResponse` contract and a mock/demo fallback
+- Desktop: Electron (content-protected windows, tray, encrypted key storage)
+- Hosting: Vercel (SPA) → Render (API) → PostgreSQL
 
 ## Quick start (Demo mode, no keys)
 
@@ -28,7 +52,8 @@ uvicorn app.main:app --reload --port 8000
 ```
 
 Health: `GET http://localhost:8000/api/health` → `{"status":"ok","demo_mode":true,...}`
-Docs: `http://localhost:8000/docs`
+Docs: `http://localhost:8000/docs` (development only; hidden in production unless
+`ENABLE_API_DOCS=true`)
 
 **Frontend**
 
@@ -352,10 +377,18 @@ other's resumes or roles.
   server-side re-validation, fresh token on login (session-fixation safe),
   logout clears the cookie.
 - **CSRF**: double-submit token (`aia_csrf` cookie echoed in `X-CSRF-Token`) on
-  all state-changing requests.
-- **CORS**: explicit origins only — never `*` with credentials.
+  **every** state-changing request — auth, resumes, roles, interview and admin.
+- **CORS**: explicit origins only — never `*` with credentials; the same
+  allowlist gates cookie-authenticated WebSockets (cross-site WebSocket
+  hijacking protection).
 - **Rate limiting**: in-process fixed-window limiter on login/register/forgot/
-  reset (default 10/min/IP).
+  reset (default 10/min per IP **and** per account), plus a per-user limit on AI
+  answers and resume uploads (`AI_RATE_LIMIT_PER_MINUTE`, default 30). Set
+  `TRUSTED_PROXY_COUNT` behind proxies so `X-Forwarded-For` cannot be spoofed.
+- **Session revocation**: logout deny-lists the token; a password reset signs
+  out every existing session.
+- **Session secret**: production without `SESSION_SECRET` uses a random
+  per-process secret (never the public dev fallback) and logs an ERROR.
 - **Security headers**: `X-Content-Type-Options`, `Referrer-Policy`,
   `X-Frame-Options`, `Content-Security-Policy` (`frame-ancestors 'none'`),
   `Permissions-Policy` (allows microphone + display-capture for same-origin),
@@ -531,9 +564,15 @@ still completing quickly on real providers.
 ## Testing
 
 ```powershell
-cd backend; python -m pytest -q        # 88 tests: auth, isolation, WS auth, resume, question buffer, mock AI, API, interviewer audio/STT
-cd ../frontend; npm run build          # production build (Karma specs: npm test)
+cd backend; python -m pytest -q                                   # ~240 tests, ~1 min, no network
+cd ../frontend; npm run build                                     # production build (budget-checked)
+npx ng test --watch=false --browsers=ChromeHeadless               # Karma specs
+npm run test:electron                                             # desktop main-process modules
 ```
+
+The backend suite blanks AI/STT/OAuth keys automatically, so it never calls
+billed providers even when `backend/.env` holds real keys (opt in with
+`AIA_TESTS_USE_REAL_KEYS=1`). Each run uses its own temporary SQLite file.
 
 Backend coverage includes authentication (register, duplicate, hashing, login,
 invalid password, logout, session validation, `/api/auth/me`, Google OAuth
@@ -547,19 +586,38 @@ External AI/STT calls are mocked or fall back in all tests.
 ## Privacy
 
 Resume and interview context are processed only to provide interview assistance.
-Interview context is kept in server memory, now **isolated per authenticated
+Interview context is kept in server memory, **isolated per authenticated
 user** (keyed by user id, never a client-supplied id), plus browser
-`localStorage`. Only authentication data (users, password-reset tokens) is
-written to the database — no resumes or transcripts. Full resume text and
-transcripts are not logged — only lengths and error summaries. Passwords are
-never logged and never returned; only Argon2id hashes are stored.
+`localStorage`. The database stores accounts, the user's own resume library
+(original file + extracted text, max 4 per user) and target roles (max 4), and
+a lean activity log (event kind, user id, time, LLM usage) — **never
+transcripts or questions**. Full resume text, questions and transcripts are not
+logged — only lengths and error summaries. Passwords are never logged and never
+returned; only Argon2id hashes are stored.
 
 ## Limits → roadmap
 
 ```
-Web MVP (this repo) — auth (Google + email/password) shipped
-  → Desktop app wrapper
-  → System-audio capture (STT provider swap, no UI rewrite)
+Shipped: web app, auth (Google + email/password), resume/role libraries,
+         multi-model AI, meeting-audio STT, admin panel, desktop app
+Next   : see docs/AUDIT_REPORT.md §4 (history purge, Electron upgrade + app://
+         protocol, email verification, Alembic, Redis for multi-worker)
   → Zoom/Meet/Teams/Webex integrations
-  → Persistent history, advanced AI
+  → Persistent history, payments
 ```
+
+## Deployment overview
+
+| Component | Host | Build / start | Notes |
+|-----------|------|---------------|-------|
+| SPA | Vercel | `npm ci && npm run build` → `dist/frontend/browser` | `vercel.json` rewrites `/api/*`, `/ws/*` to Render and `/*` to `index.html` |
+| API | Render | `pip install -r requirements.txt` → `uvicorn app.main:app --host 0.0.0.0 --port $PORT --proxy-headers` | Set `ENVIRONMENT=production`, `SESSION_SECRET`, `DATABASE_URL`, `CORS_ORIGINS`, `FRONTEND_URL`, `GOOGLE_REDIRECT_URI` (frontend origin), provider keys, `TRUSTED_PROXY_COUNT` |
+| Database | PostgreSQL | auto-created tables + additive migrations at startup | see backend/README.md → Database & migrations |
+| Desktop | GitHub Release / CDN | `cd frontend && npm run dist:win` | see frontend/electron/README.md |
+
+## Troubleshooting (quick index)
+
+- Backend config, OAuth, CSRF, WebSocket 1008, rate limits → [backend/README.md#troubleshooting](backend/README.md#troubleshooting)
+- Production logout, live answers, mic permissions → [frontend/README.md#troubleshooting](frontend/README.md#troubleshooting)
+- Desktop black window, hotkey, screenshot key → [frontend/electron/README.md#troubleshooting](frontend/electron/README.md#troubleshooting)
+- Interviewer audio / STT → [Troubleshooting](#troubleshooting) above

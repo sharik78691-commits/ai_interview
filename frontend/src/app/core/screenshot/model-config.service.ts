@@ -14,9 +14,9 @@ export const FALLBACK_MODELS: ScreenshotModel[] = [
     provider: 'google',
     displayName: 'Gemini 3.5 Flash Lite',
     limits: {
-      maxImages: 16,
-      maxImageBytes: 7 * 1024 * 1024,
-      maxTotalBytes: 14 * 1024 * 1024,
+      maxImages: 10,
+      maxImageBytes: 3 * 1024 * 1024,
+      maxTotalBytes: 3 * 1024 * 1024,
       minDimension: 32,
       maxDimension: 8192,
     },
@@ -31,15 +31,16 @@ function readSaved(): string | null {
   }
 }
 
-/** AI model selection + API-key status. The key itself is write-only from here. */
+/**
+ * AI model selection + server readiness. There is no API key on the client:
+ * the backend analyzes screenshots with the key from its own .env.
+ */
 @Injectable({ providedIn: 'root' })
 export class ModelConfigService {
   readonly models = signal<ScreenshotModel[]>(FALLBACK_MODELS);
   readonly selectedKey = signal<string>(DEFAULT_SCREENSHOT_MODEL_KEY);
-  readonly keyStored = signal<Record<string, boolean>>({});
-  readonly encryptionAvailable = signal(true);
-  readonly keySources = signal<Record<string, 'stored' | 'env' | null>>({});
-  readonly envHint = signal('');
+  /** true/false = server has / lacks its AI key; null = unknown (offline). */
+  readonly serverReady = signal<boolean | null>(null);
 
   readonly activeModel = computed(
     () =>
@@ -47,9 +48,8 @@ export class ModelConfigService {
       this.models().find((m) => m.key === DEFAULT_SCREENSHOT_MODEL_KEY) ??
       this.models()[0],
   );
-  readonly hasKey = computed(() => !!this.keyStored()[this.activeModel().provider]);
-  /** 'env' = loaded automatically from .env; 'stored' = saved in the app. */
-  readonly keySource = computed(() => this.keySources()[this.activeModel().provider] ?? null);
+  /** Analysis is allowed unless the server said it is not set up. */
+  readonly canUseServer = computed(() => this.serverReady() !== false);
 
   constructor() {
     this.selectedKey.set(this.resolveKey(readSaved(), this.models()));
@@ -66,10 +66,7 @@ export class ModelConfigService {
     const res = await bridge.getConfig();
     if (!res.ok) throw new ScreenshotError(res.error.code, res.error.message);
     this.models.set(res.models.length ? res.models : FALLBACK_MODELS);
-    this.keyStored.set(res.keyStored);
-    this.keySources.set(res.keySources ?? {});
-    this.envHint.set(res.envHint ?? '');
-    this.encryptionAvailable.set(res.encryptionAvailable);
+    this.serverReady.set(typeof res.serverReady === 'boolean' ? res.serverReady : null);
     this.selectedKey.set(this.resolveKey(readSaved(), this.models()));
   }
 
@@ -80,25 +77,5 @@ export class ModelConfigService {
     } catch {
       // Private mode / storage disabled — selection still applies for this session.
     }
-  }
-
-  async saveKey(apiKey: string): Promise<void> {
-    const bridge = getScreenshotBridge();
-    if (!bridge) throw new ScreenshotError('NOT_DESKTOP', 'Only available in the desktop app.');
-    const model = this.activeModel();
-    const res = await bridge.setKey(model.key, apiKey);
-    if (!res.ok) throw new ScreenshotError(res.error.code, res.error.message);
-    this.keyStored.update((k) => ({ ...k, [model.provider]: true }));
-    this.keySources.update((k) => ({ ...k, [model.provider]: 'stored' }));
-  }
-
-  async clearKey(): Promise<void> {
-    const bridge = getScreenshotBridge();
-    if (!bridge) return;
-    const model = this.activeModel();
-    const res = await bridge.clearKey(model.key);
-    if (!res.ok) throw new ScreenshotError(res.error.code, res.error.message);
-    // A .env key may still apply after the saved key is removed — ask the main process.
-    await this.load();
   }
 }

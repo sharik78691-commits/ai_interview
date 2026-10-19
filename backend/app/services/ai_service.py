@@ -1,15 +1,21 @@
-"""AI interview session service (in-memory context store)."""
-import uuid
+"""Answer orchestration for one interview session.
+
+Business logic only: provider choice goes through an injectable factory
+(default: the model registry), so the core flow never names a concrete LLM
+vendor and tests/alternative providers plug in without patching modules.
+"""
 from collections.abc import Awaitable, Callable
 
 from app.models.ai_response import AIInterviewResponse
-from app.providers.llm.registry import get_llm_provider
+from app.providers.llm.base import LLMProvider
 from app.providers.llm.provider import LLMQuotaError, MockLLMProvider
+from app.providers.llm.registry import get_llm_provider
+
+#: Resolves a model key (None = default model) to a provider instance.
+ProviderFactory = Callable[[str | None], LLMProvider]
 
 
 class AIService:
-    sessions: dict[str, dict[str, str]] = {}
-
     #: Shared default when no explicit length is provided by the client.
     default_length: str = "medium"
 
@@ -18,16 +24,14 @@ class AIService:
         resume_text: str = "",
         job_description: str = "",
         response_length: str = "medium",
+        provider_factory: ProviderFactory | None = None,
     ) -> None:
         self.resume_text = resume_text or ""
         self.job_description = job_description or ""
         self.response_length = response_length or "medium"
-        self.session_id = str(uuid.uuid4())
-        AIService.sessions[self.session_id] = {
-            "resume": self.resume_text,
-            "job": self.job_description,
-            "length": self.response_length,
-        }
+        # None -> look up the module-level registry function at call time
+        # (keeps existing monkeypatch-based tests working).
+        self._provider_factory = provider_factory
         # User-facing notice for the most recent call (None when all good).
         self.last_warning: str | None = None
         # Last provider/model actually used (for usage tracking + UI display).
@@ -46,7 +50,8 @@ class AIService:
         model_key: str | None = None,
         on_delta: Callable[[str], Awaitable[None]] | None = None,
     ) -> AIInterviewResponse:
-        provider = get_llm_provider(model_key)
+        factory = self._provider_factory or get_llm_provider
+        provider = factory(model_key)
         level = response_length or self.response_length
         self.response_length = level
         self.last_warning = None
@@ -119,7 +124,3 @@ class AIService:
         return await provider.analyze_question(
             self.resume_text, self.job_description, question, self.response_length
         )
-
-    @classmethod
-    def get_session(cls, session_id: str) -> dict[str, str] | None:
-        return cls.sessions.get(session_id)

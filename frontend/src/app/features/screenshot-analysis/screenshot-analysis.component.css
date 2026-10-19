@@ -40,5 +40,16 @@ h1 { margin: 0 0 4px; }
 .sources { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; margin-top: 12px; }
 .source { background: var(--panel2); border: 1px solid var(--border); border-radius: 12px; padding: 8px; color: var(--text); cursor: pointer; text-align: left; display: flex; flex-direction: column; gap: 6px; font-size: .85rem; }
 .source:hover:not(:disabled) { border-color: var(--accent); }
+.source.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+.modal:focus { outline: none; }
 .source img { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 8px; }
 .source span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.title-with-hint { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.title-hint { font-size: .8rem; font-weight: 600; color: var(--muted); }
+.hotkey-steps { margin: 2px 0 6px; }
+.hotkey-tip kbd, .hotkey-steps kbd {
+  font-family: inherit; font-size: .72rem; font-weight: 700;
+  background: rgba(255,255,255,.07); border: 1px solid var(--border-strong);
+  border-bottom-width: 2px; border-radius: 5px; padding: 0 5px;
+}

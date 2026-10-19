@@ -1,72 +1,133 @@
 <div class="container pricing">
   <header class="pricing-head">
-    <h1>Simple, honest pricing</h1>
+    <h1>Simple, prepaid pricing</h1>
     <p class="muted lead">
-      Real-time AI interview guidance for as long as you need it. Pick a plan,
-      cancel anytime. All prices are in Indian Rupees (₹) and include GST where
-      applicable.
+      Pay once for a fixed period of access. <strong>No auto-renewal, no stored
+      cards</strong> — when your period ends, you choose whether to buy again.
     </p>
   </header>
 
-  <div class="plans">
-    @for (p of plans; track p.key) {
-      <article class="plan" [class.highlight]="p.highlight">
-        @if (p.badge) {
-          <span class="plan-badge">{{ p.badge }}</span>
-        }
-        <h2>{{ p.name }}</h2>
-        <div class="price">
-          <span class="amount">{{ inr(p.price) }}</span>
-          <span class="per">/ {{ p.perLabel }}</span>
-        </div>
-        <p class="tagline muted">{{ p.tagline }}</p>
-        <ul class="feats">
-          @for (f of p.features; track f) {
-            <li>✓ {{ f }}</li>
+  @if (loading()) {
+    <p class="muted center">Loading plans…</p>
+  } @else if (loadError()) {
+    <div class="banner error">{{ loadError() }}</div>
+  } @else if (plans().length === 0) {
+    <div class="banner info">No plans are available right now. Please check back soon.</div>
+  } @else {
+    <div class="plans" [class.few]="plans().length < 4">
+      @for (p of plans(); track p.id) {
+        <article class="plan" [class.highlight]="p.is_highlighted">
+          @if (p.badge) {
+            <span class="plan-badge">{{ p.badge }}</span>
           }
-        </ul>
-        <p class="renew muted small">↻ {{ p.renews }}</p>
-        <a routerLink="/register" class="cta" [class.primary]="p.highlight">
-          {{ p.highlight ? 'Choose ' + p.name : 'Get ' + p.name }}
-        </a>
-      </article>
-    }
-  </div>
+          <h2>{{ p.name }}</h2>
+          <div class="price">
+            <span class="amount">{{ money(p.price_minor, p.currency) }}</span>
+            <span class="per">/ {{ duration(p.duration_days) }}</span>
+          </div>
+          @if (p.is_promo) {
+            <p class="promo small">
+              <s class="muted">{{ money(p.regular_price_minor, p.currency) }}</s>
+              {{ p.promo_label || 'Limited-time price' }}
+            </p>
+          }
+          <p class="tagline muted">{{ p.description }}</p>
+          <ul class="feats">
+            @for (f of p.features; track f) {
+              <li>✓ {{ f }}</li>
+            }
+          </ul>
+          <p class="renew muted small">≈ {{ perDay(p) }} per day · one-time payment</p>
+          @if (p.trial_days > 0) {
+            <p class="muted small">Includes a {{ duration(p.trial_days) }} free trial (once per account) — start it from Billing.</p>
+          }
+          <button type="button" class="cta" [class.primary]="p.is_highlighted" (click)="choose(p)">
+            Get {{ p.name }}
+          </button>
+        </article>
+      }
+    </div>
+  }
 
-  <section class="billing-note banner info">
-    <strong>Automatic renewal:</strong> every plan renews automatically for the
-    same duration at the same price so your coverage never lapses mid-interview.
-    You can cancel the renewal anytime from your account settings, and your
-    current period stays active until its end date.
-  </section>
+  @if (selected(); as plan) {
+    <div class="checkout-backdrop" (click)="cancel()"></div>
+    <section class="checkout card" role="dialog" aria-modal="true" aria-labelledby="checkout-title">
+      <h2 id="checkout-title">Checkout — {{ plan.name }}</h2>
+      <p class="checkout-total">
+        <span>Total</span>
+        <strong>{{ money(plan.price_minor, plan.currency) }}</strong>
+      </p>
+      <p class="muted small">
+        {{ duration(plan.duration_days) }} of access, starting now (or right after
+        any time you already have). Price is fixed by our server at checkout.
+      </p>
+
+      @if (gateways().length === 0) {
+        <div class="banner info">
+          Online payments are not enabled yet. Please contact support to purchase.
+        </div>
+      } @else {
+        <fieldset class="gw">
+          <legend class="small muted">Pay with</legend>
+          @for (g of gateways(); track g.key) {
+            <label class="gw-opt">
+              <input type="radio" name="gateway" [value]="g.key" [ngModel]="gateway" (ngModelChange)="onGatewayChange($event)" />
+              {{ g.display_name }}
+            </label>
+          }
+        </fieldset>
+        @if (needsPhone()) {
+          <label class="field">
+            <span class="small">Mobile number (required by Cashfree, not stored by us)</span>
+            <input type="tel" inputmode="tel" autocomplete="tel" maxlength="20" [(ngModel)]="phone" placeholder="10-digit mobile number" />
+          </label>
+        }
+        @if (message()) {
+          <div class="banner" [class.error]="messageKind() === 'error'" [class.info]="messageKind() === 'info'">{{ message() }}</div>
+        }
+        <div class="checkout-actions">
+          <button type="button" class="btn-ghost" (click)="cancel()" [disabled]="busy()">Cancel</button>
+          <button type="button" class="btn-primary" (click)="pay()" [disabled]="busy() || !gateway">
+            {{ busy() ? 'Please wait…' : 'Pay ' + money(plan.price_minor, plan.currency) }}
+          </button>
+        </div>
+        <p class="muted small">
+          You'll complete payment on the gateway's secure page. We never see or
+          store your card number, CVV, UPI PIN or bank credentials.
+        </p>
+      }
+    </section>
+  }
 
   <section class="include">
     <h2>Every plan includes</h2>
     <div class="grid3">
-      <div class="card"><h3>⚡ Real-time guidance</h3><p class="muted">Answers appear while the interviewer is asking — not after.</p></div>
-      <div class="card"><h3>📄 Resume-aware</h3><p class="muted">Every suggestion is grounded in your resume and target role.</p></div>
-      <div class="card"><h3>🎙 Live transcription</h3><p class="muted">Meeting or tab audio is transcribed to detect questions automatically.</p></div>
-      <div class="card"><h3>🧠 Multiple AI models</h3><p class="muted">Choose between Groq, Gemini, Qwen and OpenRouter free models.</p></div>
-      <div class="card"><h3>🔒 Private by design</h3><p class="muted">Mic audio is transcribed in your browser; only question text is sent.</p></div>
-      <div class="card"><h3>🔄 Cancel anytime</h3><p class="muted">No lock-in — stop auto-renewal whenever you want.</p></div>
+      <div class="card"><h3>⚡ Real-time guidance</h3><p class="muted">Answer points stream in while the question is being answered.</p></div>
+      <div class="card"><h3>📄 Resume-aware</h3><p class="muted">Suggestions use your saved resume and target job description.</p></div>
+      <div class="card"><h3>🎙 Interviewer audio</h3><p class="muted">Meeting or browser-tab audio is transcribed so questions are detected automatically.</p></div>
+      <div class="card"><h3>🧠 Model choice</h3><p class="muted">Pick from the AI models enabled on the service at the time you use it.</p></div>
+      <div class="card"><h3>📏 Answer length</h3><p class="muted">Short, medium or long answers — switch any time during a session.</p></div>
+      <div class="card"><h3>🔁 No auto-renewal</h3><p class="muted">Nothing is charged again automatically. Buy another period only if you want one.</p></div>
     </div>
   </section>
 
   <section class="faqs">
     <h2>Billing questions</h2>
-    <details class="card faq"><summary>How does auto-renewal work?</summary><p class="muted">When your current period ends, the same plan renews automatically at the same price. We send a reminder before each renewal and you can cancel it anytime.</p></details>
-    <details class="card faq"><summary>Can I cancel auto-renewal?</summary><p class="muted">Yes. Go to your account settings and turn off auto-renewal. You keep access until the end of the current period — no partial-day charges.</p></details>
-    <details class="card faq"><summary>What payment methods do you accept?</summary><p class="muted">UPI, debit and credit cards, and net banking, processed securely by Razorpay and Cashfree. We never store your full card details.</p></details>
-    <details class="card faq"><summary>Can I get a refund?</summary><p class="muted">OyeInterview is a digital service delivered instantly, so refunds follow our Refund &amp; Cancellation Policy. Please review it before purchasing.</p></details>
-    <details class="card faq"><summary>Do prices include taxes?</summary><p class="muted">Yes — listed prices include GST where applicable. The final amount shown at checkout is the amount you pay.</p></details>
+    <details class="card faq"><summary>Does any plan renew automatically?</summary><p class="muted">No. Every purchase is a one-time payment for a fixed period. We don't save cards or set up recurring mandates.</p></details>
+    <details class="card faq"><summary>What if I buy again before my period ends?</summary><p class="muted">The new period is added after your current one ends, so you don't lose any days.</p></details>
+    <details class="card faq"><summary>How do I pay?</summary><p class="muted">Through our payment partners (Razorpay or Cashfree, whichever is enabled). Available methods such as UPI, cards and net banking are offered on the gateway's own checkout page.</p></details>
+    <details class="card faq"><summary>When does my plan start?</summary><p class="muted">As soon as the payment gateway confirms the payment to our server — usually within seconds. If confirmation is delayed, your plan activates automatically when it arrives.</p></details>
+    <details class="card faq"><summary>Can I get a refund?</summary><p class="muted">Refunds follow our <a routerLink="/refund-policy">Refund &amp; Cancellation Policy</a>. Please read it before purchasing.</p></details>
+    <details class="card faq"><summary>Do prices include taxes?</summary><p class="muted">The amount shown at checkout is the amount you pay. <!-- CONFIRM: GST registration status and whether prices are tax-inclusive. -->Tax treatment is described in our Terms.</p></details>
   </section>
 
   <footer class="pricing-foot muted small">
     <p>
-      By subscribing you agree to our
-      <a routerLink="/terms-and-conditions">Terms and Conditions</a>,
-      <a routerLink="/privacy-policy">Privacy Policy</a>, and
-      <a routerLink="/refund-policy">Refund &amp; Cancellation Policy</a>.
+      By purchasing you agree to our
+      <a routerLink="/terms">Terms</a>,
+      <a routerLink="/privacy-policy">Privacy Policy</a>,
+      <a routerLink="/refund-policy">Refund &amp; Cancellation Policy</a> and
+      <a routerLink="/acceptable-use">Acceptable Use Policy</a>.
     </p>
   </footer>
 </div>

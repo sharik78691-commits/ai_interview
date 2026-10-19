@@ -13,7 +13,8 @@ import {
   throwError,
 } from 'rxjs';
 import { AuthStatus, AuthUser, LoginPayload, RegisterPayload } from '../models/auth.models';
-import { environment } from '../../../environments/environment';
+import { API_BASE_URL } from '../api/api-config';
+import { CSRF_HEADER, readCsrfToken } from './csrf';
 
 /**
  * Base URL for the API.
@@ -24,8 +25,6 @@ import { environment } from '../../../environments/environment';
  * paths keep working without hard-coded hosts. In the Electron build it is an
  * absolute URL (no proxy exists under `file://`).
  */
-const BASE = environment.apiBaseUrl;
-
 /** Lets every open tab of the app learn that the user signed out. */
 const LOGOUT_CHANNEL = 'aia-auth';
 
@@ -39,6 +38,7 @@ const LOGOUT_CHANNEL = 'aia-auth';
 @Injectable({ providedIn: 'root' })
 export class AuthService implements OnDestroy {
   private http = inject(HttpClient);
+  private readonly base = inject(API_BASE_URL);
   private zone = inject(NgZone);
 
   private userSubject = new BehaviorSubject<AuthUser | null>(null);
@@ -82,20 +82,14 @@ export class AuthService implements OnDestroy {
     return this.userSubject.value?.is_admin === true;
   }
 
-  /** Read the readable CSRF cookie for the double-submit header. */
-  private csrfToken(): string {
-    const match = document.cookie.match(/(?:^|;\s*)aia_csrf=([^;]+)/);
-    return match ? decodeURIComponent(match[1]) : '';
-  }
-
   private csrfHeaders(): Record<string, string> {
-    const token = this.csrfToken();
-    return token ? { 'X-CSRF-Token': token } : {};
+    const token = readCsrfToken();
+    return token ? { [CSRF_HEADER]: token } : {};
   }
 
   /** Fetch the current session from the backend. */
   checkSession(): Observable<AuthUser | null> {
-    return this.http.get<AuthStatus>(`${BASE}/api/auth/me`).pipe(
+    return this.http.get<AuthStatus>(`${this.base}/api/auth/me`).pipe(
       map((s) => (s.authenticated ? s.user : null)),
       tap((user) => {
         this.userSubject.next(user);
@@ -111,7 +105,7 @@ export class AuthService implements OnDestroy {
 
   register(payload: RegisterPayload): Observable<AuthUser> {
     return this.http
-      .post<AuthStatus>(`${BASE}/api/auth/register`, payload)
+      .post<AuthStatus>(`${this.base}/api/auth/register`, payload)
       .pipe(
         map((s) => s.user as AuthUser),
         tap((user) => this.userSubject.next(user)),
@@ -119,7 +113,7 @@ export class AuthService implements OnDestroy {
   }
 
   login(payload: LoginPayload): Observable<AuthUser> {
-    return this.http.post<AuthStatus>(`${BASE}/api/auth/login`, payload).pipe(
+    return this.http.post<AuthStatus>(`${this.base}/api/auth/login`, payload).pipe(
       map((s) => s.user as AuthUser),
       tap((user) => this.userSubject.next(user)),
     );
@@ -132,7 +126,7 @@ export class AuthService implements OnDestroy {
   logout(): Observable<void> {
     if (this.logoutRequest) return this.logoutRequest;
     this.logoutRequest = this.http
-      .post<{ message: string }>(`${BASE}/api/auth/logout`, {}, { headers: this.csrfHeaders() })
+      .post<{ message: string }>(`${this.base}/api/auth/logout`, {}, { headers: this.csrfHeaders() })
       .pipe(
         map(() => void 0),
         tap(() => this.finishLogout()),
@@ -158,11 +152,11 @@ export class AuthService implements OnDestroy {
   }
 
   forgotPassword(email: string): Observable<{ message: string }> {
-    return this.http.post<{ message: string }>(`${BASE}/api/auth/forgot-password`, { email });
+    return this.http.post<{ message: string }>(`${this.base}/api/auth/forgot-password`, { email });
   }
 
   resetPassword(token: string, password: string): Observable<{ message: string }> {
-    return this.http.post<{ message: string }>(`${BASE}/api/auth/reset-password`, {
+    return this.http.post<{ message: string }>(`${this.base}/api/auth/reset-password`, {
       token,
       password,
     });
@@ -170,7 +164,7 @@ export class AuthService implements OnDestroy {
 
   /** Full-page redirect to the backend Google OAuth entrypoint. */
   googleLoginUrl(): string {
-    return `${BASE}/api/auth/google/login`;
+    return `${this.base}/api/auth/google/login`;
   }
 
   /** Map a backend error into a user-friendly message. */

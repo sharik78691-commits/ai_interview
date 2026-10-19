@@ -1,7 +1,8 @@
-import { Injectable } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
 import { BehaviorSubject, Subject } from 'rxjs';
 import { AIInterviewResponse, HistoryItem, InterviewStatus } from '../models/interview.models';
 import { environment } from '../../../environments/environment';
+import { API_BASE_URL } from '../api/api-config';
 
 /**
  * Backend origin for the live-interview WebSocket.
@@ -30,7 +31,6 @@ const WS_BASE_URL: string =
  * The socket itself is cross-origin and does not, which is exactly why the
  * ticket exists.
  */
-const TICKET_PATH = `${environment.apiBaseUrl}/api/auth/ws-ticket`;
 
 interface WsMsg {
   type: string;
@@ -39,6 +39,7 @@ interface WsMsg {
 
 @Injectable({ providedIn: 'root' })
 export class InterviewWsService {
+  private readonly ticketPath = `${inject(API_BASE_URL)}/api/auth/ws-ticket`;
   messages$ = new Subject<WsMsg>();
   status$ = new BehaviorSubject<InterviewStatus>('idle');
   guidance$ = new BehaviorSubject<AIInterviewResponse | null>(null);
@@ -118,7 +119,7 @@ export class InterviewWsService {
    */
   private async fetchTicket(): Promise<string | null> {
     try {
-      const res = await fetch(TICKET_PATH, {
+      const res = await fetch(this.ticketPath, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },

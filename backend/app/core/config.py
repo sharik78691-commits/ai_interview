@@ -26,9 +26,18 @@ load_dotenv()
 
 
 def _as_bool(value: str | None, default: bool = False) -> bool:
-    if value is None:
+    # Blank counts as unset: `.env.example` ships `COOKIE_SECURE=` etc., and an
+    # empty value must mean "use the default" (e.g. Secure cookies in
+    # production), not "false".
+    if value is None or not value.strip():
         return default
     return value.strip().lower() in ("1", "true", "yes", "on")
+
+
+def _env(name: str, default: str) -> str:
+    """``os.getenv`` that also falls back to ``default`` for a BLANK value."""
+    value = os.getenv(name)
+    return value if value and value.strip() else default
 
 
 def _as_list(value: str | None, default: list[str]) -> list[str]:
@@ -59,6 +68,9 @@ class Settings:
         self.gemini_31_lite_model: str = os.getenv(
             "GEMINI_31_LITE_MODEL", "gemini-3.1-flash-lite"
         )
+        # Desktop screenshot analysis (POST /api/screenshots/analyze). Uses
+        # GEMINI_API_KEY above — the desktop app never holds a key.
+        self.screenshot_model: str = os.getenv("SCREENSHOT_MODEL", "") or self.gemini_model
         # Qwen + the OpenRouter free model share the OpenRouter key.
         self.openrouter_api_key: str = os.getenv("OPENROUTER_API_KEY", "")
         self.qwen_model: str = os.getenv("QWEN_MODEL", "qwen/qwen3-coder:free")
@@ -90,7 +102,7 @@ class Settings:
         self.stt_base_url: str = os.getenv("STT_BASE_URL", "")
         # Demo mode defaults to True when no LLM key is configured.
         explicit_demo = os.getenv("DEMO_MODE")
-        if explicit_demo is None:
+        if explicit_demo is None or not explicit_demo.strip():
             self.demo_mode: bool = not bool(self.llm_api_key)
         else:
             self.demo_mode = _as_bool(explicit_demo, default=True)
@@ -105,7 +117,7 @@ class Settings:
         # ------------------------------------------------------------- database
         # SQLite by default so the app starts locally with zero infrastructure.
         # Production sets DATABASE_URL to a PostgreSQL DSN.
-        self.database_url: str = os.getenv(
+        self.database_url: str = _env(
             "DATABASE_URL", f"sqlite:///{(_BACKEND_DIR / 'app.db').as_posix()}"
         )
 
@@ -154,7 +166,7 @@ class Settings:
         # Default the redirect URI to the backend origin so a deployed backend
         # never falls back to localhost. Override with GOOGLE_REDIRECT_URI when
         # the callback is fronted by a different host (e.g. a reverse proxy).
-        self.google_redirect_uri: str = os.getenv(
+        self.google_redirect_uri: str = _env(
             "GOOGLE_REDIRECT_URI",
             f"{self.backend_url.rstrip('/')}/api/auth/google/callback",
         )
@@ -220,8 +232,58 @@ class Settings:
             )
         except ValueError:
             self.rate_limit_per_minute = 10
+        # Per-user cap on AI answer requests (REST /interview/analyze) and
+        # resume uploads. Protects provider spend from a scripted client.
+        try:
+            self.ai_rate_limit_per_minute: int = int(
+                os.getenv("AI_RATE_LIMIT_PER_MINUTE", "30")
+            )
+        except ValueError:
+            self.ai_rate_limit_per_minute = 30
+        # Number of reverse proxies in front of the app that APPEND to
+        # X-Forwarded-For. 0 (default) keeps the legacy behaviour (left-most
+        # entry). Set it to the real hop count (e.g. 2 for Vercel -> Render) so
+        # a client cannot pick its own rate-limit bucket by spoofing the header.
+        try:
+            self.trusted_proxy_count: int = max(0, int(os.getenv("TRUSTED_PROXY_COUNT", "0")))
+        except ValueError:
+            self.trusted_proxy_count = 0
+        # Interactive API docs (/docs, /redoc, /openapi.json). On by default in
+        # development, off in production unless explicitly enabled.
+        self.enable_api_docs: bool = _as_bool(
+            os.getenv("ENABLE_API_DOCS"), default=not self._is_production()
+        )
+
+        # ------------------------------------------------------------ payments
+        # Credentials come ONLY from the environment; a gateway is offered to
+        # users only when its credentials are present. Never logged.
+        self.razorpay_key_id: str = os.getenv("RAZORPAY_KEY_ID", "").strip()
+        self.razorpay_key_secret: str = os.getenv("RAZORPAY_KEY_SECRET", "").strip()
+        self.razorpay_webhook_secret: str = os.getenv("RAZORPAY_WEBHOOK_SECRET", "").strip()
+        self.cashfree_client_id: str = os.getenv("CASHFREE_CLIENT_ID", "").strip()
+        self.cashfree_client_secret: str = os.getenv("CASHFREE_CLIENT_SECRET", "").strip()
+        # "sandbox" (default) or "production" — selects the Cashfree API host.
+        self.cashfree_env: str = _env("CASHFREE_ENV", "sandbox").strip().lower()
+        self.cashfree_api_version: str = _env("CASHFREE_API_VERSION", "2023-08-01").strip()
+        # Development-only simulated gateway. Forced OFF in production no
+        # matter what the variable says, so a fake payment can never grant
+        # real access.
+        self.payments_mock_enabled: bool = (
+            _as_bool(os.getenv("PAYMENTS_MOCK_ENABLED"), default=not self._is_production())
+            and not self._is_production()
+        )
+        # Name shown in gateway checkout popups.
+        self.payment_merchant_name: str = _env("PAYMENT_MERCHANT_NAME", "OyeInterview")
 
         self._log_summary()
+
+    @property
+    def razorpay_configured(self) -> bool:
+        return bool(self.razorpay_key_id and self.razorpay_key_secret)
+
+    @property
+    def cashfree_configured(self) -> bool:
+        return bool(self.cashfree_client_id and self.cashfree_client_secret)
 
     def _is_production(self) -> bool:
         env = os.getenv("ENVIRONMENT", os.getenv("APP_ENV", "development")).lower()
@@ -255,8 +317,23 @@ class Settings:
         logger.info("  demo_mode        = %s", self.demo_mode)
         logger.info("  google_oauth     = %s", self.google_configured)
         logger.info("  ws_ticket_max_age= %ss", self.ws_ticket_max_age)
+        logger.info(
+            "  payments         = razorpay=%s (webhook_secret=%s) cashfree=%s (%s) mock=%s",
+            self.razorpay_configured,
+            bool(self.razorpay_webhook_secret),
+            self.cashfree_configured,
+            self.cashfree_env,
+            self.payments_mock_enabled,
+        )
 
-        if not self.session_secret:
+        if not self.session_secret and self._is_production():
+            logger.error(
+                "SESSION_SECRET is not set while ENVIRONMENT=production. A random "
+                "per-process secret is used instead (sessions cannot be forged, "
+                "but every restart signs everyone out and multiple workers will "
+                "not share logins). Set SESSION_SECRET on the host."
+            )
+        elif not self.session_secret:
             logger.warning(
                 "SESSION_SECRET is not set. Sessions are signed with an insecure "
                 "built-in default, so every restart invalidates all logins. Set "

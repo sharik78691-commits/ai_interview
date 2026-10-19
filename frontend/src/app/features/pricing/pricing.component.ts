@@ -1,98 +1,139 @@
-import { Component } from '@angular/core';
-
-interface Plan {
-  key: string;
-  name: string;
-  price: number;
-  period: string;
-  perLabel: string;
-  tagline: string;
-  highlight?: boolean;
-  badge?: string;
-  features: string[];
-  renews: string;
-}
+import { Component, OnInit, computed, inject, signal } from '@angular/core';
+import { FormsModule } from '@angular/forms';
+import { Router, RouterLink } from '@angular/router';
+import { HttpErrorResponse } from '@angular/common/http';
+import { firstValueFrom, forkJoin } from 'rxjs';
+import { AuthService } from '../../core/auth/auth.service';
+import { CheckoutLauncherService } from '../../core/payments/checkout-launcher.service';
+import { BillingService } from '../../core/services/billing.service';
+import {
+  Gateway,
+  GatewayKey,
+  Plan,
+  durationLabel,
+  formatMoney,
+} from '../../core/models/billing.models';
 
 /**
- * Public pricing page — required for Razorpay / Cashfree merchant approval.
- * Plan prices and durations are displayed plainly in INR with auto-renewal
- * terms stated clearly (payment gateways reject sites with hidden pricing).
+ * Public pricing page — every plan, price, duration and promotion comes from
+ * the backend (`GET /api/plans`), so admin edits show up without a frontend
+ * release. Purchases are one-time prepaid periods; there is NO auto-renewal.
  */
 @Component({
   selector: 'app-pricing',
   standalone: true,
+  imports: [RouterLink, FormsModule],
   templateUrl: './pricing.component.html',
   styleUrl: './pricing.component.css',
 })
-export class PricingComponent {
-  plans: Plan[] = [
-    {
-      key: 'trial',
-      name: '3 Days',
-      price: 150,
-      period: '3 days',
-      perLabel: 'one-time access',
-      tagline: 'A single interview, fully assisted.',
-      features: [
-        'Real-time AI guidance',
-        'Resume + job-description aware answers',
-        'Technical, behavioral & coding support',
-        'Meeting/tab audio transcription',
-      ],
-      renews: 'Auto-renews every 3 days until cancelled.',
-    },
-    {
-      key: 'week',
-      name: '7 Days',
-      price: 300,
-      period: '7 days',
-      perLabel: 'one-time access',
-      tagline: 'A week of interviews and practice.',
-      features: [
-        'Everything in 3 Days',
-        'Unlimited interview sessions',
-        'Answer-length control (short / medium / long)',
-        'Copy answers + follow-up questions',
-      ],
-      renews: 'Auto-renews every 7 days until cancelled.',
-    },
-    {
-      key: 'month',
-      name: '1 Month',
-      price: 900,
-      period: 'month',
-      perLabel: 'billed monthly',
-      tagline: 'A full job-hunt month of coverage.',
-      highlight: true,
-      badge: 'Most popular',
-      features: [
-        'Everything in 7 Days',
-        'All AI models (Groq, Gemini, Qwen, OpenRouter)',
-        'Priority access during peak hours',
-        'Session history & saved resumes',
-      ],
-      renews: 'Auto-renews monthly at ₹900 until cancelled.',
-    },
-    {
-      key: 'quarter',
-      name: '3 Months',
-      price: 2000,
-      period: '3 months',
-      perLabel: 'billed quarterly',
-      tagline: 'Save ~26% vs paying monthly.',
-      badge: 'Best value',
-      features: [
-        'Everything in 1 Month',
-        '3 months of continuous coverage',
-        'Save ₹700 vs three monthly payments',
-        'Ideal for long interview cycles',
-      ],
-      renews: 'Auto-renews every 3 months at ₹2000 until cancelled.',
-    },
-  ];
+export class PricingComponent implements OnInit {
+  private readonly billing = inject(BillingService);
+  private readonly launcher = inject(CheckoutLauncherService);
+  private readonly auth = inject(AuthService);
+  private readonly router = inject(Router);
 
-  /** INR, Indian digit grouping. */
-  inr(n: number): string {
-    return '₹' + n.toLocaleString('en-IN');
+  readonly plans = signal<Plan[]>([]);
+  readonly gateways = signal<Gateway[]>([]);
+  readonly loading = signal(true);
+  readonly loadError = signal('');
+
+  /** Plan the checkout panel is open for. */
+  readonly selected = signal<Plan | null>(null);
+  gateway: GatewayKey | '' = '';
+  phone = '';
+  readonly busy = signal(false);
+  readonly message = signal('');
+  readonly messageKind = signal<'info' | 'error'>('info');
+
+  readonly needsPhone = computed(() => this.selectedGateway() === 'cashfree');
+  private readonly selectedGateway = signal<GatewayKey | ''>('');
+
+  readonly money = formatMoney;
+  readonly duration = durationLabel;
+
+  ngOnInit(): void {
+    forkJoin({ plans: this.billing.plans(), gateways: this.billing.gateways() }).subscribe({
+      next: ({ plans, gateways }) => {
+        this.plans.set(plans);
+        this.gateways.set(gateways);
+        this.gateway = gateways[0]?.key ?? '';
+        this.selectedGateway.set(this.gateway);
+        this.loading.set(false);
+      },
+      error: () => {
+        this.loadError.set('Pricing could not be loaded right now. Please refresh in a moment.');
+        this.loading.set(false);
+      },
+    });
+  }
+
+  perDay(p: Plan): string {
+    return formatMoney(Math.round(p.price_minor / p.duration_days), p.currency);
+  }
+
+  choose(p: Plan): void {
+    if (!this.auth.isAuthenticated) {
+      this.router.navigate(['/register'], { queryParams: { redirect: '/pricing' } });
+      return;
+    }
+    this.message.set('');
+    this.selected.set(p);
+  }
+
+  onGatewayChange(key: GatewayKey | ''): void {
+    this.gateway = key;
+    this.selectedGateway.set(key);
+  }
+
+  cancel(): void {
+    this.selected.set(null);
+    this.message.set('');
+  }
+
+  async pay(): Promise<void> {
+    const plan = this.selected();
+    if (!plan || !this.gateway || this.busy()) return;
+    if (this.needsPhone() && this.phone.replace(/\D/g, '').length < 10) {
+      this.show('Cashfree needs a 10-digit mobile number for the payment.', 'error');
+      return;
+    }
+    this.busy.set(true);
+    this.show('Opening secure checkout…', 'info');
+    try {
+      const order = await firstValueFrom(this.billing.checkout(plan.id, this.gateway, this.phone));
+      const outcome = await this.launcher.open(order, this.auth.currentUser?.email ?? '');
+      if (outcome.kind === 'dismissed') {
+        this.show('Checkout closed. You have not been charged by us for this attempt.', 'info');
+        return;
+      }
+      if (outcome.kind === 'redirected') return; // verified on /billing after return
+      this.show('Confirming your payment with the gateway…', 'info');
+      const result = await firstValueFrom(this.billing.verify(order.gateway, order.order_id, outcome.payload));
+      if (result.status === 'paid') {
+        this.router.navigate(['/billing'], { queryParams: { purchased: 1 } });
+      } else if (result.status === 'pending') {
+        this.show('Payment is still processing. Your plan activates automatically once the gateway confirms it — check Billing in a few minutes.', 'info');
+      } else {
+        this.show(result.message || 'The payment did not go through.', 'error');
+      }
+    } catch (err) {
+      this.show(this.errorText(err), 'error');
+    } finally {
+      this.busy.set(false);
+    }
+  }
+
+  private show(text: string, kind: 'info' | 'error'): void {
+    this.message.set(text);
+    this.messageKind.set(kind);
+  }
+
+  private errorText(err: unknown): string {
+    if (err instanceof HttpErrorResponse) {
+      const detail = err.error?.detail;
+      if (typeof detail === 'string') return detail;
+      if (err.status === 0) return 'Network error — please check your connection.';
+    }
+    return err instanceof Error ? err.message : 'Something went wrong. Please try again.';
   }
 }

@@ -79,6 +79,11 @@ class ResumeService:
             raise ValueError("Uploaded file is empty.")
 
     async def extract_text(self, filename: str, content: bytes) -> str:
+        """Async-compatible wrapper (kept for existing callers)."""
+        return self.extract_text_sync(filename, content)
+
+    def extract_text_sync(self, filename: str, content: bytes) -> str:
+        """CPU-bound extraction. Call from a worker thread in async code."""
         ext = "." + (filename.rsplit(".", 1)[-1].lower() if "." in filename else "")
         if ext not in ALLOWED_EXTENSIONS:
             raise ValueError(

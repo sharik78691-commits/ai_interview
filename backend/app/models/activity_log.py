@@ -10,7 +10,7 @@ high-volume noise, not signal.
 """
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, Integer, String
+from sqlalchemy import DateTime, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -35,6 +35,9 @@ def _utcnow() -> datetime:
 
 class ActivityLog(Base):
     __tablename__ = "activity_log"
+    # Serves "kind = X AND created_at BETWEEN ..." (admin dashboard). Existing
+    # databases get it from db.session._ensure_activity_indexes().
+    __table_args__ = (Index("ix_activity_log_kind_created_at", "kind", "created_at"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     kind: Mapped[str] = mapped_column(String(20), index=True, nullable=False)

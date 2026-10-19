@@ -21,7 +21,11 @@
 .faq summary { cursor: pointer; font-weight: 700; }
 .faq p { margin-top: 8px; }
 .foot2 { text-align: center; padding: 30px 24px 70px; }
-.legal-links { display: flex; gap: 18px; justify-content: center; flex-wrap: wrap; margin: 22px 0 8px; }
-.legal-links a { color: var(--muted); font-size: .83rem; }
-.legal-links a:hover { color: var(--accent); }
 @media (max-width: 860px) { .grid3, .feat-grid { grid-template-columns: 1fr; } }
+
+/* Section headers with a "see more" link (Features / How it works / Trust). */
+.sec-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.sec-link { color: var(--accent); font-size: .9rem; font-weight: 600; }
+.sec-link:hover { text-decoration: underline; }
+.faq a, .banner a { color: var(--accent); }
+.foot2 { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; }

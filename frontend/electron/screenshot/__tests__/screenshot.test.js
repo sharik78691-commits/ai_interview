@@ -1,14 +1,10 @@
 // Run with: npm run test:electron   (node --test, no extra dependencies)
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const os = require('os');
-const path = require('path');
-const fs = require('fs');
 
 const { DEFAULT_MODEL_KEY, listModels, resolveModel } = require('../model-config');
 const { validateImages, base64Bytes } = require('../image-validation');
-const { createKeyStore } = require('../key-store');
-const { analyzeScreenshots, redact } = require('../analysis');
+const { analyzeScreenshots, fetchServerReady, redact } = require('../analysis');
 const { createCapture } = require('../capture');
 const { registerScreenshotIpc } = require('../ipc');
 
@@ -55,105 +51,80 @@ test('base64Bytes matches Buffer length', () => {
   for (const n of [1, 2, 3, 100, 1001]) assert.equal(base64Bytes(b64(n)), n);
 });
 
-// ---- secure key storage ----
-function fakeSafeStorage(available = true) {
-  return {
-    isEncryptionAvailable: () => available,
-    encryptString: (s) => Buffer.from('enc:' + [...s].reverse().join('')),
-    decryptString: (b) => [...b.toString().slice(4)].reverse().join(''),
-  };
-}
-test('key store: encrypts at rest, never writes plaintext, round-trips, clears', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'keys-'));
-  const store = createKeyStore({ safeStorage: fakeSafeStorage(), fs, userDataDir: dir });
-  store.set('google', 'AIzaSECRET_KEY_123456');
-  const onDisk = fs.readFileSync(path.join(dir, 'ai-keys.json'), 'utf8');
-  assert.ok(!onDisk.includes('AIzaSECRET_KEY_123456'));
-  assert.equal(store.has('google'), true);
-  assert.equal(store.get('google'), 'AIzaSECRET_KEY_123456');
-  store.clear('google');
-  assert.equal(store.has('google'), false);
-});
-test('key store: refuses to store without OS encryption or with a bad key', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'keys-'));
-  const noEnc = createKeyStore({ safeStorage: fakeSafeStorage(false), fs, userDataDir: dir });
-  assert.throws(() => noEnc.set('google', 'AIzaSECRET_KEY_123456'), { code: 'ENCRYPTION_UNAVAILABLE' });
-  assert.equal(fs.existsSync(path.join(dir, 'ai-keys.json')), false);
-  const ok = createKeyStore({ safeStorage: fakeSafeStorage(), fs, userDataDir: dir });
-  assert.throws(() => ok.set('google', 'short'), { code: 'INVALID_KEY_FORMAT' });
-});
-
-// ---- AI request + error states ----
+// ---- backend AI request + error states (no key on this machine) ----
+const API = 'https://api.test';
 const model = () => resolveModel(DEFAULT_MODEL_KEY);
-const goodBody = {
-  candidates: [
-    {
-      content: {
-        parts: [
-          {
-            text: JSON.stringify({
-              questions: ['What is a closure?'],
-              topic: 'JavaScript',
-              seniority: 'Mid',
-              directAnswer: 'A function plus its lexical scope.',
-              interviewAnswer: 'A closure is...',
-              keyPoints: ['lexical scope'],
-              followUps: [{ question: 'Memory leaks?', suggestedResponse: 'Yes if...' }],
-              code: null,
-            }),
-          },
-        ],
-      },
-    },
-  ],
+const goodResult = {
+  questions: ['What is a closure?'],
+  topic: 'JavaScript',
+  seniority: 'Mid',
+  directAnswer: 'A function plus its lexical scope.',
+  interviewAnswer: 'A closure is...',
+  keyPoints: ['lexical scope'],
+  followUps: [{ question: 'Memory leaks?', suggestedResponse: 'Yes if...' }],
+  code: null,
 };
+const goodBody = { ok: true, result: goodResult, model: 'gemini-3.5-flash-lite' };
 const fakeFetch = (status, body) => async () => ({
   ok: status >= 200 && status < 300,
   status,
   text: async () => (typeof body === 'string' ? body : JSON.stringify(body)),
 });
-const run = (fetchImpl, apiKey = 'AIzaSECRET_KEY_123456') =>
-  analyzeScreenshots({ model: model(), images: [img(500)], apiKey, fetchImpl });
+const run = (fetchImpl) => analyzeScreenshots({ model: model(), images: [img(500)], apiBase: API, fetchImpl });
 
-test('analysis: success sends key in header (not URL), images inline, returns normalized result', async () => {
+test('analysis: posts images to OUR backend with no API key, returns normalized result', async () => {
   let seen;
   const result = await run(async (url, opts) => {
     seen = { url, opts };
     return fakeFetch(200, goodBody)();
   });
-  assert.ok(!seen.url.includes('AIza'));
-  assert.equal(seen.opts.headers['x-goog-api-key'], 'AIzaSECRET_KEY_123456');
-  assert.ok(seen.url.includes('gemini-3.5-flash-lite'));
+  assert.equal(seen.url, `${API}/api/screenshots/analyze`);
+  assert.equal(seen.opts.method, 'POST');
+  assert.ok(!/goog|key/i.test(JSON.stringify(seen.opts.headers)), 'no key header leaves the app');
   const body = JSON.parse(seen.opts.body);
-  assert.equal(body.contents[0].parts.filter((p) => p.inline_data).length, 1);
+  assert.deepEqual(Object.keys(body.images[0]).sort(), ['data', 'mimeType']);
   assert.equal(result.topic, 'JavaScript');
   assert.equal(result.code, null);
   assert.equal(result.followUps.length, 1);
 });
-test('analysis: error states map to clear codes', async () => {
+test('analysis: server error states map to clear codes', async () => {
   const code = async (p) => p.then(() => 'ok', (e) => e.code);
-  assert.equal(await code(run(fakeFetch(200, goodBody), null)), 'NO_KEY');
-  assert.equal(await code(run(fakeFetch(403, 'nope'))), 'INVALID_KEY');
-  assert.equal(await code(run(fakeFetch(429, 'quota'))), 'RATE_LIMITED');
+  const detail = (c) => ({ detail: { code: c, message: 'x' } });
+  assert.equal(await code(run(fakeFetch(401, { detail: 'Not authenticated' }))), 'NOT_SIGNED_IN');
+  assert.equal(await code(run(fakeFetch(403, { detail: 'CSRF' }))), 'SESSION_EXPIRED');
+  assert.equal(await code(run(fakeFetch(503, detail('NOT_CONFIGURED')))), 'NOT_CONFIGURED');
+  assert.equal(await code(run(fakeFetch(429, { detail: 'Too many attempts.' }))), 'RATE_LIMITED');
   assert.equal(await code(run(fakeFetch(413, ''))), 'TOO_LARGE');
-  assert.equal(await code(run(fakeFetch(503, ''))), 'PROVIDER_ERROR');
-  assert.equal(await code(run(fakeFetch(200, { candidates: [{ content: { parts: [{ text: 'not json' }] } }] }))), 'BAD_RESPONSE');
-  assert.equal(await code(run(fakeFetch(200, { promptFeedback: { blockReason: 'SAFETY' } }))), 'BLOCKED');
+  assert.equal(await code(run(fakeFetch(502, detail('PROVIDER_ERROR')))), 'PROVIDER_ERROR');
+  assert.equal(await code(run(fakeFetch(500, '<html>'))), 'SERVER_ERROR');
+  assert.equal(await code(run(fakeFetch(200, 'not json'))), 'BAD_RESPONSE');
   assert.equal(await code(run(async () => { throw new TypeError('fetch failed'); })), 'NETWORK');
   assert.equal(
-    await code(analyzeScreenshots({ model: model(), images: [], apiKey: 'AIzaSECRET_KEY_123456', fetchImpl: fakeFetch(200, goodBody) })),
+    await code(analyzeScreenshots({ model: model(), images: [], apiBase: API, fetchImpl: fakeFetch(200, goodBody) })),
     'VALIDATION',
   );
   const slow = (_u, { signal }) =>
     new Promise((_r, rej) => signal.addEventListener('abort', () => rej(Object.assign(new Error('a'), { name: 'AbortError' }))));
   assert.equal(
-    await code(analyzeScreenshots({ model: model(), images: [img(500)], apiKey: 'AIzaSECRET_KEY_123456', fetchImpl: slow, timeoutMs: 20 })),
+    await code(analyzeScreenshots({ model: model(), images: [img(500)], apiBase: API, fetchImpl: slow, timeoutMs: 20 })),
     'TIMEOUT',
   );
 });
-test('analysis: key is redacted from provider error text', () => {
+test('analysis: server messages are passed through with keys redacted', async () => {
+  const err = await run(fakeFetch(502, { detail: { code: 'PROVIDER_ERROR', message: 'bad AIza' + 'x'.repeat(30) } })).catch((e) => e);
+  assert.ok(!err.message.includes('xxxx'));
   assert.equal(redact('bad key AIzaSECRET_KEY_123456 here', 'AIzaSECRET_KEY_123456'), 'bad key [redacted] here');
-  assert.ok(!redact('AIza' + 'x'.repeat(30), null).includes('xxxx'));
+});
+test('server readiness: true/false from the backend, null when unreachable', async () => {
+  assert.equal(await fetchServerReady({ apiBase: API, fetchImpl: fakeFetch(200, { configured: true }) }), true);
+  assert.equal(await fetchServerReady({ apiBase: API, fetchImpl: fakeFetch(200, { configured: false }) }), false);
+  assert.equal(await fetchServerReady({ apiBase: API, fetchImpl: fakeFetch(401, {}) }), null);
+  assert.equal(await fetchServerReady({ apiBase: API, fetchImpl: async () => { throw new Error('offline'); } }), null);
+});
+test('client limits fit the backend + Vercel body budget', () => {
+  const { limits } = model();
+  assert.ok(limits.maxImages <= 10);
+  assert.ok((limits.maxTotalBytes * 4) / 3 < 4.5 * 1024 * 1024);
 });
 
 // ---- capture flow + IPC gating ----
@@ -180,17 +151,19 @@ function fakeElectron({ sources, trustedSender = true }) {
   const capture = createCapture({ desktopCapturer, screen, BrowserWindow });
   const sender = {};
   const win = { isDestroyed: () => false, webContents: sender, getMediaSourceId: () => 'window:self' };
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'keys-'));
-  const keyStore = createKeyStore({ safeStorage: fakeSafeStorage(), fs, userDataDir: dir });
+  const calls = [];
   registerScreenshotIpc({
     ipcMain: { handle: (ch, fn) => (handlers[ch] = fn), removeHandler() {} },
     getMainWindow: () => win,
     capture,
-    keyStore,
-    fetchImpl: fakeFetch(200, goodBody),
+    apiBase: API,
+    fetchImpl: async (url) => {
+      calls.push(url);
+      return url.endsWith('/config') ? fakeFetch(200, { configured: true })() : fakeFetch(200, goodBody)();
+    },
   });
   const invoke = (ch, ...args) => handlers[ch]({ sender: trustedSender ? sender : {} }, ...args);
-  return { invoke, keyStore };
+  return { invoke, calls };
 }
 
 const SOURCES = [
@@ -215,81 +188,96 @@ test('capture flow: bad / vanished / empty sources fail with clear errors', asyn
   assert.equal((await invoke('screenshot:capture', 'window:404:0')).error.code, 'SOURCE_GONE');
   assert.equal((await invoke('screenshot:capture', 'window:9:0')).error.code, 'EMPTY_CAPTURE');
 });
+test('capture flash: border window is hidden from screen share', () => {
+  const calls = [];
+  function BrowserWindow() {
+    return {
+      setIgnoreMouseEvents: () => {},
+      setContentProtection: (on) => calls.push(on),
+      loadURL: () => {},
+      once: () => {},
+      isDestroyed: () => true,
+      close: () => {},
+    };
+  }
+  const screen = {
+    getAllDisplays: () => [{ id: 1, bounds: { x: 0, y: 0, width: 100, height: 100 } }],
+    getPrimaryDisplay: () => ({ bounds: { x: 0, y: 0, width: 100, height: 100 } }),
+  };
+  createCapture({ desktopCapturer: {}, screen, BrowserWindow }).flashDisplay('1');
+  assert.deepEqual(calls, [true]);
+});
 test('ipc: untrusted senders are rejected on every channel', async () => {
   const { invoke } = fakeElectron({ sources: SOURCES, trustedSender: false });
-  for (const ch of ['screenshot:get-config', 'screenshot:list-sources', 'screenshot:capture', 'screenshot:set-key', 'screenshot:analyze']) {
+  for (const ch of ['screenshot:get-config', 'screenshot:list-sources', 'screenshot:capture', 'screenshot:analyze']) {
     assert.equal((await invoke(ch, 'x', 'y')).error.code, 'FORBIDDEN');
   }
 });
-test('ipc: config exposes default model + key presence but never the key', async () => {
+test('ipc: no key channels exist and config reports server readiness, never a key', async () => {
   const { invoke } = fakeElectron({ sources: SOURCES });
-  assert.equal((await invoke('screenshot:get-config')).keyStored.google, false);
-  assert.equal((await invoke('screenshot:set-key', DEFAULT_MODEL_KEY, 'AIzaSECRET_KEY_123456')).ok, true);
+  const handlers = {};
+  registerScreenshotIpc({ ipcMain: { handle: (ch, fn) => (handlers[ch] = fn) }, getMainWindow: () => null, capture: {}, apiBase: API });
+  assert.equal(handlers['screenshot:set-key'], undefined);
+  assert.equal(handlers['screenshot:clear-key'], undefined);
   const cfg = await invoke('screenshot:get-config');
-  assert.equal(cfg.keyStored.google, true);
+  assert.equal(cfg.serverReady, true);
   assert.equal(cfg.defaultModel, 'gemini-3.5-flash-lite');
-  assert.ok(!JSON.stringify(cfg).includes('AIzaSECRET'));
-  assert.equal((await invoke('screenshot:set-key', 'nope', 'AIzaSECRET_KEY_123456')).error.code, 'UNKNOWN_MODEL');
+  assert.equal(cfg.keyStored, undefined);
 });
-test('ipc: analyze without a key reports NO_KEY; with a key returns the result', async () => {
-  const { invoke } = fakeElectron({ sources: SOURCES });
-  const images = [img(500)];
-  assert.equal((await invoke('screenshot:analyze', DEFAULT_MODEL_KEY, images)).error.code, 'NO_KEY');
-  await invoke('screenshot:set-key', DEFAULT_MODEL_KEY, 'AIzaSECRET_KEY_123456');
-  const ok = await invoke('screenshot:analyze', DEFAULT_MODEL_KEY, images);
+test('ipc: analyze goes to the backend and returns the result', async () => {
+  const { invoke, calls } = fakeElectron({ sources: SOURCES });
+  const ok = await invoke('screenshot:analyze', DEFAULT_MODEL_KEY, [img(500)]);
   assert.equal(ok.ok, true);
   assert.equal(ok.model, 'Gemini 3.5 Flash Lite');
+  assert.deepEqual(calls, [`${API}/api/screenshots/analyze`]);
   assert.equal((await invoke('screenshot:analyze', DEFAULT_MODEL_KEY, [])).error.code, 'VALIDATION');
 });
 
-// ---- automatic key from .env ----
-const { parseDotenv, createEnvKeys } = require('../env-key');
-
-test('env-key: parses .env syntax and prefers process env over files', () => {
-  assert.deepEqual(
-    parseDotenv('# c\nGEMINI_API_KEY="AIzaFromFile12345" # x\nexport OTHER=1\nBAD LINE\n'),
-    { GEMINI_API_KEY: 'AIzaFromFile12345', OTHER: '1' },
-  );
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'env-'));
-  const file = path.join(dir, '.env');
-  fs.writeFileSync(file, 'GEMINI_API_KEY=AIzaFromFile12345\n');
-  const keys = createEnvKeys({ fs, candidates: [path.join(dir, 'missing.env'), file], env: {} });
-  assert.equal(keys.get('google'), 'AIzaFromFile12345');
-  assert.equal(createEnvKeys({ fs, candidates: [file], env: { GEMINI_API_KEY: 'AIzaFromEnv123456' } }).get('google'), 'AIzaFromEnv123456');
-  assert.equal(createEnvKeys({ fs, candidates: [], env: {} }).has('google'), false);
-});
-
-test('ipc: .env key is used automatically; saved key overrides; key never reaches renderer', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'env-'));
-  const file = path.join(dir, '.env');
-  fs.writeFileSync(file, 'GEMINI_API_KEY=AIzaFromEnvFile1234\n');
+test('hotkey: Ctrl+Shift+S is app-wide — opens the Screenshots page elsewhere, the picker on that page', async () => {
   const handlers = {};
-  const sender = {};
-  const win = { isDestroyed: () => false, webContents: sender, getMediaSourceId: () => 'x' };
-  const keyStore = createKeyStore({ safeStorage: fakeSafeStorage(), fs, userDataDir: dir });
-  const seenKeys = [];
+  const sent = [];
+  const registered = {};
+  const sender = { send: (...a) => sent.push(a), on() {}, once() {} };
+  let focused = 0;
+  const win = { isDestroyed: () => false, webContents: sender, focus: () => focused++ };
+  const desktopCapturer = {
+    getSources: async () => [
+      { id: 'screen:1:0', display_id: '1' },
+      { id: 'screen:2:0', display_id: '2' },
+    ],
+  };
+  const screen = {
+    getCursorScreenPoint: () => ({ x: 2000, y: 10 }),
+    getDisplayNearestPoint: () => ({ id: 2 }),
+  };
+  const globalShortcut = {
+    register: (combo, fn) => ((registered[combo] = fn), true),
+    unregister: (combo) => delete registered[combo],
+  };
   registerScreenshotIpc({
     ipcMain: { handle: (ch, fn) => (handlers[ch] = fn) },
     getMainWindow: () => win,
-    capture: {},
-    keyStore,
-    envKeys: createEnvKeys({ fs, candidates: [file], env: {} }),
-    envHint: path.join(dir, '.env'),
-    fetchImpl: async (_u, opts) => {
-      seenKeys.push(opts.headers['x-goog-api-key']);
-      return fakeFetch(200, goodBody)();
-    },
+    globalShortcut,
+    capture: createCapture({ desktopCapturer, screen, BrowserWindow() {} }),
+    apiBase: API,
   });
-  const invoke = (ch, ...a) => handlers[ch]({ sender }, ...a);
-  const cfg = await invoke('screenshot:get-config');
-  assert.equal(cfg.keyStored.google, true);
-  assert.equal(cfg.keySources.google, 'env');
-  assert.ok(!JSON.stringify(cfg).includes('AIzaFromEnvFile'));
-  assert.equal((await invoke('screenshot:analyze', DEFAULT_MODEL_KEY, [img(500)])).ok, true);
-  await invoke('screenshot:set-key', DEFAULT_MODEL_KEY, 'AIzaSavedKey1234567');
-  assert.equal((await invoke('screenshot:get-config')).keySources.google, 'stored');
-  await invoke('screenshot:analyze', DEFAULT_MODEL_KEY, [img(500)]);
-  assert.deepEqual(seenKeys, ['AIzaFromEnvFile1234', 'AIzaSavedKey1234567']);
-  await invoke('screenshot:clear-key', DEFAULT_MODEL_KEY);
-  assert.equal((await invoke('screenshot:get-config')).keySources.google, 'env');
+  const press = registered['CommandOrControl+Shift+S'];
+  assert.ok(press, 'registered app-wide at startup');
+
+  // Not on the Screenshots page: bring the app forward and open the page.
+  await press();
+  assert.deepEqual(sent, [['screenshot:open-page']]);
+  assert.equal(focused, 1);
+
+  assert.equal((await handlers['screenshot:set-hotkey']({ sender: {} }, true)).error.code, 'FORBIDDEN');
+  assert.equal((await handlers['screenshot:set-hotkey']({ sender }, true)).active, true);
+  await press();
+  assert.deepEqual(sent[1], ['screenshot:hotkey', 'screen:2:0']);
+  assert.equal(focused, 2, 'window is focused so the picker receives arrow / Enter keys');
+
+  // Page closed: back to "open the page", and the shortcut stays registered.
+  assert.equal((await handlers['screenshot:set-hotkey']({ sender }, false)).active, false);
+  assert.ok(registered['CommandOrControl+Shift+S']);
+  await press();
+  assert.deepEqual(sent[2], ['screenshot:open-page']);
 });

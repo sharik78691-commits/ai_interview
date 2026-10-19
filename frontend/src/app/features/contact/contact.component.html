@@ -12,31 +12,35 @@
       <h3>📧 Email support</h3>
       <p class="muted">The fastest way to reach us for any issue.</p>
       <a class="email" [href]="'mailto:' + supportEmail">{{ supportEmail }}</a>
-      <p class="muted small">We usually reply within 1–2 business days.</p>
+      <!-- CONFIRM: response time you can commit to. -->
     </section>
 
     <section class="card channel">
       <h3>💳 Billing &amp; payments</h3>
       <p class="muted">
-        Refunds, auto-renewal, failed payments, or invoices — email the same
-        address and include your registered email and transaction reference.
+        Refunds, failed or pending payments, or receipts — email the same
+        address with your registered email and the payment reference shown on
+        your Billing page.
       </p>
       <a class="email" [href]="'mailto:' + supportEmail">{{ supportEmail }}</a>
     </section>
 
     <section class="card channel">
       <h3>⏱ Support hours</h3>
+      <!-- CONFIRM: support hours before publishing them (previous text claimed Mon–Sat 10:00–19:00 IST). -->
       <p class="muted">
-        Monday – Saturday, 10:00 AM – 7:00 PM IST. Emails outside these hours
-        are answered on the next business day.
+        We read every message and reply as soon as we can. Include as much
+        detail as possible so we can help on the first reply.
       </p>
     </section>
   </div>
 
   <section class="biz muted small">
     <p>
-      OyeInterview is operated from India. Payments are processed securely by
-      Razorpay and Cashfree; we never store your full card or banking details.
+      OyeInterview is an independently developed product operated from India.
+      <!-- CONFIRM: operator name/address for payment-gateway KYC and consumer law. -->
+      Payments are processed by Razorpay and Cashfree; we never receive or store
+      card, UPI or bank credentials.
     </p>
   </section>
 </div>

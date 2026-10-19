@@ -303,6 +303,9 @@ def consume_reset_token(db: Session, raw_token: str, new_password: str) -> bool:
     user.password_hash = hash_password(new_password)
     # A Google-only account that resets a password becomes a dual-provider
     # account; keep auth_provider as-is but it now has a local credential.
+    # Sign out every existing session: whoever forced the reset (or stole a
+    # cookie) must not stay logged in with the old credentials.
+    user.sessions_revoked_at = _utcnow()
     row.used_at = _utcnow()
     db.commit()
     return True

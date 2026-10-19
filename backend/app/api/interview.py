@@ -1,73 +1,55 @@
-"""Interview prepare/context/analyze endpoints (authenticated, per-user)."""
+"""Interview prepare/context/analyze endpoints (authenticated, per-user).
+
+Thin HTTP layer: per-user context lives in
+:mod:`app.services.interview_context`, answer generation in
+:class:`app.services.ai_service.AIService`.
+"""
 import logging
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 
-from app.auth.dependencies import require_user
+from app.auth.dependencies import require_user, require_user_csrf
+from app.core.config import get_settings
+from app.core.ratelimit import rate_limit_key
 from app.models.ai_response import AIInterviewResponse
-from app.models.interview import PrepareRequest, PrepareResponse
+from app.models.interview import AnalyzeRequest, PrepareRequest, PrepareResponse
 from app.models.user import User
 from app.providers.llm.registry import validate_model_key
 from app.services.activity import log_event, log_llm_usage
 from app.services.ai_service import AIService
+from app.services.interview_context import (
+    VALID_LENGTHS,
+    coerce_length,
+    context_store,
+    normalize_length,
+)
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-VALID_LENGTHS = {"default", "short", "medium", "long"}
+# Backward-compatible names (older imports and tests use these).
+get_context = context_store.get
+clear_context = context_store.clear
+_normalize_length = normalize_length
+_contexts = context_store._contexts
 
-# Per-user interview context, keyed by user id. This replaces the previous
-# single global dict so one user can never read another user's resume/JD.
-# Still in-memory (no permanent transcript storage), matching the MVP privacy
-# behaviour — but now isolated per authenticated user.
-_contexts: dict[int, dict[str, str]] = {}
-
-
-def get_context(user_id: int) -> dict[str, str]:
-    """Return (creating if needed) the context bucket for one user."""
-    return _contexts.setdefault(
-        user_id, {"resume": "", "job": "", "length": "medium"}
-    )
-
-
-def clear_context(user_id: int) -> None:
-    _contexts.pop(user_id, None)
-
-
-def _normalize_length(value: Optional[str]) -> str:
-    aliases = {"concise": "short", "brief": "short", "standard": "medium", "detailed": "long"}
-    v = (value or "").strip().lower()
-    return aliases.get(v, v) if v else "medium"
-
-
-class AnalyzeRequest(BaseModel):
-    question: str
-    resumeText: Optional[str] = None
-    jobDescription: Optional[str] = None
-    responseLength: Optional[str] = None
-    model: Optional[str] = None
+__all__ = ["router", "AnalyzeRequest", "VALID_LENGTHS", "get_context", "clear_context"]
 
 
 @router.post("/interview/prepare", response_model=PrepareResponse)
-async def prepare(
+def prepare(
     req: PrepareRequest,
     request: Request,
-    user: User = Depends(require_user),
+    user: User = Depends(require_user_csrf),
 ) -> PrepareResponse:
     # Resume and job description are optional — the user may prepare an
     # interview directly without either. Empty context is allowed.
     resume = (req.resumeText or "").strip()
     job = (req.jobDescription or "").strip()
-    length = _normalize_length(req.responseLength)
-    if length not in VALID_LENGTHS:
-        length = "medium"
-    ctx = get_context(user.id)
-    ctx["resume"] = resume
-    ctx["job"] = job
-    ctx["length"] = length
+    length = coerce_length(req.responseLength)
+    context_store.update(user.id, resume=resume, job=job, length=length)
     logger.info(
         "Interview prepared: user=%s resume_chars=%d job_chars=%d length=%s",
         user.id, len(resume), len(job), length,
@@ -83,8 +65,8 @@ async def prepare(
 
 
 @router.get("/interview/context")
-async def get_context_endpoint(user: User = Depends(require_user)) -> dict:
-    ctx = get_context(user.id)
+def get_context_endpoint(user: User = Depends(require_user)) -> dict:
+    ctx = context_store.get(user.id)
 
     def _trunc(s: str, n: int = 500) -> str:
         return s[:n] + ("..." if len(s) > n else "")
@@ -103,8 +85,9 @@ async def get_context_endpoint(user: User = Depends(require_user)) -> dict:
 async def analyze(
     req: AnalyzeRequest,
     request: Request,
-    user: User = Depends(require_user),
+    user: User = Depends(require_user_csrf),
 ) -> AIInterviewResponse:
+    rate_limit_key("ai-analyze", str(user.id), get_settings().ai_rate_limit_per_minute)
     question = (req.question or "").strip()
     if not question:
         raise HTTPException(status_code=422, detail="question must be non-empty.")
@@ -113,12 +96,10 @@ async def analyze(
         model_key = validate_model_key(req.model)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    ctx = get_context(user.id)
+    ctx = context_store.get(user.id)
     resume = (req.resumeText or "").strip() or ctx["resume"]
     job = (req.jobDescription or "").strip() or ctx["job"]
-    length = _normalize_length(req.responseLength or ctx["length"])
-    if length not in VALID_LENGTHS:
-        length = "medium"
+    length = coerce_length(req.responseLength or ctx["length"])
     service = AIService(
         resume_text=resume,
         job_description=job,
@@ -131,13 +112,16 @@ async def analyze(
     try:
         answer = await service.analyze(question, model_key=model_key)
     except Exception:
-        logger.exception("Analyze failed: user=%s question=%r", user.id, question[:200])
+        # Question text is user content (PII) — log its size, not its body.
+        logger.exception("Analyze failed: user=%s question_chars=%d", user.id, len(question))
         raise HTTPException(
             status_code=502, detail="AI response unavailable. Please try again."
         )
-    log_event("question_analyzed", user.id)
+    # Activity writes are blocking DB inserts: keep them off the event loop.
+    await run_in_threadpool(log_event, "question_analyzed", user.id)
     # Usage tracking (provider-reported tokens only, never estimated).
-    log_llm_usage(
+    await run_in_threadpool(
+        log_llm_usage,
         user_id=user.id,
         request_type="analyze",
         provider=service.last_provider,

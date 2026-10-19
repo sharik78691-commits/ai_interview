@@ -1,7 +1,16 @@
 <div class="container page">
   <div class="title-row">
     <div>
-      <h1>Screenshot analysis</h1>
+      <h1 class="title-with-hint">
+        Screenshot analysis
+        <span class="hotkey-tip title-hint" data-testid="title-hotkey-hint" title="Keyboard shortcut to capture a screenshot">
+          <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd>
+        </span>
+      </h1>
+      <p class="muted small hotkey-steps" data-testid="title-hotkey-steps">
+        Press <strong>Ctrl+Shift+S</strong> to capture a screenshot → choose the screen with the
+        <kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd> arrow keys → press <kbd>Enter</kbd> and the screenshot is added.
+      </p>
       <p class="muted">Turn screenshots of interview questions into clear answer guidance for practice and preparation.</p>
     </div>
     <span class="model-badge" title="Active AI model" data-testid="active-model">
@@ -32,32 +41,16 @@
           {{ (config.activeModel().limits.maxTotalBytes / 1048576).toFixed(0) }} MB total.
         </p>
 
-        <label class="lbl" for="apikey">{{ config.activeModel().provider === 'google' ? 'Google AI Studio' : config.activeModel().provider }} API key</label>
-        @if (config.hasKey()) {
-          <div class="key-ok" data-testid="key-status">
-            @if (config.keySource() === 'env') {
-              <span>🔑 Key loaded automatically from .env</span>
-            } @else {
-              <span>🔒 Key saved (encrypted on this device)</span>
-              <button class="btn-ghost sm" (click)="removeKey()">Remove</button>
-            }
-          </div>
-        } @else {
-          <div class="key-row">
-            <input id="apikey" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your API key" [(ngModel)]="keyInput" (keydown.enter)="saveKey()" />
-            <button class="btn-primary sm" (click)="saveKey()" [disabled]="keyBusy() || keyInput.length < 8">Save</button>
-          </div>
-        }
-        @if (!config.hasKey() && config.envHint()) {
-          <p class="muted small">Tip: put <code>GEMINI_API_KEY=…</code> in <code>{{ config.envHint() }}</code> and reopen the app to load it automatically.</p>
-        }
-        @if (keyError()) { <p class="err small">{{ keyError() }}</p> }
-        @if (!config.encryptionAvailable()) {
-          <p class="err small">Secure storage is unavailable on this system, so a key cannot be saved.</p>
-        }
+        <div class="key-ok" data-testid="server-status">
+          @switch (config.serverReady()) {
+            @case (true) { <span>✓ Ready — analysis runs on the OyeInterview server</span> }
+            @case (false) { <span class="err">Screenshot analysis is not set up on the server yet.</span> }
+            @default { <span class="muted">Server status unknown — analysis will retry when you send.</span> }
+          }
+        </div>
         <p class="muted small">
-          Your key is encrypted with your operating system's secure storage and is only used by the desktop app to call the model.
-          It is never shown again, logged, or included in screenshots.
+          No API key needed. Screenshots are sent securely to your OyeInterview account's server,
+          which runs the model with its own key. Nothing is stored on this computer.
         </p>
       </div>
 
@@ -71,6 +64,7 @@
           📸 Capture Screen
         </button>
         <p class="muted small">You choose exactly which screen or window to capture. Nothing is captured in the background, and the screen flashes briefly each time a capture is taken.</p>
+        <p class="muted small hotkey-tip" data-testid="capture-hotkey-tip">Shortcut: press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> to open the screen picker — use the arrow keys (← → ↑ ↓) to choose a screen, then press <kbd>Enter</kbd>. From any other page, the shortcut first opens this page.</p>
         @if (captureNotice()) { <p class="ok small" role="status">✓ {{ captureNotice() }}</p> }
 
         @if (shots().length) {
@@ -103,7 +97,7 @@
         <button class="btn-primary wide" (click)="analyze()" [disabled]="!canAnalyze()" data-testid="analyze-btn">
           {{ analyzing() ? 'Analyzing…' : 'Analyze screenshots' }}
         </button>
-        @if (!config.hasKey()) { <p class="muted small">Add your API key above to enable analysis.</p> }
+        @if (config.serverReady() === false) { <p class="muted small">Analysis is unavailable until the server is set up.</p> }
         @if (analyzing()) {
           <div class="progress" role="status" aria-live="polite">
             <div class="bar"><div class="bar-fill"></div></div>
@@ -154,18 +148,18 @@
 
 @if (picker()) {
   <div class="backdrop" (click)="closePicker()" role="presentation">
-    <div class="modal" role="dialog" aria-modal="true" aria-label="Choose what to capture" (click)="$event.stopPropagation()" data-testid="source-picker">
+    <div #pickerModal class="modal" role="dialog" aria-modal="true" aria-label="Choose what to capture" tabindex="-1" (click)="$event.stopPropagation()" (keydown)="onPickerKey($event)" data-testid="source-picker">
       <div class="sec-head">
         <h3>Choose what to capture</h3>
         <button class="btn-ghost sm" (click)="closePicker()" [disabled]="capturing()">Cancel</button>
       </div>
-      <p class="muted small">Clicking a screen or window captures it immediately.</p>
+      <p class="muted small">Click a screen or window to capture it, or use the arrow keys to choose and press <strong>Enter</strong>.</p>
       @if (loadingSources()) {
         <p class="muted">Looking for screens and windows…</p>
       } @else {
         <div class="sources">
-          @for (s of sources(); track s.id) {
-            <button class="source" (click)="takeCapture(s)" [disabled]="capturing()">
+          @for (s of sources(); track s.id; let i = $index) {
+            <button class="source" [class.selected]="i === selectedIndex()" [attr.aria-current]="i === selectedIndex() ? 'true' : null" tabindex="-1" (click)="takeCapture(s)" (mouseenter)="selectedIndex.set(i)" [disabled]="capturing()">
               <img [src]="s.thumbnail" [alt]="s.name" />
               <span>{{ s.kind === 'screen' ? '🖥️' : '🗔' }} {{ s.name }}</span>
             </button>

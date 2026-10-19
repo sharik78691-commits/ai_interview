@@ -3,6 +3,7 @@ import { inject } from '@angular/core';
 import { Router } from '@angular/router';
 import { catchError, throwError } from 'rxjs';
 import { AuthService } from './auth.service';
+import { CSRF_HEADER, readCsrfToken } from './csrf';
 
 /**
  * Ensures API requests carry the secure session cookie and the CSRF header.
@@ -22,9 +23,8 @@ export const authInterceptor: HttpInterceptorFn = (req, next) => {
 
   let headers = req.headers;
   if (isApi && unsafe) {
-    const match = document.cookie.match(/(?:^|;\s*)aia_csrf=([^;]+)/);
-    const token = match ? decodeURIComponent(match[1]) : '';
-    if (token) headers = headers.set('X-CSRF-Token', token);
+    const token = readCsrfToken();
+    if (token) headers = headers.set(CSRF_HEADER, token);
   }
 
   const cloned = req.clone({

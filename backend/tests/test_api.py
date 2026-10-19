@@ -2,7 +2,7 @@
 from fastapi.testclient import TestClient
 
 from app.main import app
-from tests.conftest import authenticate
+from tests.conftest import authenticate, csrf_headers
 
 client = TestClient(app)
 
@@ -21,6 +21,7 @@ def test_prepare_ok() -> None:
     r = client.post(
         "/api/interview/prepare",
         json={"resumeText": RESUME, "jobDescription": JOB},
+        headers=csrf_headers(client),
     )
     assert r.status_code == 200
     assert r.json()["status"] == "ready"
@@ -32,6 +33,7 @@ def test_prepare_allows_empty_resume_and_jd() -> None:
     r = client.post(
         "/api/interview/prepare",
         json={"resumeText": "", "jobDescription": ""},
+        headers=csrf_headers(client),
     )
     assert r.status_code == 200
     assert r.json()["status"] == "ready"
@@ -42,10 +44,12 @@ def test_analyze_returns_guidance() -> None:
     client.post(
         "/api/interview/prepare",
         json={"resumeText": RESUME, "jobDescription": JOB},
+        headers=csrf_headers(client),
     )
     r = client.post(
         "/api/interview/analyze",
         json={"question": "Can you explain REST API design?"},
+        headers=csrf_headers(client),
     )
     assert r.status_code == 200
     body = r.json()
@@ -59,6 +63,7 @@ def test_upload_txt() -> None:
     r = client.post(
         "/api/resume/upload",
         files={"file": ("resume.txt", content, "text/plain")},
+        headers=csrf_headers(client),
     )
     assert r.status_code == 200
     assert r.json()["chars"] > 0
