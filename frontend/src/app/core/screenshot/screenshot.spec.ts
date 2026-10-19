@@ -270,7 +270,7 @@ describe('capture service', () => {
   });
 
   it('routes Ctrl+Shift+S "open the Screenshots page" requests from other pages', () => {
-    let fire: (() => void) | null = null;
+    let fire: ((sourceId: string | null) => void) | null = null;
     const restore = installDesktopBridge({
       onOpenPage: (cb) => {
         fire = cb;
@@ -281,8 +281,11 @@ describe('capture service', () => {
       const svc = TestBed.inject(ScreenCaptureService);
       let opened = 0;
       const off = svc.onOpenPageRequest(() => opened++);
-      fire!();
+      fire!('screen:2:0');
       expect(opened).toBe(1);
+      // The screen under the cursor is handed to the page once, then cleared.
+      expect(svc.takePendingPick()).toBe('screen:2:0');
+      expect(svc.takePendingPick()).toBeNull();
       off();
       expect(fire).toBeNull();
     } finally {

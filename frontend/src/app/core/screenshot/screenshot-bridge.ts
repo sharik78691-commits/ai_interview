@@ -34,8 +34,11 @@ export interface ScreenshotBridge {
   setHotkey?(enabled: boolean): Promise<BridgeResult<{ active: boolean }>>;
   /** Hotkey pressed: screen source under the cursor, or an error. Returns an unsubscribe fn. */
   onHotkey?(cb: (sourceId: string | null, error: { code: string; message: string } | null) => void): () => void;
-  /** Hotkey pressed while another page is open: show the Screenshots page. Returns an unsubscribe fn. */
-  onOpenPage?(cb: () => void): () => void;
+  /**
+   * Hotkey pressed while another page is open: show the Screenshots page and
+   * open its picker on `sourceId` (screen under the cursor). Returns an unsubscribe fn.
+   */
+  onOpenPage?(cb: (sourceId: string | null) => void): () => void;
 }
 
 /**

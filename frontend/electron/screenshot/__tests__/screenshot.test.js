@@ -239,6 +239,8 @@ test('hotkey: Ctrl+Shift+S is app-wide — opens the Screenshots page elsewhere,
   const registered = {};
   const sender = { send: (...a) => sent.push(a), on() {}, once() {} };
   let focused = 0;
+  let pageFocused = 0;
+  sender.focus = () => pageFocused++;
   const win = { isDestroyed: () => false, webContents: sender, focus: () => focused++ };
   const desktopCapturer = {
     getSources: async () => [
@@ -264,20 +266,40 @@ test('hotkey: Ctrl+Shift+S is app-wide — opens the Screenshots page elsewhere,
   const press = registered['CommandOrControl+Shift+S'];
   assert.ok(press, 'registered app-wide at startup');
 
-  // Not on the Screenshots page: bring the app forward and open the page.
+  // Not on the Screenshots page: ONE press brings the app forward and opens the
+  // page with the picker on the screen under the cursor.
   await press();
-  assert.deepEqual(sent, [['screenshot:open-page']]);
+  assert.deepEqual(sent, [['screenshot:open-page', 'screen:2:0']]);
   assert.equal(focused, 1);
+  assert.equal(pageFocused, 1, 'the page itself gets keyboard focus (Enter must reach the picker)');
 
   assert.equal((await handlers['screenshot:set-hotkey']({ sender: {} }, true)).error.code, 'FORBIDDEN');
   assert.equal((await handlers['screenshot:set-hotkey']({ sender }, true)).active, true);
   await press();
-  assert.deepEqual(sent[1], ['screenshot:hotkey', 'screen:2:0']);
+  assert.deepEqual(sent[1], ['screenshot:hotkey', 'screen:2:0', null]);
   assert.equal(focused, 2, 'window is focused so the picker receives arrow / Enter keys');
 
   // Page closed: back to "open the page", and the shortcut stays registered.
   assert.equal((await handlers['screenshot:set-hotkey']({ sender }, false)).active, false);
   assert.ok(registered['CommandOrControl+Shift+S']);
   await press();
-  assert.deepEqual(sent[2], ['screenshot:open-page']);
+  assert.deepEqual(sent[2], ['screenshot:open-page', 'screen:2:0']);
+});
+
+test('hotkey: the main process focus helper is used so Windows foregrounds the app', async () => {
+  const registered = {};
+  const sent = [];
+  const win = { isDestroyed: () => false, webContents: { send: (...a) => sent.push(a), on() {}, once() {} } };
+  const focusedWith = [];
+  registerScreenshotIpc({
+    ipcMain: { handle() {} },
+    getMainWindow: () => win,
+    globalShortcut: { register: (c, fn) => ((registered[c] = fn), true) },
+    capture: { screenSourceAtCursor: async () => 'screen:1:0' },
+    apiBase: API,
+    focusWindow: (w) => focusedWith.push(w),
+  });
+  await registered['CommandOrControl+Shift+S']();
+  assert.deepEqual(focusedWith, [win]);
+  assert.deepEqual(sent, [['screenshot:open-page', 'screen:1:0']]);
 });

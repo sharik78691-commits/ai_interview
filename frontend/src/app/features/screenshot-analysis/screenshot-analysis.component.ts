@@ -90,6 +90,10 @@ export class ScreenshotAnalysisComponent implements OnInit, OnDestroy {
         if (this.destroyed) off();
         else this.disableHotkey = off;
       });
+    // Opened by Ctrl+Shift+S from another page: show the picker right away, so
+    // one press + Enter captures and analyzes (no second press needed).
+    const pending = this.capture.takePendingPick();
+    if (pending) void this.onHotkey(pending, null);
     try {
       await this.config.load();
     } catch (e) {

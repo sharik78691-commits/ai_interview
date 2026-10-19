@@ -64,7 +64,7 @@
           📸 Capture Screen
         </button>
         <p class="muted small">You choose exactly which screen or window to capture. Nothing is captured in the background, and the screen flashes briefly each time a capture is taken.</p>
-        <p class="muted small hotkey-tip" data-testid="capture-hotkey-tip">Shortcut: press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> to open the screen picker — use the arrow keys (← → ↑ ↓) to choose a screen, then press <kbd>Enter</kbd> to capture and analyze it immediately. From any other page, the shortcut first opens this page.</p>
+        <p class="muted small hotkey-tip" data-testid="capture-hotkey-tip">Shortcut: press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> to open the screen picker — use the arrow keys (← → ↑ ↓) to choose a screen, then press <kbd>Enter</kbd> to capture and analyze it immediately. It works from any page — the app opens this page with the picker ready.</p>
         @if (captureNotice()) { <p class="ok small" role="status">✓ {{ captureNotice() }}</p> }
 
         @if (shots().length) {

@@ -55,7 +55,7 @@ export class App implements OnInit, OnDestroy {
     this.applySeo();
 
     // Desktop only (no-op on web): Ctrl+Shift+S on any other page opens the
-    // Screenshots page; pressing it again there captures.
+    // Screenshots page and its picker (Enter then captures + analyzes).
     this.offScreenshotHotkey = this.screenCapture.onOpenPageRequest(
       () => void this.router.navigate(['/screenshot-analysis']),
     );

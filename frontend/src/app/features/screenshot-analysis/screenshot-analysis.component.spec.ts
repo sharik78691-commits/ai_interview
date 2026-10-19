@@ -5,6 +5,7 @@ import {
   installDesktopBridge,
   shot,
 } from '../../core/screenshot/screenshot.spec';
+import { ScreenCaptureService } from '../../core/screenshot/screen-capture.service';
 import { ScreenshotAnalysisComponent } from './screenshot-analysis.component';
 
 describe('ScreenshotAnalysisComponent (desktop flow)', () => {
@@ -300,5 +301,57 @@ describe('ScreenshotAnalysisComponent (desktop flow)', () => {
     press!(null, { code: 'SOURCE_GONE', message: 'No screen available to capture.' });
     await new Promise((r) => setTimeout(r, 20));
     expect(cmp.shots().length).toBe(0);
+  });
+});
+
+describe('ScreenshotAnalysisComponent (Ctrl+Shift+S from another page)', () => {
+  afterEach(() => TestBed.resetTestingModule());
+
+  it('one press opens the picker on the cursor screen; Enter captures and analyzes', async () => {
+    const captured: string[] = [];
+    let analyzed = 0;
+    const sources = [
+      { id: 'screen:1:0', name: 'Screen 1', kind: 'screen', thumbnail: 'data:image/png;base64,AAAA' },
+      { id: 'screen:2:0', name: 'Screen 2', kind: 'screen', thumbnail: 'data:image/png;base64,AAAA' },
+    ];
+    let openPage: ((id: string | null) => void) | null = null;
+    const restore = installDesktopBridge({
+      onOpenPage: (cb: (id: string | null) => void) => {
+        openPage = cb;
+        return () => (openPage = null);
+      },
+      listSources: async () => ({ ok: true, sources }),
+      capture: async (id: string) => {
+        captured.push(id);
+        return { ok: true, image: shot() };
+      },
+      analyze: async () => {
+        analyzed++;
+        return { ok: true, result: RESULT, model: 'Gemini 3.5 Flash Lite' };
+      },
+    } as Parameters<typeof installDesktopBridge>[0]);
+    try {
+      // App shell: the press arrives on another page and the app navigates here.
+      TestBed.inject(ScreenCaptureService).onOpenPageRequest(() => {});
+      openPage!('screen:2:0');
+
+      const fixture = TestBed.createComponent(ScreenshotAnalysisComponent);
+      const cmp = fixture.componentInstance;
+      fixture.detectChanges();
+      await new Promise((r) => setTimeout(r, 20));
+      fixture.detectChanges();
+      const modal = (fixture.nativeElement as HTMLElement).querySelector('[data-testid="source-picker"]')!;
+      expect(modal).not.toBeNull();
+      expect(cmp.selectedIndex()).toBe(1);
+      expect(captured).toEqual([]);
+
+      modal.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      await new Promise((r) => setTimeout(r, 20));
+      expect(captured).toEqual(['screen:2:0']);
+      expect(analyzed).toBe(1);
+      expect(cmp.result()).not.toBeNull();
+    } finally {
+      restore();
+    }
   });
 });

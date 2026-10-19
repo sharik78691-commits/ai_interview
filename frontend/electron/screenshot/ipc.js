@@ -17,10 +17,11 @@ const fail = (err) => ({
 const CAPTURE_HOTKEY = 'CommandOrControl+Shift+S';
 
 /**
- * @param {{ ipcMain: any, getMainWindow: () => any, globalShortcut?: any, capture: ReturnType<import('./capture').createCapture>, apiBase: string, fetchImpl?: typeof fetch }} deps
+ * @param {{ ipcMain: any, getMainWindow: () => any, globalShortcut?: any, capture: ReturnType<import('./capture').createCapture>, apiBase: string, fetchImpl?: typeof fetch, focusWindow?: (win: any) => void }} deps
  *   fetchImpl must carry the signed-in session (cookies + CSRF header).
+ *   focusWindow forces the app to the foreground WITH keyboard focus.
  */
-function registerScreenshotIpc({ ipcMain, getMainWindow, globalShortcut, capture, apiBase, fetchImpl }) {
+function registerScreenshotIpc({ ipcMain, getMainWindow, globalShortcut, capture, apiBase, fetchImpl, focusWindow }) {
   const trusted = (event) => {
     const win = getMainWindow();
     return !!win && !win.isDestroyed() && event.sender === win.webContents;
@@ -75,26 +76,35 @@ function registerScreenshotIpc({ ipcMain, getMainWindow, globalShortcut, capture
   let hotkeyOn = false;
   let pageActive = false;
   const bringForward = (win) => {
-    // So the picker / page receives arrow and Enter keys.
+    // So the picker / page receives arrow and Enter keys. Window focus alone is
+    // not enough: the PAGE (webContents) needs keyboard focus too, and Windows
+    // won't foreground a background app without the main process's help.
+    if (focusWindow) {
+      focusWindow(win);
+      return;
+    }
     if (win.isMinimized?.()) win.restore?.();
     win.show?.();
     win.focus?.();
+    win.webContents?.focus?.();
   };
   const onHotkey = async () => {
     const win = getMainWindow();
     if (!win || win.isDestroyed()) return;
+    let sourceId = null;
+    let error = null;
+    try {
+      sourceId = await capture.screenSourceAtCursor();
+    } catch (err) {
+      error = fail(err).error;
+    }
+    bringForward(win);
     if (!pageActive) {
-      bringForward(win);
-      win.webContents.send('screenshot:open-page');
+      // One press from any page: open the Screenshots page AND its picker.
+      win.webContents.send('screenshot:open-page', sourceId);
       return;
     }
-    try {
-      const sourceId = await capture.screenSourceAtCursor();
-      bringForward(win);
-      win.webContents.send('screenshot:hotkey', sourceId);
-    } catch (err) {
-      win.webContents.send('screenshot:hotkey', null, fail(err).error);
-    }
+    win.webContents.send('screenshot:hotkey', sourceId, error);
   };
   const registerHotkey = () => {
     if (!globalShortcut || hotkeyOn) return hotkeyOn;
