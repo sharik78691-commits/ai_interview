@@ -9,7 +9,7 @@
       </h1>
       <p class="muted small hotkey-steps" data-testid="title-hotkey-steps">
         Press <strong>Ctrl+Shift+S</strong> to capture a screenshot → choose the screen with the
-        <kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd> arrow keys → press <kbd>Enter</kbd> and the screenshot is added.
+        <kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd> arrow keys → press <kbd>Enter</kbd> — it is captured and analyzed immediately.
       </p>
       <p class="muted">Turn screenshots of interview questions into clear answer guidance for practice and preparation.</p>
     </div>
@@ -64,7 +64,7 @@
           📸 Capture Screen
         </button>
         <p class="muted small">You choose exactly which screen or window to capture. Nothing is captured in the background, and the screen flashes briefly each time a capture is taken.</p>
-        <p class="muted small hotkey-tip" data-testid="capture-hotkey-tip">Shortcut: press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> to open the screen picker — use the arrow keys (← → ↑ ↓) to choose a screen, then press <kbd>Enter</kbd>. From any other page, the shortcut first opens this page.</p>
+        <p class="muted small hotkey-tip" data-testid="capture-hotkey-tip">Shortcut: press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> to open the screen picker — use the arrow keys (← → ↑ ↓) to choose a screen, then press <kbd>Enter</kbd> to capture and analyze it immediately. From any other page, the shortcut first opens this page.</p>
         @if (captureNotice()) { <p class="ok small" role="status">✓ {{ captureNotice() }}</p> }
 
         @if (shots().length) {
@@ -153,7 +153,7 @@
         <h3>Choose what to capture</h3>
         <button class="btn-ghost sm" (click)="closePicker()" [disabled]="capturing()">Cancel</button>
       </div>
-      <p class="muted small">Click a screen or window to capture it, or use the arrow keys to choose and press <strong>Enter</strong>.</p>
+      <p class="muted small">Click a screen or window to add it, or use the arrow keys and press <strong>Enter</strong> to capture and analyze at once.</p>
       @if (loadingSources()) {
         <p class="muted">Looking for screens and windows…</p>
       } @else {

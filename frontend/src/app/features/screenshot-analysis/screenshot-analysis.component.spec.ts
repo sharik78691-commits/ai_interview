@@ -174,10 +174,11 @@ describe('ScreenshotAnalysisComponent (desktop flow)', () => {
     expect(cmp.canAnalyze()).toBeFalse();
     expect(q('[data-testid="server-status"]')!.textContent).toContain('not set up on the server');
   });
-  it('Ctrl+Shift+S hotkey: picker mode only while the page is open; opens the picker, arrows choose, Enter captures', async () => {
+  it('Ctrl+Shift+S hotkey: picker mode only while the page is open; opens the picker, arrows choose, Enter captures and analyzes', async () => {
     const calls: boolean[] = [];
     let press: ((id: string | null, err: { code: string; message: string } | null) => void) | null = null;
     const captured: string[] = [];
+    let analyzedCount = 0;
     const sources = [
       { id: 'screen:1:0', name: 'Screen 1', kind: 'screen', thumbnail: 'data:image/png;base64,AAAA' },
       { id: 'screen:2:0', name: 'Screen 2', kind: 'screen', thumbnail: 'data:image/png;base64,AAAA' },
@@ -196,6 +197,10 @@ describe('ScreenshotAnalysisComponent (desktop flow)', () => {
       capture: async (id: string) => {
         captured.push(id);
         return { ok: true, image: shot() };
+      },
+      analyze: async (_m: string, images: unknown[]) => {
+        analyzedCount = images.length;
+        return { ok: true, result: RESULT, model: 'Gemini 3.5 Flash Lite' };
       },
     } as Parameters<typeof installDesktopBridge>[0]);
     expect(calls).toEqual([true]);
@@ -233,6 +238,9 @@ describe('ScreenshotAnalysisComponent (desktop flow)', () => {
     expect(captured).toEqual(['screen:2:0']);
     expect(cmp.shots().length).toBe(1);
     expect(q('[data-testid="source-picker"]')).toBeNull();
+    // Enter = capture + analyze immediately, no click on "Analyze".
+    expect(analyzedCount).toBe(1);
+    expect(cmp.result()).toEqual(RESULT);
 
     // Escape cancels without capturing.
     press!('screen:1:0', null);
@@ -246,6 +254,35 @@ describe('ScreenshotAnalysisComponent (desktop flow)', () => {
     fixture.destroy();
     expect(calls).toEqual([true, false]);
     expect(press).toBeNull();
+  });
+
+  it('clicking a source only captures (no automatic analysis), so several can be collected', async () => {
+    let analyzeCalls = 0;
+    await setup({
+      analyze: async () => {
+        analyzeCalls++;
+        return { ok: true, result: RESULT, model: 'Gemini 3.5 Flash Lite' };
+      },
+    });
+    await cmp.openPicker({ kind: 'add' });
+    await cmp.takeCapture(cmp.sources()[0]);
+    expect(cmp.shots().length).toBe(1);
+    expect(analyzeCalls).toBe(0);
+  });
+
+  it('Enter does not analyze when the capture fails', async () => {
+    let analyzeCalls = 0;
+    await setup({
+      capture: async () => ({ ok: false, error: { code: 'EMPTY_CAPTURE', message: 'The capture came back empty.' } }),
+      analyze: async () => {
+        analyzeCalls++;
+        return { ok: true, result: RESULT, model: 'Gemini 3.5 Flash Lite' };
+      },
+    });
+    await cmp.openPicker({ kind: 'add' });
+    await cmp.takeCapture(cmp.sources()[0], { analyzeNow: true });
+    expect(analyzeCalls).toBe(0);
+    expect(cmp.error()).toBe('The capture came back empty.');
   });
 
   it('Ctrl+Shift+S hotkey reports errors instead of capturing', async () => {
