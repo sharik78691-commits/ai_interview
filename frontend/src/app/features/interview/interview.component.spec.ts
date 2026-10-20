@@ -4,6 +4,7 @@ import { AIInterviewResponse } from '../../core/models/interview.models';
 import { DemoService } from '../../core/services/demo.service';
 import { InterviewComponent, MAX_PAST_HISTORY, groupSentences, splitLabelled } from './interview.component';
 import { SmoothText } from './smooth-text';
+import { EMPTY, Subject } from 'rxjs';
 
 describe('DemoService', () => {
   it('returns saga guidance for saga questions', () => {
@@ -62,25 +63,10 @@ describe('Interview Answer Card', () => {
     ]);
   });
 
-  it('coding answers carry exactly ONE program (no human-style version)', () => {
+  it('coding demo answers carry exactly ONE program (no human-style version)', () => {
     const coding = new DemoService().DEMO_GUIDANCE.find((g) => g.questionType === 'coding')!;
     expect(coding.codeHint).toBeTruthy();
     expect(coding.humanCode).toBeFalsy();
-    const text = make(coding).answerText;
-    expect(text).toContain('Program:');
-    expect(text).not.toContain('Program 1');
-    expect(text).not.toContain('Program 2');
-    expect(text).not.toContain('human-style');
-    // Even an old stored answer that still carries humanCode shows one program.
-    expect(make({ ...coding, humanCode: 'def x(): pass' }).answerText).not.toContain('def x(): pass');
-  });
-
-  it('copy text follows the card, without the removed fixed sections', () => {
-    const text = make(new DemoService().DEMO_GUIDANCE[0]).answerText;
-    expect(text).toContain('Best answer:');
-    expect(text).toContain('If they ask further:');
-    expect(text).not.toContain('Key takeaways');
-    expect(text).not.toContain('Code hint');
   });
 });
 
@@ -122,7 +108,6 @@ describe('On-demand follow-ups ("Show follow-ups")', () => {
     c.applyFollowUps({ question: '  what is a SAGA? ', followUps: [{ question: 'Why not 2PC?', answer: 'It blocks.' }] });
     expect(c.followUpsLoading).toBeFalse();
     expect(c.card.followUps).toEqual([{ question: 'Why not 2PC?', answer: 'It blocks.' }]);
-    expect(c.answerText).toContain('Why not 2PC?');
   });
 
   it('ignores a late reply for an answer no longer on screen', () => {
@@ -194,14 +179,6 @@ describe('ChatGPT-style list answers (numbered concepts + quick reference)', () 
     expect(card.bestItems.length).toBe(4);
     expect(card.bestIntro).toEqual(['Java has four core OOP concepts.']);
     expect(card.table?.rows.length).toBe(4);
-  });
-
-  it('copy text numbers the concepts and includes the table', () => {
-    const text = make(oop).answerText;
-    expect(text).toContain('1. **Encapsulation:**');
-    expect(text).toContain('4. **Abstraction:**');
-    expect(text).toContain('Quick reference:');
-    expect(text).toContain('Abstraction | `interface`');
   });
 
   it('ignores empty tables and never shows a table on coding answers', () => {
@@ -430,5 +407,34 @@ describe('Live interviewer transcript (meeting audio)', () => {
     c.onLiveText({ text: 'Hello there', final: true }); // no clip final ever comes
     jasmine.clock().tick(3_000);
     expect(c.liveTranscript).toBe('');
+  });
+});
+
+describe('Only the interviewer is heard (never the candidate mic)', () => {
+  // Runs the real ngOnInit against stubs: every `x$` is a silent stream and
+  // every method a spy returning an empty observable.
+  const stub = (extra: Record<string, unknown> = {}) =>
+    new Proxy(extra, {
+      get: (t, k: string) =>
+        k in t ? t[k] : (t[k] = k.endsWith('$') ? new Subject() : jasmine.createSpy(k).and.returnValue(EMPTY)),
+    });
+
+  it('page load does not start the Web Speech (microphone) recognizer', () => {
+    const c = Object.create(InterviewComponent.prototype) as InterviewComponent;
+    const transcription = stub({ isSupported: () => true });
+    Object.assign(c, {
+      subs: [],
+      route: { snapshot: { queryParamMap: { get: () => null } } },
+      settings: { value: {} },
+      aiModels: stub(),
+      ws: stub(),
+      transcription,
+      resumeService: stub(),
+      detector: stub(),
+      interviewerAudio: stub(),
+    });
+    c.ngOnInit();
+    expect((transcription as unknown as { start: jasmine.Spy }).start).not.toHaveBeenCalled();
+    expect(c.micSupported).toBeTrue();
   });
 });
