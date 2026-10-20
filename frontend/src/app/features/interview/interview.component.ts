@@ -167,8 +167,6 @@ export class InterviewComponent implements OnInit, OnDestroy {
   capturingInterviewer = false;
   /** Text typed or pasted by the user (manual fallback). */
   manualQuestion = '';
-  /** Copy the generated answer to the clipboard. */
-  copied = false;
   /** Copy the interviewer transcript to the clipboard. */
   copiedTranscript = false;
   /** Last interviewer question recognised from meeting/tab audio. */
@@ -230,49 +228,6 @@ export class InterviewComponent implements OnInit, OnDestroy {
     } else {
       this.followUpsError = error || 'No follow-ups were suggested. Try again.';
     }
-  }
-
-  /** Answer text used by the "Copy Answer" button (mirrors the card). */
-  get answerText(): string {
-    const g = this.guidance;
-    if (!g) return '';
-    const c = this.card;
-    const parts: string[] = [`Question: ${g.question}`];
-    const section = (title: string, body: string[]) => {
-      if (body.length) parts.push('', `${title}:`, ...body);
-    };
-    if (c.isCoding) {
-      section('Approach', g.approach ? [g.approach] : []);
-      section('Program', g.codeHint ? [g.codeHint] : []);
-      section('Complexity', g.complexity ? [g.complexity] : []);
-      section('Edge cases', (g.edgeCases ?? []).map((e) => `- ${e}`));
-      section('Explain it like this', [g.answerPoints.join(' ')]);
-    } else {
-      section(
-        'Best answer',
-        c.bestItems.length
-          ? [...c.bestIntro, ...c.bestItems.map((p, i) => `${i + 1}. ${p}`), ...c.bestOutro]
-          : [g.answerPoints.join(' ')],
-      );
-      section('Explain it simply', g.simpleExplanation ? [g.simpleExplanation] : []);
-      section('Key details', c.keyDetails.map((d) => `- ${d}`));
-      section(
-        'Quick reference',
-        c.table ? [c.table.headers.join(' | '), ...c.table.rows.map((r) => r.join(' | '))] : [],
-      );
-      section('Practical example', g.example ? [g.example] : []);
-    }
-    if (g.star) {
-      section(
-        'Situation → Action → Result',
-        typeof g.star === 'string' ? [g.star] : this.starEntries().map(([k, v]) => `${k}: ${v}`),
-      );
-    }
-    section(
-      'If they ask further',
-      c.followUps.map((f) => (f.answer ? `- ${f.question}\n  ${f.answer}` : `- ${f.question}`)),
-    );
-    return parts.join('\n');
   }
 
   /** Display labels for the backend's question types. */
@@ -349,12 +304,11 @@ export class InterviewComponent implements OnInit, OnDestroy {
     this.ws.connect();
     this.transcription.connect();
     this.micSupported = this.transcription.isSupported();
-    // connect() only wires the callbacks — the Web Speech recognizer must also
-    // be STARTED or the mic path stays completely silent (that start call was
-    // dropped in bc62b86, which made voice-to-text look like it "never loads").
-    // Chrome asks for mic permission once per origin; afterwards this is
-    // silent. ngOnDestroy()/sign-out release it via transcription.stop().
-    if (this.micSupported) this.transcription.start();
+    // Never START the Web Speech recognizer here: it can only hear the
+    // CANDIDATE'S microphone, so the user's own spoken answers were being
+    // transcribed, detected as questions and answered by the AI. Questions
+    // come only from interviewer (meeting/system) audio via backend STT, plus
+    // typed/demo text pushed through transcript$.
     // Meeting audio needs server-side transcription; show the state up front.
     this.resumeService.checkHealth().subscribe({
       next: (h) => (this.sttReady = h.stt_configured !== false),
@@ -788,19 +742,6 @@ export class InterviewComponent implements OnInit, OnDestroy {
   clearManual(): void {
     this.manualQuestion = '';
     this.audioStatus = '';
-  }
-
-  /** Copy the full answer (points + example + follow-ups) to the clipboard. */
-  async copyAnswer(): Promise<void> {
-    const text = this.answerText;
-    if (!text) return;
-    try {
-      await navigator.clipboard.writeText(text);
-      this.copied = true;
-      setTimeout(() => (this.copied = false), 2000);
-    } catch {
-      this.copied = false;
-    }
   }
 
   /** Copy the interviewer transcript (meeting audio) to the clipboard. */

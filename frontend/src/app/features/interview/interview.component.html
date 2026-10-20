@@ -170,9 +170,6 @@
           <div class="btn-row">
             <button class="btn-primary btn-sm" (click)="generateAnswer()">Generate Answer</button>
             <button class="btn-ghost btn-sm" (click)="clearManual()">Clear</button>
-            <button class="btn-ghost btn-sm" (click)="copyAnswer()" [disabled]="!guidance">
-              {{ copied ? '✓ Copied' : 'Copy Answer' }}
-            </button>
           </div>
         </div>
 
