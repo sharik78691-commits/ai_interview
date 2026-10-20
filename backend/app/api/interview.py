@@ -92,8 +92,9 @@ async def analyze(
     if not question:
         raise HTTPException(status_code=422, detail="question must be non-empty.")
     # Validate the model against the server-side allowlist BEFORE calling out.
+    # Only admins may pick the model; everyone else gets the admin's default.
     try:
-        model_key = validate_model_key(req.model)
+        model_key = validate_model_key(req.model if user.is_admin else None)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     ctx = context_store.get(user.id)

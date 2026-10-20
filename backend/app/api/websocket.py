@@ -219,6 +219,16 @@ def _ws_user_is_active(user_id: int) -> int | None:
         db.close()
 
 
+def _ws_user_is_admin(user_id: int) -> bool:
+    """Only admins may pick the answering model; everyone else gets the default."""
+    db = SessionLocal()
+    try:
+        user = get_user_by_id(db, user_id)
+        return bool(user and user.is_admin)
+    finally:
+        db.close()
+
+
 @router.websocket("/ws/interview")
 async def ws_interview(websocket: WebSocket) -> None:
     # Authentication is checked BEFORE accepting the connection. An
@@ -308,18 +318,20 @@ async def ws_interview(websocket: WebSocket) -> None:
         if length in VALID_LENGTHS:
             service.response_length = length
 
-    # Per-connection AI model. Defaults to the backend default; the client may
-    # switch it mid-session via `model` on any question-bearing message.
+    # Per-connection AI model. Defaults to the backend default (the admin's
+    # pick, resolved per answer). Only admins may switch it via `model`;
+    # a regular user's `model` field is ignored.
     model_key: str | None = None
+    can_pick_model = await asyncio.to_thread(_ws_user_is_admin, user_id)
 
     async def _apply_model(raw: object) -> bool:
-        """Adopt a client-selected model. Returns False for an unknown key.
+        """Adopt an admin-selected model. Returns False for an unknown key.
 
-        The user's explicit choice is respected: an invalid key is reported,
+        The admin's explicit choice is respected: an invalid key is reported,
         never silently replaced with another model.
         """
         nonlocal model_key
-        if raw is None:
+        if raw is None or not can_pick_model:
             return True
         key = str(raw).strip()
         if not key:

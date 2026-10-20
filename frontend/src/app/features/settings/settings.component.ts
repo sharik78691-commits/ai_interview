@@ -3,8 +3,6 @@ import { FormsModule } from '@angular/forms';
 import { AudioService } from '../../core/services/audio.service';
 import { ResumeService } from '../../core/services/resume.service';
 import { SettingsService } from '../../core/services/settings.service';
-import { AiModelsService } from '../../core/services/ai-models.service';
-import { AiModel } from '../../core/models/ai-models';
 import { ErrorBannerComponent } from '../../shared/components/error-banner/error-banner.component';
 import { ResponseLength } from '../../core/models/interview.models';
 
@@ -18,12 +16,19 @@ import { ResponseLength } from '../../core/models/interview.models';
 export class SettingsComponent implements OnInit {
   private settings = inject(SettingsService);
   private resumeService = inject(ResumeService);
-  private aiModels = inject(AiModelsService);
   audio = inject(AudioService);
 
   aiModel = 'auto';
-  /** Model catalog from the backend (never hardcoded). */
-  aiModelList: AiModel[] = [];
+  /**
+   * Display-only choices. The pick is saved locally but never sent: the
+   * backend always answers with the model the admin set as default.
+   */
+  readonly aiModelList = [
+    { key: 'auto', displayName: 'Auto (Recommended)', hint: 'Best balance of speed and quality.' },
+    { key: 'fast', displayName: 'Fast', hint: 'Quickest first words.' },
+    { key: 'balanced', displayName: 'Balanced', hint: 'Fast with richer detail.' },
+    { key: 'advanced', displayName: 'Advanced', hint: 'Deeper reasoning for hard questions.' },
+  ];
   sttProvider = 'browser';
   responseLength: ResponseLength = 'default';
   theme = 'dark';
@@ -41,21 +46,20 @@ export class SettingsComponent implements OnInit {
     this.theme = s.theme;
     this.micId = s.micId;
     this.audio.listMics().then((m) => (this.mics = m));
-    // Model list comes from the backend allowlist (names + availability only).
-    this.aiModels.listModels().subscribe((models) => {
-      this.aiModelList = models;
-      // Keep a stale saved key from pointing at a model that no longer exists.
-      if (this.aiModel !== 'auto' && !models.some((m) => m.key === this.aiModel)) {
-        this.aiModel = models.find((m) => m.isDefault)?.key ?? 'auto';
-      }
-    });
+    // A key saved before the list became display-only falls back to Auto.
+    if (!this.aiModelList.some((m) => m.key === this.aiModel)) this.aiModel = 'auto';
     this.resumeService.checkHealth().subscribe({
       next: (h) => {
         const mode = h.demo_mode ? 'demo' : h.llm_configured ? 'live AI' : 'online';
-        this.health = `online · ${mode}${h.model ? ' · ' + h.model : ''}`;
+        this.health = `online · ${mode}`;
       },
       error: () => (this.health = 'offline — start backend at http://localhost:8000'),
     });
+  }
+
+  /** Hint line for the selected display-only model. */
+  aiModelHint(): string {
+    return this.aiModelList.find((m) => m.key === this.aiModel)?.hint ?? '';
   }
 
   save(): void {

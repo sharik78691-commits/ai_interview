@@ -20,8 +20,6 @@ import { InterviewWsService } from '../../core/services/interview-ws.service';
 import { QuestionDetectorService } from '../../core/services/question-detector.service';
 import { ResumeService } from '../../core/services/resume.service';
 import { SettingsService } from '../../core/services/settings.service';
-import { AiModelsService } from '../../core/services/ai-models.service';
-import { AiModel } from '../../core/models/ai-models';
 import { TranscriptionService } from '../../core/services/transcription.service';
 import { ErrorBannerComponent } from '../../shared/components/error-banner/error-banner.component';
 import { TimeFormatPipe } from '../../shared/pipes/time-format.pipe';
@@ -118,7 +116,6 @@ export class InterviewComponent implements OnInit, OnDestroy {
   sttReady = false;
   private demo = inject(DemoService);
   private settings = inject(SettingsService);
-  private aiModels = inject(AiModelsService);
   private route = inject(ActivatedRoute);
   /** True in the packaged desktop build (Auto Select + transparency slider). */
   readonly isDesktop = environment.electron;
@@ -139,14 +136,6 @@ export class InterviewComponent implements OnInit, OnDestroy {
     string,
   ]>;
 
-  // ------------------------------------------------------------- AI model selection
-  /** Model catalog from the backend (names, providers, availability). */
-  aiModelList: AiModel[] = [];
-  /** Currently selected model key (persisted; default from backend). */
-  selectedModel = '';
-  /** Model/provider that produced the latest guidance (display only). */
-  lastUsedModel = '';
-  lastUsedProvider = '';
   /** Provisional streamed bullets (preview only — final card replaces them). */
   provisionalPoints: string[] = [];
   /** True while a streamed answer is in flight. */
@@ -300,11 +289,6 @@ export class InterviewComponent implements OnInit, OnDestroy {
     }
     this.responseLength = this.settings.value.responseLength;
     this.guidanceFontSize = this.settings.value.guidanceFontSize;
-    // Load the AI model catalog and adopt the persisted (or default) model.
-    this.aiModels.listModels().subscribe((models) => {
-      this.aiModelList = models;
-      this.selectedModel = this.resolveModel(models);
-    });
     this.ws.connect();
     this.transcription.connect();
     this.micSupported = this.transcription.isSupported();
@@ -419,9 +403,6 @@ export class InterviewComponent implements OnInit, OnDestroy {
           this.thinking = false;
         }
       }),
-      // Track which model/provider produced the latest guidance.
-      this.ws.lastModel$.subscribe((m) => (this.lastUsedModel = m ?? '')),
-      this.ws.lastProvider$.subscribe((p) => (this.lastUsedProvider = p ?? '')),
       // Provisional streamed bullets (preview only, never the final answer).
       this.ws.streamPoints$.subscribe((pts) => (this.provisionalPoints = pts)),
       this.ws.streaming$.subscribe((s) => (this.isStreaming = s)),
@@ -446,7 +427,7 @@ export class InterviewComponent implements OnInit, OnDestroy {
     // Transcription first, AI second — do not claim "Question detected" yet.
     this.audioStatus = 'Transcribing interviewer audio…';
     this.thinking = true;
-    this.ws.sendAudioClip(clip.data, clip.mimeType, this.responseLength, this.activeModel());
+    this.ws.sendAudioClip(clip.data, clip.mimeType, this.responseLength);
     // Safety valve: never stall the queue if the backend stays silent.
     setTimeout(() => this.releaseClipSlot(), 10000);
   }
@@ -735,9 +716,9 @@ export class InterviewComponent implements OnInit, OnDestroy {
     this.lastInterviewerText = question;
     this.lastQuestion = question;
     if (this.ws.isConnected()) {
-      this.ws.sendInterviewerQuestion(question, this.responseLength, this.activeModel());
+      this.ws.sendInterviewerQuestion(question, this.responseLength);
     } else {
-      this.resumeService.analyzeQuestion(question, this.responseLength, this.activeModel()).subscribe({
+      this.resumeService.analyzeQuestion(question, this.responseLength).subscribe({
         next: (g) => {
           this.thinking = false;
           this.audioStatus = 'Answer ready';
@@ -796,44 +777,6 @@ export class InterviewComponent implements OnInit, OnDestroy {
     }
   }
 
-  // ---------------------------------------------------------- AI model select
-
-  /** Pick the persisted model when it is still offered, else the default. */
-  private resolveModel(models: AiModel[]): string {
-    const saved = (this.settings.value.aiModel || '').trim();
-    if (saved && saved !== 'auto' && models.some((m) => m.key === saved)) {
-      return saved;
-    }
-    return models.find((m) => m.isDefault)?.key ?? '';
-  }
-
-  /** Resolve the model key to send: '' means "backend default". */
-  private activeModel(): string | undefined {
-    const key = (this.selectedModel || '').trim();
-    return key ? key : undefined;
-  }
-
-  /** Detail row for the currently selected model (capabilities + status). */
-  selectedModelDetail(): AiModel | null {
-    return this.aiModelList.find((m) => m.key === this.selectedModel) ?? null;
-  }
-
-  /** Label for the currently selected model (selector + status line). */
-  selectedModelLabel(): string {
-    return (
-      this.aiModelList.find((m) => m.key === this.selectedModel)?.displayName ||
-      this.selectedModel ||
-      'Default'
-    );
-  }
-
-  /** Switch the AI model for subsequent answers (mid-session, persisted). */
-  onModelChange(key: string): void {
-    this.selectedModel = key;
-    this.settings.save({ aiModel: key });
-    this.ws.sendSetModel(key);
-  }
-
   /** Re-ask the last question (e.g. after a rate-limit error) with the current model. */
   retryGuidance(): void {
     const q = (this.lastQuestion || this.guidance?.question || '').trim();
@@ -886,7 +829,7 @@ export class InterviewComponent implements OnInit, OnDestroy {
     this.detector.pushFragment(text);
     // Demo mode is fully on-device: never forward demo speech to the server,
     // or every demo question gets TWO answers (demo + live AI).
-    if (this.ws.isConnected() && !this.live) this.ws.sendTranscript(text, this.responseLength, this.activeModel());
+    if (this.ws.isConnected() && !this.live) this.ws.sendTranscript(text, this.responseLength);
   }
 
   private onQuestion(q: string): void {
@@ -900,11 +843,11 @@ export class InterviewComponent implements OnInit, OnDestroy {
       // Transcript fragments were already streamed by onTranscript, so ask the
       // server to analyze its buffer instead of re-sending the same text
       // (re-sending duplicated the question and short questions never fired).
-      this.ws.sendForce(q, this.responseLength, this.activeModel());
+      this.ws.sendForce(q, this.responseLength);
       return;
     }
     // HTTP fallback when WS unavailable
-    this.resumeService.analyzeQuestion(q, this.responseLength, this.activeModel()).subscribe({
+    this.resumeService.analyzeQuestion(q, this.responseLength).subscribe({
       next: (g) => {
         this.thinking = false;
         this.ws.pushLocalGuidance({ ...g, question: q });
