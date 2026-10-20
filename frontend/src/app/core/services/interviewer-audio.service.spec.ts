@@ -155,6 +155,47 @@ describe('InterviewerAudioService: live transcript snapshots', () => {
   });
 });
 
+/** Pause / resume: the stream stays open, but nothing reaches STT while paused. */
+describe('InterviewerAudioService: pause / resume', () => {
+  type Internals = {
+    state$: { next(v: string): void };
+    pcmChunks: Float32Array[];
+    pcmCount: number;
+    listening: boolean;
+  };
+  let svc: InterviewerAudioService;
+  let raw: Internals;
+
+  beforeEach(() => {
+    svc = TestBed.inject(InterviewerAudioService);
+    raw = svc as unknown as Internals;
+    raw.state$.next('capturing');
+  });
+
+  afterEach(() => {
+    svc.setPaused(false);
+    raw.state$.next('idle');
+  });
+
+  it('stops feeding audio while paused and drops the half-spoken clip', () => {
+    raw.pcmChunks.push(new Float32Array(10));
+    raw.pcmCount = 10;
+    svc.setPaused(true);
+    expect(svc.paused$.value).toBeTrue();
+    expect(raw.listening).toBeFalse();
+    expect(raw.pcmCount).toBe(0);
+    expect(raw.pcmChunks.length).toBe(0);
+    svc.setPaused(false);
+    expect(raw.listening).toBeTrue();
+  });
+
+  it('ignores pause when nothing is being captured', () => {
+    raw.state$.next('idle');
+    svc.setPaused(true);
+    expect(svc.paused$.value).toBeFalse();
+  });
+});
+
 /** Word-by-word transcript: PCM is streamed only while someone is talking. */
 describe('InterviewerAudioService: live transcript stream', () => {
   const RATE = 48_000;

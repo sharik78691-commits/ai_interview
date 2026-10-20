@@ -2,7 +2,7 @@
 import '../../core/services/electron-bridge';
 import { AIInterviewResponse } from '../../core/models/interview.models';
 import { DemoService } from '../../core/services/demo.service';
-import { InterviewComponent, MAX_PAST_HISTORY, groupSentences, splitLabelled } from './interview.component';
+import { InterviewComponent, MAX_PAST_HISTORY, MAX_SESSION_SECONDS, groupSentences, splitLabelled } from './interview.component';
 import { SmoothText } from './smooth-text';
 import { EMPTY, Subject } from 'rxjs';
 
@@ -245,6 +245,66 @@ describe('Auto Select Meeting Audio (web)', () => {
     await c.autoSelectMeetingAudio();
     expect(audio.startSystemAudio).not.toHaveBeenCalled();
     expect(ws.sendInterviewerAudioStart).not.toHaveBeenCalled();
+  });
+});
+
+describe('Session time limit (1h 15m)', () => {
+  const make = (capturing: boolean) => {
+    const c = Object.create(InterviewComponent.prototype) as InterviewComponent;
+    Object.assign(c, { capturingInterviewer: capturing, error: '', elapsed: MAX_SESSION_SECONDS - 2, timer: null });
+    const stop = spyOn(c, 'stopInterviewerAudio').and.resolveTo();
+    const tick = () => (c as unknown as { tickTimer: () => void }).tickTimer();
+    return { c, stop, tick };
+  };
+
+  it('auto-stops interviewer audio exactly at 01:15:00', () => {
+    const { c, stop, tick } = make(true);
+    tick();
+    expect(stop).not.toHaveBeenCalled();
+    tick();
+    expect(c.elapsed).toBe(MAX_SESSION_SECONDS);
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect(c.error).toContain('1h 15m');
+  });
+
+  it('never counts past the cap even when no audio is capturing', () => {
+    const { c, stop, tick } = make(false);
+    tick(); tick(); tick();
+    expect(c.elapsed).toBe(MAX_SESSION_SECONDS);
+    expect(stop).not.toHaveBeenCalled();
+  });
+});
+
+describe('Transcript pause / resume', () => {
+  const make = (capturing: boolean) => {
+    const c = Object.create(InterviewComponent.prototype) as InterviewComponent;
+    const audio = jasmine.createSpyObj('audio', ['setPaused']);
+    const ws = jasmine.createSpyObj('ws', ['setStatus']);
+    // The service's paused$ normally drives audioPaused; mirror it here.
+    audio.setPaused.and.callFake((p: boolean) => (c.audioPaused = p));
+    Object.assign(c, {
+      interviewerAudio: audio, ws, capturingInterviewer: capturing, audioPaused: false,
+      clipQueue: [{}], streamHold: null, liveTyped: { set: () => undefined },
+    });
+    return { c, audio, ws };
+  };
+
+  it('pauses STT, drops queued audio, then resumes on the second click', () => {
+    const { c, audio, ws } = make(true);
+    c.toggleAudioPause();
+    expect(audio.setPaused).toHaveBeenCalledWith(true);
+    expect(ws.setStatus).toHaveBeenCalledWith('paused');
+    expect((c as unknown as { clipQueue: unknown[] }).clipQueue.length).toBe(0);
+    c.toggleAudioPause();
+    expect(audio.setPaused).toHaveBeenCalledWith(false);
+    expect(ws.setStatus).toHaveBeenCalledWith('listening');
+    expect(c.audioPaused).toBeFalse();
+  });
+
+  it('does nothing when meeting audio is not on', () => {
+    const { c, audio } = make(false);
+    c.toggleAudioPause();
+    expect(audio.setPaused).not.toHaveBeenCalled();
   });
 });
 

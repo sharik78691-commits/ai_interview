@@ -131,6 +131,11 @@
   margin-bottom: 0;
   border-bottom: 0;
 }
+/* Transcript pause / resume (meeting audio only). */
+.pause-audio.paused {
+  color: var(--warning, #d97706);
+  border-color: currentColor;
+}
 
 /* ------------------------------ Sidebar fields ---------------------------- */
 .field {
@@ -707,10 +712,6 @@
   color: #fcd34d;
   border-color: rgba(252, 211, 77, 0.4);
   background: rgba(252, 211, 77, 0.08);
-}
-.heard {
-  margin: 0;
-  font-style: italic;
 }
 button[disabled] {
   opacity: 0.45;

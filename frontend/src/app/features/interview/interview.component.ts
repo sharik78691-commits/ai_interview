@@ -99,6 +99,8 @@ export function groupSentences(sentences: string[]): string[] {
 export const MAX_PAST_HISTORY = 4;
 /** How long a finished streamed utterance waits for its final transcript. */
 const STREAM_HOLD_MS = 2_500;
+/** One interview session is capped at 1h 15m; interviewer audio stops automatically. */
+export const MAX_SESSION_SECONDS = 75 * 60;
 
 @Component({
   selector: 'app-interview',
@@ -165,6 +167,8 @@ export class InterviewComponent implements OnInit, OnDestroy {
   audioStatus = '';
   /** True while tab/meeting audio is being captured. */
   capturingInterviewer = false;
+  /** Meeting audio is open but paused: nothing reaches STT or the AI. */
+  audioPaused = false;
   /** Text typed or pasted by the user (manual fallback). */
   manualQuestion = '';
   /** Copy the interviewer transcript to the clipboard. */
@@ -363,6 +367,7 @@ export class InterviewComponent implements OnInit, OnDestroy {
           this.dropStreamText();
         }
       }),
+      this.interviewerAudio.paused$.subscribe((p) => (this.audioPaused = p)),
       // One clip in flight at a time. Sending every clip immediately used to
       // hit the transcription rate limit during a fast interview.
       this.interviewerAudio.clip$.subscribe((clip) => this.enqueueClip(clip)),
@@ -680,6 +685,27 @@ export class InterviewComponent implements OnInit, OnDestroy {
     URL.revokeObjectURL(url);
   }
 
+  /**
+   * Pause / resume meeting audio from the Transcript panel. While paused the
+   * stream stays open but no audio reaches STT, so no new question is
+   * transcribed or answered; Resume picks up from fresh audio.
+   */
+  toggleAudioPause(): void {
+    if (!this.capturingInterviewer) return;
+    const pause = !this.audioPaused;
+    this.interviewerAudio.setPaused(pause);
+    if (pause) {
+      this.clipQueue = [];
+      this.clearInterviewerInterim();
+      this.dropStreamText();
+      this.ws.setStatus('paused');
+      this.audioStatus = 'Paused — the AI is not listening.';
+    } else {
+      this.ws.setStatus('listening');
+      this.audioStatus = "Listening for the interviewer's question…";
+    }
+  }
+
   /** Stop capturing interviewer audio. */
   async stopInterviewerAudio(): Promise<void> {
     await this.interviewerAudio.stop();
@@ -893,7 +919,19 @@ export class InterviewComponent implements OnInit, OnDestroy {
 
   private startTimer(): void {
     this.stopTimer();
-    this.timer = setInterval(() => this.elapsed++, 1000);
+    this.timer = setInterval(() => this.tickTimer(), 1000);
+  }
+
+  /** One second of session time; at the 1h 15m cap the interviewer audio stops itself. */
+  private tickTimer(): void {
+    this.elapsed++;
+    if (this.elapsed < MAX_SESSION_SECONDS) return;
+    this.elapsed = MAX_SESSION_SECONDS;
+    this.stopTimer();
+    if (this.capturingInterviewer) {
+      void this.stopInterviewerAudio();
+      this.error = 'Interview time limit (1h 15m) reached — interviewer audio stopped automatically.';
+    }
   }
 
   private stopTimer(keep = false): void {
