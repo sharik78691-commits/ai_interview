@@ -122,10 +122,24 @@ class Settings:
         # Fourth STT model (Google's Gemini 3.5 Transcribe Live — streaming
         # Live API / bidiGenerateContent over a WebSocket; uses GEMINI_API_KEY).
         self.stt_model_4: str = os.getenv("STT_MODEL_4", "") or "gemini-3.5-transcribe-live"
+        # Fifth STT model: the same Whisper large-v3-turbo served by DeepInfra
+        # (OpenAI-compatible /audio/transcriptions). Own key: DEEPINFRA_API_KEY.
+        self.deepinfra_api_key: str = os.getenv("DEEPINFRA_API_KEY", "")
+        self.stt_model_5: str = os.getenv("STT_MODEL_5", "") or "openai/whisper-large-v3-turbo"
         # Server-side STT only. Browsers cannot transcribe tab/meeting audio
         # locally, so that audio is streamed to the backend for transcription.
         # Defaults to the LLM endpoint (Groq serves Whisper on the same base URL).
         self.stt_base_url: str = os.getenv("STT_BASE_URL", "")
+        # Live transcript: while the interviewer is still talking, the client
+        # sends rolling snapshots of the clip and the backend returns PROVISIONAL
+        # text (display only, never question detection). Costs ~1 extra STT call
+        # per second of speech; set false to show text only after each pause.
+        self.stt_live_preview: bool = _as_bool(os.getenv("STT_LIVE_PREVIEW"), default=True)
+        # Word-by-word live transcript: with GEMINI_API_KEY set, interviewer
+        # audio is also STREAMED into one Gemini Live session (display only;
+        # answers still come from the clip pipeline). Without the key, the
+        # snapshot previews above are used instead.
+        self.stt_live_model: str = os.getenv("STT_LIVE_MODEL", "") or self.stt_model_4
         # Demo mode defaults to True when no LLM key is configured.
         explicit_demo = os.getenv("DEMO_MODE")
         if explicit_demo is None or not explicit_demo.strip():

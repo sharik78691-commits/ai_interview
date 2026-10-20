@@ -315,6 +315,20 @@ describe('analysis history (local only)', () => {
     expect(raw).not.toContain('base64');
   });
 
+  it('keeps only the 3 newest analyses, including ones saved by older builds', () => {
+    expect(MAX_HISTORY).toBe(3);
+    const h = TestBed.inject(AnalysisHistoryService);
+    const first = h.add({ ...RESULT, topic: 'oldest' }, 'm', 1);
+    for (let i = 0; i < 3; i++) h.add({ ...RESULT, topic: `new ${i}` }, 'm', 1);
+    expect(h.entries().map((e) => e.result.topic)).toEqual(['new 2', 'new 1', 'new 0']);
+    expect(h.entries().some((e) => e.id === first.id)).toBeFalse();
+
+    // An older build may have stored up to 30 entries: only 3 are shown.
+    TestBed.resetTestingModule();
+    localStorage.setItem('aia_screenshot_history', JSON.stringify(Array(30).fill(h.entries()[0])));
+    expect(TestBed.inject(AnalysisHistoryService).entries().length).toBe(3);
+  });
+
   it('removes and clears entries, and tolerates corrupt storage', () => {
     const h = TestBed.inject(AnalysisHistoryService);
     const e = h.add(RESULT, 'm', 1);

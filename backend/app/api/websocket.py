@@ -7,12 +7,28 @@ Message types from the browser:
   {type: "audio_flush", mimeType?}                   -> end of one audio clip
                                                         (mimeType wins: it is
                                                         what that clip actually is)
+  {type: "audio_preview", mimeType?}                 -> the preceding binary frame
+                                                        is a SNAPSHOT of the clip
+                                                        still being spoken (live
+                                                        transcript, display only)
+  <binary frame "LPCM" + 16 kHz PCM16>               -> live transcript stream
+                                                        (display only, see
+                                                        live_stream.py)
   {type: "interviewer_audio_start"|"interviewer_audio_stop"}
   {type: "reset"} | {type: "ping"}
 
 Messages to the browser:
   {type: "status"}     {type: "ai_guidance"}   {type: "stt_transcript"}
   {type: "notice"}     {type: "error"}
+
+  stt_transcript carries `final` and `seq` (the clip it belongs to). A
+  `final: false` transcript is PROVISIONAL live text for the clip still being
+  spoken: it is never question-detected or answered, and the final transcript
+  of the same `seq` replaces it.
+
+  {type: "stt_live", text, final} is the word-by-word streamed transcript of
+  the current utterance (cumulative per turn; `final` closes the turn). It is
+  display only and never answered.
 """
 import asyncio
 import json
@@ -34,7 +50,9 @@ from app.providers.stt.provider import (
     STTUnavailableError,
     get_stt_provider,
     is_stt_hallucination,
+    prewarm_stt,
 )
+from app.providers.stt.live_stream import LIVE_PCM_TAG, LiveTranscriptStream
 from app.services.activity import log_llm_usage
 from app.services.ai_service import AIService
 from app.services.interview_context import VALID_LENGTHS, context_store, normalize_length
@@ -54,6 +72,11 @@ DEFAULT_AUDIO_MIME = "audio/wav"
 # the next question waited minutes; now they run in parallel, bounded so a
 # fast-talking interviewer cannot hammer the transcription rate limit.
 MAX_CONCURRENT_TRANSCRIPTIONS = 2
+# Live-transcript previews are disposable: a slow one is abandoned (the next
+# snapshot supersedes it) and a failing provider pauses previews for a while so
+# they never compete with the FINAL clip for the rate limit.
+PREVIEW_TIMEOUT_SECONDS = 6.0
+PREVIEW_COOLDOWN_SECONDS = 20.0
 # Longest question accepted by "Show follow-ups" (questions are short text).
 MAX_FOLLOWUP_QUESTION_CHARS = 2000
 # Longest question sent to the LLM (shared with the REST route): real
@@ -247,6 +270,37 @@ async def ws_interview(websocket: WebSocket) -> None:
     audio_buffer = bytearray()
     audio_mime = "audio/webm"
     interviewer_capturing = False
+
+    # Live-transcript lane: provisional text while the interviewer is still
+    # talking. Its own provider instance makes ONE attempt per snapshot, so a
+    # preview never retries into the rate limit the final clip needs.
+    live_preview = get_settings().stt_live_preview
+    preview_stt = get_stt_provider()
+    if preview_stt is not stt:
+        preview_stt.max_attempts = 1
+    #: Index of the clip currently being spoken; bumped when a clip is flushed,
+    #: so a preview that finishes after its clip's final is dropped as stale.
+    clip_seq = 0
+    #: Newest unsent snapshot (clip, seq) — latest wins, older ones drop.
+    preview_pending: tuple[bytes, int] | None = None
+    preview_running = False
+    preview_paused_until = 0.0
+
+    # Word-by-word stream (needs a Gemini key). When on, the client streams
+    # PCM instead of sending snapshots, so the preview lane above stays idle.
+    settings = get_settings()
+    live_stream: LiveTranscriptStream | None = None
+    if live_preview and settings.gemini_api_key and settings.stt_live_model:
+
+        async def _on_live_text(text: str, final: bool) -> None:
+            try:
+                await websocket.send_json({"type": "stt_live", "text": text, "final": final})
+            except Exception:
+                logger.debug("[ws user=%s] live text dropped: socket closing", user_id)
+
+        live_stream = LiveTranscriptStream(
+            settings.gemini_api_key, settings.stt_live_model, _on_live_text
+        )
 
     def _apply_length(raw: object) -> None:
         """Client may override the answer depth for the next answer."""
@@ -445,7 +499,11 @@ async def ws_interview(websocket: WebSocket) -> None:
         await _send_guidance(question)
 
     async def _transcribe_and_detect(
-        clip: bytes, clip_mime: str, length_raw: object, model_raw: object
+        clip: bytes,
+        clip_mime: str,
+        length_raw: object,
+        model_raw: object,
+        seq: int | None = None,
     ) -> None:
         """Transcribe one interviewer audio clip, then run question detection.
 
@@ -456,7 +514,7 @@ async def ws_interview(websocket: WebSocket) -> None:
         next clip, model switches) while this awaits the STT provider, and at
         most MAX_CONCURRENT_TRANSCRIPTIONS clips transcribe at once.
         """
-        nonlocal audio_mime
+        nonlocal audio_mime, preview_paused_until
         if not clip:
             return
 
@@ -514,6 +572,8 @@ async def ws_interview(websocket: WebSocket) -> None:
                 # Provider is configured but the call failed - tell the real reason.
                 # scope="stt" so the UI does not claim it is showing template guidance.
                 logger.warning("Interviewer audio transcription failed: %s", exc)
+                # Rate limit / provider trouble: the final clip has priority.
+                preview_paused_until = time.monotonic() + PREVIEW_COOLDOWN_SECONDS
                 await websocket.send_json(
                     {"type": "notice", "scope": "stt", "message": str(exc)}
                 )
@@ -559,9 +619,10 @@ async def ws_interview(websocket: WebSocket) -> None:
             )
             return
 
-        await websocket.send_json(
-            {"type": "stt_transcript", "text": text, "final": True}
-        )
+        final_frame: dict = {"type": "stt_transcript", "text": text, "final": True}
+        if seq is not None:
+            final_frame["seq"] = seq
+        await websocket.send_json(final_frame)
 
         # Question detection for interviewer audio: the clip already ends at a
         # pause, so treat this segment as a finished utterance — but only a
@@ -600,6 +661,59 @@ async def ws_interview(websocket: WebSocket) -> None:
                 "message": "listening... (waiting for a complete question)",
             }
         )
+
+    async def _preview_worker() -> None:
+        """Transcribe live snapshots of the clip still being spoken.
+
+        DISPLAY ONLY: the result is sent as `final: false` and never touches
+        the QuestionBuffer or the answer queue, so a provisional transcript can
+        never be answered (or answered twice). One preview runs at a time and
+        only the newest snapshot is kept, which bounds the extra STT calls to
+        the provider's own latency.
+        """
+        nonlocal preview_pending, preview_running, preview_paused_until
+        try:
+            while preview_pending is not None:
+                clip, seq = preview_pending
+                preview_pending = None
+                # Stale (its clip was already flushed), paused after a provider
+                # failure, or every final slot busy (finals have priority).
+                if seq != clip_seq or time.monotonic() < preview_paused_until:
+                    continue
+                if stt_slots.locked():
+                    continue
+                real_mime = MIME_BY_FORMAT.get(sniff_audio(clip))
+                if not real_mime:
+                    continue
+                t0 = time.perf_counter()
+                try:
+                    text = await asyncio.wait_for(
+                        preview_stt.transcribe(clip, mime_type=real_mime),
+                        timeout=PREVIEW_TIMEOUT_SECONDS,
+                    )
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    preview_paused_until = time.monotonic() + PREVIEW_COOLDOWN_SECONDS
+                    logger.info(
+                        "Live preview paused %.0fs after STT failure: %s",
+                        PREVIEW_COOLDOWN_SECONDS,
+                        str(exc)[:120] or type(exc).__name__,
+                    )
+                    continue
+                logger.info(
+                    "STT preview latency: %.2fs for %d bytes",
+                    time.perf_counter() - t0,
+                    len(clip),
+                )
+                text = (text or "").strip()
+                if seq != clip_seq or not text or is_stt_hallucination(text):
+                    continue
+                await websocket.send_json(
+                    {"type": "stt_transcript", "text": text, "final": False, "seq": seq}
+                )
+        finally:
+            preview_running = False
 
     async def _flush_held_question(
         delay_s: float, length_raw: object, model_raw: object
@@ -709,6 +823,10 @@ async def ws_interview(websocket: WebSocket) -> None:
             "type": "status",
             "status": "listening",
             "message": "connected. Send {type:'transcript', text}.",
+            # Feature flags: the client sends audio_preview snapshots only when
+            # livePreview is set, and streams LPCM frames only when liveStream is.
+            "livePreview": live_preview,
+            "liveStream": live_stream is not None,
         }
     )
 
@@ -735,6 +853,11 @@ async def ws_interview(websocket: WebSocket) -> None:
             # ---- Binary frame: interviewer audio chunk ----
             if message.get("type") == "websocket.receive" and message.get("bytes"):
                 chunk = message["bytes"]
+                if chunk[:4] == LIVE_PCM_TAG:
+                    # Live transcript audio: never part of a clip.
+                    if interviewer_capturing and live_stream is not None:
+                        live_stream.feed(chunk[4:])
+                    continue
                 if interviewer_capturing and len(audio_buffer) < MAX_CLIP_BYTES:
                     audio_buffer.extend(chunk)
                 continue
@@ -784,6 +907,7 @@ async def ws_interview(websocket: WebSocket) -> None:
             elif mtype == "reset":
                 buffer = QuestionBuffer()
                 audio_buffer = bytearray()
+                clip_seq += 1  # in-flight previews belong to the old session
                 await websocket.send_json(
                     {"type": "status", "status": "listening", "message": "buffer reset"}
                 )
@@ -796,6 +920,11 @@ async def ws_interview(websocket: WebSocket) -> None:
                 # how MediaRecorder output is decoded). Each clip announces its
                 # own mimeType in audio_flush, which always wins.
                 audio_mime = msg.get("mimeType") or DEFAULT_AUDIO_MIME
+                # Open the STT connection now, while the interviewer is still
+                # talking, so the first clip skips the TCP+TLS setup.
+                _spawn(prewarm_stt())
+                if live_stream is not None:
+                    live_stream.warm()
                 await websocket.send_json(
                     {
                         "type": "status",
@@ -811,7 +940,8 @@ async def ws_interview(websocket: WebSocket) -> None:
                     # so the "stopped" status (and everything else) stays fast.
                     clip = bytes(audio_buffer)
                     audio_buffer = bytearray()
-                    _spawn(_transcribe_and_detect(clip, audio_mime, None, None))
+                    _spawn(_transcribe_and_detect(clip, audio_mime, None, None, clip_seq))
+                clip_seq += 1
                 await websocket.send_json(
                     {
                         "type": "status",
@@ -833,11 +963,26 @@ async def ws_interview(websocket: WebSocket) -> None:
                 # after this handler returns) and transcribe in the background.
                 clip = bytes(audio_buffer)
                 audio_buffer = bytearray()
+                seq = clip_seq
+                clip_seq += 1  # previews of this clip are stale from now on
                 _spawn(
                     _transcribe_and_detect(
-                        clip, audio_mime, msg.get("responseLength"), msg.get("model")
+                        clip, audio_mime, msg.get("responseLength"), msg.get("model"), seq
                     )
                 )
+
+            elif mtype == "audio_preview":
+                # Live transcript: the binary frame just before this is a
+                # snapshot of the clip STILL being spoken. Take it out of the
+                # buffer (it is not part of the final clip) and hand it to the
+                # preview lane; the newest snapshot replaces an unsent one.
+                snapshot = bytes(audio_buffer)
+                audio_buffer = bytearray()
+                if snapshot and interviewer_capturing and live_preview:
+                    preview_pending = (snapshot, clip_seq)
+                    if not preview_running:
+                        preview_running = True
+                        _spawn(_preview_worker())
 
             elif mtype == "interviewer_question":
                 # Manual/typed interviewer question -> existing AI flow.
@@ -925,3 +1070,5 @@ async def ws_interview(websocket: WebSocket) -> None:
             task.cancel()
         if background:
             await asyncio.gather(*background, return_exceptions=True)
+        if live_stream is not None:
+            await live_stream.close()

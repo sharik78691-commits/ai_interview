@@ -232,6 +232,10 @@ export class InterviewWsService {
           const point = typeof msg['point'] === 'string' ? msg['point'] : '';
           if (point) this.streamPoints$.next([...this.streamPoints$.value, point]);
         } else if (msg.type === 'status') {
+          // The handshake advertises live transcript support (older backends
+          // omit it and would reject audio_preview as an unknown type).
+          if (typeof msg['livePreview'] === 'boolean') this.livePreview$.next(msg['livePreview']);
+          if (typeof msg['liveStream'] === 'boolean') this.liveStream$.next(msg['liveStream']);
           const s = msg['status'] as string | undefined;
           if (s === 'idle' || s === 'listening' || s === 'processing' || s === 'thinking' || s === 'ready' || s === 'paused' || s === 'error') {
             this.status$.next(s);
@@ -251,10 +255,15 @@ export class InterviewWsService {
           });
         } else if (msg.type === 'stt_transcript') {
           // Interviewer audio recognised by the server-side STT provider.
+          // final:false = provisional live text for the clip still being spoken.
           this.interviewerTranscript$.next({
             text: String(msg['text'] ?? ''),
             final: msg['final'] !== false,
+            seq: typeof msg['seq'] === 'number' ? msg['seq'] : undefined,
           });
+        } else if (msg.type === 'stt_live') {
+          // Word-by-word streamed text of the current utterance (display only).
+          this.liveText$.next({ text: String(msg['text'] ?? ''), final: msg['final'] === true });
         } else if (msg.type === 'notice') {
           // AI fallback (quota/rate limit) vs. speech-to-text problem.
           const scope = msg['scope'] === 'stt' ? 'stt' : 'ai';
@@ -283,6 +292,8 @@ export class InterviewWsService {
         `[ws] closed code=${ev.code} reason=${ev.reason || '-'} clean=${ev.wasClean}; retrying`,
       );
       this.stopPing();
+      this.livePreview$.next(false); // re-learned from the next handshake
+      this.liveStream$.next(false);
       this.scheduleReconnect();
     };
     this.ws.onerror = (ev: Event) => {
@@ -325,7 +336,13 @@ export class InterviewWsService {
   // ------------------------------------------------ interviewer (tab/meeting) audio
 
   /** Interviewer speech recognised by the server-side STT provider. */
-  interviewerTranscript$ = new Subject<{ text: string; final: boolean }>();
+  interviewerTranscript$ = new Subject<{ text: string; final: boolean; seq?: number }>();
+  /** True when the backend accepts audio_preview snapshots (live transcript). */
+  livePreview$ = new BehaviorSubject<boolean>(false);
+  /** True when the backend accepts streamed PCM (word-by-word transcript). */
+  liveStream$ = new BehaviorSubject<boolean>(false);
+  /** Streamed transcript of the current utterance; `final` closes the turn. */
+  liveText$ = new Subject<{ text: string; final: boolean }>();
 
   /** Tell the backend we are starting to stream interviewer audio. */
   sendInterviewerAudioStart(mimeType: string): void {
@@ -348,6 +365,23 @@ export class InterviewWsService {
     // Following control frame tells the backend "clip complete, transcribe now".
     this.ws.send(JSON.stringify({ type: 'audio_flush', mimeType, responseLength, model }));
     this.status$.next('processing');
+  }
+
+  /**
+   * Snapshot of the clip still being spoken (live transcript). Binary frame +
+   * control frame are sent back to back, so they never interleave with a clip.
+   * Does not touch status$: a preview is not a question being processed.
+   */
+  sendAudioPreview(data: ArrayBuffer, mimeType: string): void {
+    if (this.ws?.readyState !== WebSocket.OPEN || !this.livePreview$.value) return;
+    this.ws.send(data);
+    this.ws.send(JSON.stringify({ type: 'audio_preview', mimeType }));
+  }
+
+  /** One tagged live-transcript PCM frame (already carries the "LPCM" tag). */
+  sendLivePcm(frame: ArrayBuffer): void {
+    if (this.ws?.readyState !== WebSocket.OPEN || !this.liveStream$.value) return;
+    this.ws.send(frame);
   }
 
   /** Manual interviewer question -> existing AI flow. */

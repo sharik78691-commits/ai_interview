@@ -234,14 +234,15 @@
         <h3 class="panel-title">Transcript</h3>
         <!-- Exactly ONE interviewer message: the latest one, from any source
              (meeting audio, microphone, demo or a typed question). While the
-             mic is mid-sentence the live interim text takes its place. -->
+             mic or the meeting audio is mid-sentence, the live (provisional)
+             text takes its place until the final transcript arrives. -->
         <div
           class="entry iv"
-          [class.q]="!interim && lastInterviewerText.includes('?')"
-          [class.interim]="!!interim"
+          [class.q]="!liveTranscript && lastInterviewerText.includes('?')"
+          [class.interim]="!!liveTranscript"
         >
           <div class="entry-head">
-            <span class="who">{{ interim ? 'Listening…' : '🎧 Interviewer' }}</span>
+            <span class="who">{{ liveTranscript ? 'Listening…' : '🎧 Interviewer' }}</span>
             <button
               class="btn-ghost btn-sm copy-transcript"
               (click)="copyTranscript()"
@@ -251,7 +252,7 @@
               {{ copiedTranscript ? '✓ Copied' : 'Copy' }}
             </button>
           </div>
-          <p>{{ interim || lastInterviewerText || 'Listening for the interviewer’s question…' }}</p>
+          <p>{{ liveTranscript || lastInterviewerText || 'Listening for the interviewer’s question…' }}</p>
         </div>
       </section>
 

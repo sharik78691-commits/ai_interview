@@ -2,7 +2,8 @@ import { Injectable, signal } from '@angular/core';
 import { AnalysisResult, HistoryEntry } from './screenshot.models';
 
 const STORAGE_KEY = 'aia_screenshot_history';
-export const MAX_HISTORY = 30;
+/** Only the latest 3 analyses are kept (oldest dropped first). */
+export const MAX_HISTORY = 3;
 
 /**
  * Session history. Stored ONLY in this device's localStorage and holds text

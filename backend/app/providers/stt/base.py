@@ -11,6 +11,10 @@ from abc import ABC, abstractmethod
 
 class STTProvider(ABC):
     name: str = "base"
+    #: Calls per transcription (first try + retries). Live transcript previews
+    #: set this to 1 on their own instance: a preview is disposable, so it must
+    #: never retry into the rate limit the FINAL clip needs.
+    max_attempts: int = 3
 
     @abstractmethod
     async def transcribe(

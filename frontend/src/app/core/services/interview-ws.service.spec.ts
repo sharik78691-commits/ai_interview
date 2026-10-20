@@ -165,6 +165,66 @@ describe('InterviewWsService keepalive', () => {
     svc.disconnect();
   });
 
+  it('sends live-transcript snapshots only after the backend advertises them', async () => {
+    const svc = TestBed.runInInjectionContext(() => new InterviewWsService());
+    const ws = await connect(svc);
+    ws.onopen!();
+    const previews = () => ws.sent.filter((f) => f.includes('"audio_preview"'));
+
+    // Older backend (no livePreview in the handshake) would reject the type.
+    svc.sendAudioPreview(new ArrayBuffer(8), 'audio/wav');
+    expect(ws.sent.length).toBe(0);
+
+    ws.onmessage!({ data: JSON.stringify({ type: 'status', status: 'listening', message: 'connected', livePreview: true }) });
+    svc.sendAudioPreview(new ArrayBuffer(8), 'audio/wav');
+    expect(ws.sent).toEqual(['[binary]', JSON.stringify({ type: 'audio_preview', mimeType: 'audio/wav' })]);
+    // A preview is not a question in flight: the status pill is untouched.
+    expect(svc.status$.value).toBe('listening');
+
+    // Provisional vs final transcripts keep their flag and clip seq.
+    const got: unknown[] = [];
+    svc.interviewerTranscript$.subscribe((t) => got.push(t));
+    ws.onmessage!({ data: JSON.stringify({ type: 'stt_transcript', text: 'Can you', final: false, seq: 2 }) });
+    ws.onmessage!({ data: JSON.stringify({ type: 'stt_transcript', text: 'Can you explain?', final: true, seq: 2 }) });
+    expect(got).toEqual([
+      { text: 'Can you', final: false, seq: 2 },
+      { text: 'Can you explain?', final: true, seq: 2 },
+    ]);
+
+    // A dropped socket forgets the flag until the next handshake.
+    ws.onclose!({ code: 1006, reason: '', wasClean: false });
+    expect(svc.livePreview$.value).toBeFalse();
+    expect(previews().length).toBe(1);
+    svc.disconnect();
+  });
+
+  it('streams live PCM only when advertised and relays stt_live text', async () => {
+    const svc = TestBed.runInInjectionContext(() => new InterviewWsService());
+    const ws = await connect(svc);
+    ws.onopen!();
+
+    svc.sendLivePcm(new ArrayBuffer(8));
+    expect(ws.sent.length).toBe(0); // older backend would glue it into a clip
+
+    ws.onmessage!({ data: JSON.stringify({ type: 'status', status: 'listening', message: 'connected', liveStream: true }) });
+    svc.sendLivePcm(new ArrayBuffer(8));
+    expect(ws.sent).toEqual(['[binary]']);
+    expect(svc.status$.value).toBe('listening');
+
+    const got: unknown[] = [];
+    svc.liveText$.subscribe((t) => got.push(t));
+    ws.onmessage!({ data: JSON.stringify({ type: 'stt_live', text: 'Can you', final: false }) });
+    ws.onmessage!({ data: JSON.stringify({ type: 'stt_live', text: 'Can you explain?', final: true }) });
+    expect(got).toEqual([
+      { text: 'Can you', final: false },
+      { text: 'Can you explain?', final: true },
+    ]);
+
+    ws.onclose!({ code: 1006, reason: '', wasClean: false });
+    expect(svc.liveStream$.value).toBeFalse();
+    svc.disconnect();
+  });
+
   it('stops keepalive on disconnect', async () => {
     const svc = TestBed.runInInjectionContext(() => new InterviewWsService());
     const ws = await connect(svc);

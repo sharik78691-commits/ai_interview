@@ -31,7 +31,7 @@ def _remove_test_db() -> None:
 if not os.getenv("AIA_TESTS_USE_REAL_KEYS"):
     for _key in (
         "LLM_API_KEY", "GROQ_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY",
-        "OPENAI_API_KEY", "DEEPSEEK_API_KEY", "AI_GATEWAY_API_KEY", "CEREBRAS_API_KEY", "STT_API_KEY",
+        "OPENAI_API_KEY", "DEEPSEEK_API_KEY", "AI_GATEWAY_API_KEY", "CEREBRAS_API_KEY", "STT_API_KEY", "DEEPINFRA_API_KEY",
         "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "SMTP_HOST", "ADMIN_PASSWORD",
     ):
         os.environ[_key] = ""
