@@ -79,6 +79,11 @@ export class InterviewerAudioService {
   private liveOpen = false;
   private liveTailMs = 0;
   private livePreroll: Float32Array[] = [];
+  /**
+   * Paused: capture stays open, but every sample is dropped before it reaches
+   * clips, previews or the live stream — nothing goes to STT or the AI.
+   */
+  readonly paused$ = new BehaviorSubject<boolean>(false);
   /** User-facing status message for the UI. */
   readonly status$ = new BehaviorSubject<string>('');
   /**
@@ -116,6 +121,25 @@ export class InterviewerAudioService {
 
   get isCapturing(): boolean {
     return this.state$.value === 'capturing';
+  }
+
+  /** True while capturing and actually feeding STT (not paused). */
+  private get listening(): boolean {
+    return this.state$.value === 'capturing' && !this.paused$.value;
+  }
+
+  /**
+   * Pause / resume STT without closing the meeting stream. The half-spoken
+   * clip is discarded both ways, so no stale audio is sent after a resume.
+   */
+  setPaused(paused: boolean): void {
+    if (!this.isCapturing || this.paused$.value === paused) return;
+    this.liveOpen = false;
+    this.liveTailMs = 0;
+    this.livePreroll = [];
+    this.silentTicks = 0;
+    this._resetClipState();
+    this.paused$.next(paused);
   }
 
   /**
@@ -477,7 +501,7 @@ export class InterviewerAudioService {
 
     this.recordedMime = this.recorder.mimeType || mimeType || 'audio/webm';
     this.recorder.ondataavailable = (ev) => {
-      if (ev.data && ev.data.size > 0) {
+      if (ev.data && ev.data.size > 0 && !this.paused$.value) {
         this.pendingChunks.push(ev.data);
         this.pendingCount += 1;
       }
@@ -571,7 +595,7 @@ export class InterviewerAudioService {
     try {
       const processor = this.audioCtx.createScriptProcessor(PCM_BUFFER_SIZE, 1, 1);
       processor.onaudioprocess = (ev) => {
-        if (this.state$.value !== 'capturing') return;
+        if (!this.listening) return;
         const input = ev.inputBuffer.getChannelData(0);
         // The underlying buffer is reused by the audio thread - copy it.
         const samples = Float32Array.from(input);
@@ -601,7 +625,7 @@ export class InterviewerAudioService {
     // Fallback: no PCM path, so measure level with the analyser instead.
     const buf = new Uint8Array(this.analyser ? this.analyser.frequencyBinCount : 0);
     this.energyTimer = setInterval(() => {
-      if (this.state$.value !== 'capturing') return;
+      if (!this.listening) return;
       let rms = 0;
       if (this.analyser) {
         this.analyser.getByteTimeDomainData(buf);
@@ -780,6 +804,7 @@ export class InterviewerAudioService {
     this.liveOpen = false;
     this.liveTailMs = 0;
     this.livePreroll = [];
+    if (this.paused$.value) this.paused$.next(false);
     this.silenceThreshold = DEFAULT_SILENCE_THRESHOLD;
     this.noiseFloor = DEFAULT_SILENCE_THRESHOLD / NOISE_MARGIN;
     this._resetClipState();

@@ -149,9 +149,6 @@
                 Paste the question below instead — or switch transcription on (STT_MODEL in backend/.env).
               </p>
             }
-            @if (lastInterviewerText) {
-              <p class="muted small heard">Heard: “{{ lastInterviewerText }}”</p>
-            }
           }
         </div>
 
@@ -228,7 +225,19 @@
     <main class="main">
       <!-- Transcript -->
       <section class="card panel transcript-panel">
-        <h3 class="panel-title">Transcript</h3>
+        <div class="panel-head">
+          <h3 class="panel-title">Transcript</h3>
+          @if (capturingInterviewer) {
+            <button
+              class="btn-ghost btn-sm pause-audio"
+              [class.paused]="audioPaused"
+              (click)="toggleAudioPause()"
+              [title]="audioPaused ? 'Resume listening to the interviewer' : 'Pause interviewer audio, STT and AI answers'"
+            >
+              {{ audioPaused ? '▶ Resume' : '❚❚ Pause' }}
+            </button>
+          }
+        </div>
         <!-- Exactly ONE interviewer message: the latest one, from any source
              (meeting audio, microphone, demo or a typed question). While the
              mic or the meeting audio is mid-sentence, the live (provisional)
@@ -249,7 +258,7 @@
               {{ copiedTranscript ? '✓ Copied' : 'Copy' }}
             </button>
           </div>
-          <p>{{ liveTranscript || lastInterviewerText || 'Listening for the interviewer’s question…' }}</p>
+          <p>{{ audioPaused ? 'Paused — the AI is not listening. Click Resume to continue.' : (liveTranscript || lastInterviewerText || 'Listening for the interviewer’s question…') }}</p>
         </div>
       </section>
 
