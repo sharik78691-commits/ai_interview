@@ -150,6 +150,15 @@ class Settings:
             self.max_upload_mb: int = int(os.getenv("MAX_UPLOAD_MB", "10"))
         except ValueError:
             self.max_upload_mb = 10
+        # Each Argon2 hash/verify holds ~64 MiB for ~0.5 s; capping how many
+        # run at once keeps a login burst from OOM-killing a 512 MB instance
+        # (which would drop every live interview socket).
+        try:
+            self.password_hash_concurrency: int = max(
+                1, int(os.getenv("PASSWORD_HASH_CONCURRENCY", "2"))
+            )
+        except ValueError:
+            self.password_hash_concurrency = 2
         self.cors_origins: list[str] = _as_list(
             os.getenv("CORS_ORIGINS"), ["http://localhost:4200"]
         )
