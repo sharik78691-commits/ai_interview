@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { BehaviorSubject, Subject } from 'rxjs';
-import { pcmToWav, toWav } from './wav-encoder';
+import { pcmToWav, toPcm16, toWav } from './wav-encoder';
 
 /**
  * InterviewerAudioService
@@ -51,11 +51,34 @@ export class InterviewerAudioService {
   private pendingChunks: Blob[] = [];
   private pendingCount = 0;
   private clipHasSpeech = false;
+  /** Total above-threshold audio in the current clip (ms). */
+  private voicedMs = 0;
   private cutting = false;
   private recordedMime = 'audio/webm';
 
   /** Emitted audio clips: raw bytes + mime type, ready for the WebSocket. */
   readonly clip$ = new Subject<{ data: ArrayBuffer; mimeType: string }>();
+  /**
+   * Live transcript: WAV snapshots of the clip STILL being spoken, every
+   * PREVIEW_INTERVAL_MS of audio while the interviewer talks. Display only —
+   * the clip itself is still cut and sent once via clip$.
+   */
+  readonly preview$ = new Subject<{ data: ArrayBuffer; mimeType: string }>();
+  /** Set by the page when the backend advertises live previews. */
+  livePreview = false;
+  /** Clip time (ms) of the last preview snapshot. */
+  private lastPreviewMs = 0;
+  /**
+   * Word-by-word transcript: tagged 16 kHz PCM16 frames, streamed only while
+   * someone is talking (plus pre-roll and a short tail so the provider hears
+   * the first syllable and the end of the turn). Display only.
+   */
+  readonly livePcm$ = new Subject<ArrayBuffer>();
+  /** Set by the page when the backend advertises the live stream. */
+  liveStream = false;
+  private liveOpen = false;
+  private liveTailMs = 0;
+  private livePreroll: Float32Array[] = [];
   /** User-facing status message for the UI. */
   readonly status$ = new BehaviorSubject<string>('');
   /**
@@ -255,67 +278,6 @@ export class InterviewerAudioService {
 
     this._beginCapture(stream);
     return true;
-  }
-
-  /**
-   * "Auto Select" fallback when no loopback device exists: capture the whole
-   * screen's SYSTEM audio through the browser picker, pre-set to "Entire
-   * screen" with "Also share system audio" on, so the user only clicks Share.
-   * Video is dropped immediately — only the audio is used.
-   */
-  async startScreenSystemAudio(): Promise<void> {
-    const blocked = this.getBlockReason();
-    if (blocked) {
-      this.status$.next(blocked);
-      throw new Error('unsupported');
-    }
-    if (this.state$.value === 'capturing') return;
-
-    this.state$.next('prompting');
-    this.status$.next('Choose "Entire screen" and keep "Also share system audio" on.');
-
-    // Chrome/Edge-specific hints; other browsers ignore unknown keys.
-    const options = {
-      video: { displaySurface: 'monitor' },
-      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
-      systemAudio: 'include',
-      selfBrowserSurface: 'exclude',
-      monitorTypeSurfaces: 'include',
-    } as DisplayMediaStreamOptions;
-
-    let stream: MediaStream;
-    try {
-      stream = await navigator.mediaDevices.getDisplayMedia(options);
-    } catch (err) {
-      this.state$.next('idle');
-      const name = (err as DOMException)?.name ?? '';
-      if (name === 'NotAllowedError' || name === 'SecurityError') {
-        this.status$.next('Screen audio sharing was cancelled.');
-      } else if (name === 'InvalidStateError') {
-        this.status$.next('Click Auto Select Meeting Audio again to share system audio.');
-      } else {
-        this.status$.next('System audio capture is unavailable. Please paste the question manually.');
-      }
-      throw err;
-    }
-
-    stream.getVideoTracks().forEach((t) => {
-      t.stop();
-      stream.removeTrack(t);
-    });
-    const track = stream.getAudioTracks()[0];
-    if (!track) {
-      stream.getTracks().forEach((t) => t.stop());
-      this.state$.next('idle');
-      this.status$.next(
-        'No system audio was shared. Click Auto Select again, pick "Entire screen" and turn on "Also share system audio".',
-      );
-      throw new Error('no audio track');
-    }
-    track.addEventListener('ended', () => void this.stop());
-
-    this.systemAudioSetup$.next(null);
-    this._beginCapture(stream);
   }
 
   /**
@@ -562,6 +524,8 @@ export class InterviewerAudioService {
     this.pcmCount = 0;
     this.silentMs = 0;
     this.clipHasSpeech = false;
+    this.voicedMs = 0;
+    this.lastPreviewMs = 0;
     this.clipStartedAt = Date.now();
   }
 
@@ -610,10 +574,13 @@ export class InterviewerAudioService {
         if (this.state$.value !== 'capturing') return;
         const input = ev.inputBuffer.getChannelData(0);
         // The underlying buffer is reused by the audio thread - copy it.
-        this.pcmChunks.push(Float32Array.from(input));
+        const samples = Float32Array.from(input);
+        this.pcmChunks.push(samples);
         this.pcmCount += input.length;
         this.pcmRate = ev.inputBuffer.sampleRate || this.audioCtx!.sampleRate;
-        this._trackLevel(input, (input.length / this.pcmRate) * 1000);
+        const ms = (input.length / this.pcmRate) * 1000;
+        const voiced = this._trackLevel(input, ms);
+        this._streamLive(samples, ms, voiced);
       };
       source.connect(processor);
       // A script processor only runs while it reaches the destination. Route it
@@ -654,6 +621,7 @@ export class InterviewerAudioService {
       } else {
         this.silentTicks = 0;
         this.clipHasSpeech = true;
+        this.voicedMs += 100;
         if (this.pendingCount * CHUNK_MS >= MAX_CLIP_MS) void this._cutClip();
       }
     }, 100);
@@ -665,13 +633,15 @@ export class InterviewerAudioService {
    * `silentMs` is what ends a clip: when the interviewer stops talking for a
    * moment we send what we have instead of one huge meeting recording.
    */
-  private _trackLevel(samples: Float32Array, durationMs: number): void {
+  private _trackLevel(samples: Float32Array, durationMs: number): boolean {
     let sum = 0;
     for (let i = 0; i < samples.length; i++) sum += samples[i] * samples[i];
     const rms = Math.sqrt(sum / Math.max(1, samples.length));
+    const voiced = rms >= this.silenceThreshold;
 
-    if (rms >= this.silenceThreshold) {
+    if (voiced) {
       this.clipHasSpeech = true;
+      this.voicedMs += durationMs;
       this.silentMs = 0;
     } else {
       this.silentMs += durationMs;
@@ -692,7 +662,57 @@ export class InterviewerAudioService {
     } else if (clipMs >= MAX_CLIP_MS) {
       // Safety valve for uninterrupted talking.
       void this._cutClip();
+    } else {
+      this._maybePreview(clipMs);
     }
+    return voiced;
+  }
+
+  /**
+   * Feed the live transcript stream. Speech opens it (flushing ~250 ms of
+   * pre-roll so the first word is not clipped); after the last voiced frame a
+   * LIVE_TAIL_MS tail of real quiet is still sent so the provider can close
+   * the turn, then it stops — silence is never streamed (or billed).
+   */
+  private _streamLive(samples: Float32Array, durationMs: number, voiced: boolean): void {
+    if (!this.liveStream || !this.pcmRate) return;
+    if (voiced) {
+      if (!this.liveOpen) {
+        this.liveOpen = true;
+        for (const f of this.livePreroll) this._sendLive(f);
+        this.livePreroll = [];
+      }
+      this.liveTailMs = LIVE_TAIL_MS;
+      this._sendLive(samples);
+    } else if (this.liveOpen) {
+      this._sendLive(samples);
+      this.liveTailMs -= durationMs;
+      if (this.liveTailMs <= 0) this.liveOpen = false;
+    } else {
+      this.livePreroll.push(samples);
+      if (this.livePreroll.length > LIVE_PREROLL_FRAMES) this.livePreroll.shift();
+    }
+  }
+
+  private _sendLive(samples: Float32Array): void {
+    const frame = toPcm16(samples, this.pcmRate, LIVE_PCM_TAG.length);
+    new Uint8Array(frame).set(LIVE_PCM_TAG, 0);
+    this.livePcm$.next(frame);
+  }
+
+  /**
+   * Snapshot the clip so far for the live transcript while the interviewer is
+   * mid-sentence. Only real speech (same voiced gate as a clip) and only new
+   * audio: a pause sends nothing, since the last snapshot already covers it.
+   */
+  private _maybePreview(clipMs: number): void {
+    if (!this.livePreview || this.cutting || !this.pcmRate) return;
+    if (!this.clipHasSpeech || this.voicedMs < MIN_VOICED_MS) return;
+    if (this.silentMs >= PREVIEW_QUIET_MS) return;
+    if (clipMs - this.lastPreviewMs < PREVIEW_INTERVAL_MS) return;
+    this.lastPreviewMs = clipMs;
+    const wav = pcmToWav(this.pcmChunks, this.pcmRate, undefined, this.silenceThreshold);
+    if (wav.byteLength > 44) this.preview$.next({ data: wav, mimeType: 'audio/wav' });
   }
 
   /** Hand the current clip to the WebSocket, then start a fresh one. */
@@ -700,7 +720,11 @@ export class InterviewerAudioService {
     if (this.cutting) return;
     this.cutting = true;
     try {
-      const hasSpeech = this.clipHasSpeech;
+      // A click, cough or keyboard burst also crosses the threshold, but a
+      // question needs real voiced time. Such clips came back as 0 chars after
+      // 2–2.6s of STT and held the single in-flight slot, so the NEXT (real)
+      // question waited behind them. Drop them here instead.
+      const hasSpeech = this.clipHasSpeech && this.voicedMs >= MIN_VOICED_MS;
       const pcmChunks = this.pcmChunks;
       const pcmCount = this.pcmCount;
       const pcmRate = this.pcmRate;
@@ -708,7 +732,7 @@ export class InterviewerAudioService {
       // Reset immediately: capture continues while we encode + upload.
       this._resetClipState();
 
-      // Never upload silence - it only wastes rate limit quota.
+      // Never upload silence or noise - it wastes STT time, money and quota.
       if (!hasSpeech) return;
 
       // Primary path: encode the PCM we already hold. No decoder involved.
@@ -753,6 +777,9 @@ export class InterviewerAudioService {
     this.stream = null;
     this.recorder = null;
     this.silentTicks = 0;
+    this.liveOpen = false;
+    this.liveTailMs = 0;
+    this.livePreroll = [];
     this.silenceThreshold = DEFAULT_SILENCE_THRESHOLD;
     this.noiseFloor = DEFAULT_SILENCE_THRESHOLD / NOISE_MARGIN;
     this._resetClipState();
@@ -763,6 +790,30 @@ export class InterviewerAudioService {
 const CHUNK_MS = 250;
 /** Don't send clips shorter than this (too little context to transcribe). */
 const MIN_CLIP_MS = 1_500;
+/**
+ * Minimum voiced audio for a clip to be transcribed. The backend only answers
+ * 3+ words (or 25+ chars), which is well over 0.5s of speech, so shorter
+ * voiced time is noise (click, cough, keyboard), never a question.
+ */
+export const MIN_VOICED_MS = 400;
+/**
+ * Live transcript cadence: one snapshot per second of clip audio, so the
+ * Transcript panel trails the interviewer by ~1s + STT latency instead of
+ * waiting for the whole sentence plus the silence cut.
+ */
+export const PREVIEW_INTERVAL_MS = 1_000;
+/** No snapshot once the speaker has been quiet this long (nothing new to show). */
+const PREVIEW_QUIET_MS = 300;
+/** Tag on every live-stream frame (backend: live_stream.LIVE_PCM_TAG). */
+export const LIVE_PCM_TAG = new Uint8Array([0x4c, 0x50, 0x43, 0x4d]); // "LPCM"
+/**
+ * Quiet still streamed after speech. Gemini Live closed its turn ~1.3 s after
+ * the last word in measurements, so the tail must cover that or the final
+ * text for the turn never arrives.
+ */
+export const LIVE_TAIL_MS = 1_600;
+/** Frames kept from before speech onset (~85 ms each at 48 kHz). */
+const LIVE_PREROLL_FRAMES = 3;
 /** Hard cap per clip so one long answer still reaches the AI. */
 const MAX_CLIP_MS = 15_000;
 /**
@@ -789,6 +840,11 @@ const PCM_BUFFER_SIZE = 4_096;
  */
 const SYSTEM_AUDIO_LABELS = [
   'stereo mix',
+  'stereomix',
+  'stereo-mix',
+  'mezcla estéreo',
+  'mixage stéréo',
+  'missaggio stereo',
   'what u hear',
   'what-u-hear',
   'wave out',

@@ -1,12 +1,8 @@
 import { DatePipe } from '@angular/common';
 import { Component, ElementRef, OnDestroy, OnInit, computed, inject, signal, viewChild } from '@angular/core';
-import { FormsModule } from '@angular/forms';
 import { AnalysisHistoryService } from '../../core/screenshot/analysis-history.service';
 import { validateImages } from '../../core/screenshot/image-validation';
-import {
-  DEFAULT_SCREENSHOT_MODEL_KEY,
-  ModelConfigService,
-} from '../../core/screenshot/model-config.service';
+import { ModelConfigService } from '../../core/screenshot/model-config.service';
 import { ScreenCaptureService } from '../../core/screenshot/screen-capture.service';
 import { ScreenshotAnalysisService } from '../../core/screenshot/screenshot-analysis.service';
 import {
@@ -33,7 +29,7 @@ type PickerMode = { kind: 'add' } | { kind: 'replace'; index: number };
 @Component({
   selector: 'app-screenshot-analysis',
   standalone: true,
-  imports: [FormsModule, DatePipe, ErrorBannerComponent, AnalysisResultComponent],
+  imports: [DatePipe, ErrorBannerComponent, AnalysisResultComponent],
   templateUrl: './screenshot-analysis.component.html',
   styleUrl: './screenshot-analysis.component.css',
 })
@@ -43,7 +39,6 @@ export class ScreenshotAnalysisComponent implements OnInit, OnDestroy {
   readonly config = inject(ModelConfigService);
   readonly history = inject(AnalysisHistoryService);
 
-  readonly defaultKey = DEFAULT_SCREENSHOT_MODEL_KEY;
   private nextId = 1;
   private timer: ReturnType<typeof setInterval> | null = null;
   private disableHotkey: (() => void) | null = null;
@@ -301,12 +296,6 @@ export class ScreenshotAnalysisComponent implements OnInit, OnDestroy {
   openHistory(entry: HistoryEntry): void {
     this.result.set(entry.result);
     this.resultModel.set(entry.model);
-  }
-
-  // ---- AI model settings ----
-
-  onModelChange(key: string): void {
-    this.config.select(key);
   }
 
   private stopTimer(): void {

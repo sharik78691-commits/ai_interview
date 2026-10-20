@@ -26,6 +26,7 @@ import { TranscriptionService } from '../../core/services/transcription.service'
 import { ErrorBannerComponent } from '../../shared/components/error-banner/error-banner.component';
 import { TimeFormatPipe } from '../../shared/pipes/time-format.pipe';
 import { RichTextPipe } from '../../shared/pipes/rich-text.pipe';
+import { SmoothText } from './smooth-text';
 
 /** View model for the adaptive Interview Answer Card. */
 export interface AnswerCard {
@@ -93,6 +94,11 @@ export function groupSentences(sentences: string[]): string[] {
   }
   return out;
 }
+
+/** "Earlier this session" in AI Guidance shows at most this many past answers. */
+export const MAX_PAST_HISTORY = 4;
+/** How long a finished streamed utterance waits for its final transcript. */
+const STREAM_HOLD_MS = 2_500;
 
 @Component({
   selector: 'app-interview',
@@ -167,6 +173,21 @@ export class InterviewComponent implements OnInit, OnDestroy {
   copiedTranscript = false;
   /** Last interviewer question recognised from meeting/tab audio. */
   lastInterviewerText = '';
+  /**
+   * PROVISIONAL meeting-audio text while the interviewer is still talking
+   * (live transcript). Display only: it never triggers an answer, and the
+   * final transcript of the same clip replaces it.
+   */
+  interviewerInterim = '';
+  /** Clip seq the interim text belongs to (-1 = none). */
+  private interimSeq = -1;
+  /** Word-by-word streamed text of the current utterance (display only). */
+  private streamText = '';
+  /** True while the streamed utterance is still being spoken. */
+  private streamOpen = false;
+  private streamHold: ReturnType<typeof setTimeout> | null = null;
+  /** Typewriter-smoothed live line actually rendered. */
+  private readonly liveTyped = new SmoothText();
   /** Scope of the current notice: AI fallback vs. speech-to-text problem. */
   noticeScope: 'ai' | 'stt' = 'ai';
   /** One transcription request is in flight; extra clips wait their turn. */
@@ -384,11 +405,21 @@ export class InterviewComponent implements OnInit, OnDestroy {
         if (s === 'idle') {
           this.clipQueue = [];
           this.audioBusy = false;
+          this.clearInterviewerInterim();
+          this.dropStreamText();
         }
       }),
       // One clip in flight at a time. Sending every clip immediately used to
       // hit the transcription rate limit during a fast interview.
       this.interviewerAudio.clip$.subscribe((clip) => this.enqueueClip(clip)),
+      // Live transcript: snapshots bypass the clip queue (the backend keeps
+      // only the newest one) and are sent only when the backend supports them.
+      // Word-by-word stream when the backend has it; snapshots otherwise.
+      this.ws.livePreview$.subscribe(() => this.syncLiveFlags()),
+      this.ws.liveStream$.subscribe(() => this.syncLiveFlags()),
+      this.interviewerAudio.preview$.subscribe((p) => this.ws.sendAudioPreview(p.data, p.mimeType)),
+      this.interviewerAudio.livePcm$.subscribe((frame) => this.ws.sendLivePcm(frame)),
+      this.ws.liveText$.subscribe((t) => this.onLiveText(t)),
       // When Auto Select needs a system-audio device, surface the setup helper
       // (with the list of devices the browser currently sees).
       this.interviewerAudio.systemAudioSetup$.subscribe(
@@ -396,13 +427,7 @@ export class InterviewComponent implements OnInit, OnDestroy {
       ),
       // Server-side STT result: show it, and let the backend's own question
       // detection decide when to call the AI (no extra AI call here).
-      this.ws.interviewerTranscript$.subscribe(({ text }) => {
-        // Meeting audio has its own dedicated card ("Interviewer (meeting audio)")
-        // above the transcript list, so it is NOT duplicated into entries —
-        // the list stays for microphone / demo speech only.
-        this.lastInterviewerText = text;
-        this.releaseClipSlot();
-      }),
+      this.ws.interviewerTranscript$.subscribe((t) => this.onInterviewerTranscript(t)),
       this.ws.messages$.subscribe((m) => {
         if (m['type'] === 'status') {
           const msg = String(m['message'] ?? '');
@@ -472,14 +497,93 @@ export class InterviewComponent implements OnInit, OnDestroy {
     this.pumpClipQueue();
   }
 
-  /** Past Q&As excluding the one shown in the current-guidance card. */
+  /**
+   * Server-side STT result for meeting audio. A provisional (final:false)
+   * transcript only updates the live line; it neither frees the clip slot nor
+   * reaches question detection, so it can never start an answer.
+   */
+  onInterviewerTranscript(t: { text: string; final: boolean; seq?: number }): void {
+    if (!t.final) {
+      if (!t.text) return;
+      // A preview of an older clip than the one shown is out of date.
+      if (t.seq !== undefined && t.seq < this.interimSeq) return;
+      this.interviewerInterim = t.text;
+      this.interimSeq = t.seq ?? this.interimSeq;
+      this.syncLive();
+      return;
+    }
+    // Meeting audio has its own dedicated card ("Interviewer (meeting audio)")
+    // above the transcript list, so it is NOT duplicated into entries —
+    // the list stays for microphone / demo speech only.
+    this.lastInterviewerText = t.text;
+    // The final replaces its own clip's live text; a newer clip's stays.
+    if (t.seq === undefined || t.seq >= this.interimSeq) this.clearInterviewerInterim();
+    // A finished streamed utterance yields to the final transcript; one still
+    // being spoken (the interviewer only paused) keeps growing on screen.
+    if (!this.streamOpen) this.dropStreamText();
+    this.releaseClipSlot();
+  }
+
+  /**
+   * Word-by-word streamed text (cumulative per utterance). Display only: it
+   * never reaches question detection, so it can never start an answer.
+   */
+  onLiveText(t: { text: string; final: boolean }): void {
+    if (this.streamHold) clearTimeout(this.streamHold);
+    this.streamHold = null;
+    if (!t.text) return;
+    this.streamText = t.text;
+    this.streamOpen = !t.final;
+    // A closed turn stays up until the clip's final transcript replaces it
+    // (normally well under a second); the timer only covers a final that
+    // never comes, so the line cannot get stuck on old words.
+    if (t.final) this.streamHold = setTimeout(() => this.dropStreamText(), STREAM_HOLD_MS);
+    this.syncLive();
+  }
+
+  private dropStreamText(): void {
+    if (this.streamHold) clearTimeout(this.streamHold);
+    this.streamHold = null;
+    this.streamText = '';
+    this.streamOpen = false;
+    this.syncLive();
+  }
+
+  private clearInterviewerInterim(): void {
+    this.interviewerInterim = '';
+    this.interimSeq = -1;
+    this.syncLive();
+  }
+
+  private syncLive(): void {
+    this.liveTyped.set(this.streamText || this.interviewerInterim);
+  }
+
+  private syncLiveFlags(): void {
+    const stream = this.ws.liveStream$.value;
+    this.interviewerAudio.liveStream = stream;
+    // The stream supersedes snapshots: never pay for both.
+    this.interviewerAudio.livePreview = this.ws.livePreview$.value && !stream;
+  }
+
+  /** Live (provisional) text for the Transcript line: mic first, then meeting audio. */
+  get liveTranscript(): string {
+    return this.interim || this.liveTyped.shown;
+  }
+
+  /**
+   * Past Q&As excluding the one shown in the current-guidance card — newest
+   * first, at most MAX_PAST_HISTORY ("Earlier this session").
+   */
   get pastHistory(): HistoryItem[] {
     if (this.history.length <= 1) return [];
-    return this.history.slice(0, -1).reverse();
+    return this.history.slice(0, -1).reverse().slice(0, MAX_PAST_HISTORY);
   }
 
   ngOnDestroy(): void {
     this.subs.forEach((s) => s.unsubscribe());
+    this.liveTyped.stop();
+    if (this.streamHold) clearTimeout(this.streamHold);
     this.stopTimer();
     this.transcription.stop();
     void this.interviewerAudio.stop();
@@ -591,38 +695,16 @@ export class InterviewComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Web "Auto Select Meeting Audio": one click starts capturing the computer's
-   * sound — no info popup. Uses a loopback device (Stereo Mix / VB-Cable) when
-   * one exists, otherwise falls back to sharing the entire screen's system
-   * audio. Either way the interviewer's speech flows into the same question
-   * pipeline as tab audio.
+   * Web "Auto Select Meeting Audio": one click captures the COMPUTER'S SOUND
+   * through a system-audio loopback input (Stereo Mix / VB-Cable / BlackHole)
+   * — never the share picker. Picking a tab/screen is what "Select meeting
+   * audio" is for; Auto Select must not duplicate it. When no loopback device
+   * is enabled, the service flags setup and the inline helper explains how to
+   * turn one on, instead of silently falling back to the picker.
    */
   async autoSelectMeetingAudio(): Promise<void> {
-    this.error = '';
-    let started = false;
-    try {
-      started = await this.interviewerAudio.startSystemAudio();
-    } catch (err) {
-      // Only a declined mic-permission prompt falls through to screen audio;
-      // other failures keep their specific message.
-      if ((err as Error)?.message !== 'permission denied') {
-        this.error = this.interviewerAudio.status$.value;
-        return;
-      }
-    }
-    if (!started && !this.capturingInterviewer) {
-      try {
-        await this.interviewerAudio.startScreenSystemAudio();
-        started = true;
-      } catch {
-        this.error = this.interviewerAudio.status$.value;
-        return;
-      }
-    }
-    if (started) {
-      this.ws.sendInterviewerAudioStart('audio/wav');
-      this.startTimer();
-    }
+    if (this.capturingInterviewer) return;
+    await this.startSystemAudio();
   }
 
   /**

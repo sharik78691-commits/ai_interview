@@ -37,11 +37,10 @@ describe('ScreenshotAnalysisComponent (desktop flow)', () => {
     TestBed.resetTestingModule();
   });
 
-  it('shows the active default model and the responsible-use note', async () => {
+  it('shows the active default model, without the removed responsible-use banner', async () => {
     await setup();
     expect(q('[data-testid="active-model"]')!.textContent).toContain('Gemini 3.5 Flash Lite');
-    expect(el().textContent).toContain('misrepresent your work');
-    expect(el().textContent).toContain('bypass the rules');
+    expect(q('.notice[role="note"]')).toBeNull();
   });
 
   it('capture flow: button opens the picker, choosing a source captures, thumbnail appears', async () => {
@@ -158,7 +157,10 @@ describe('ScreenshotAnalysisComponent (desktop flow)', () => {
     await setup();
     expect(q('#apikey')).toBeNull();
     expect(el().textContent).not.toContain('Paste your API key');
-    expect(q('[data-testid="server-status"]')!.textContent).toContain('Ready');
+    // AI Model section removed from the page; no model picker, no status card.
+    expect(q('[data-testid="model-settings"]')).toBeNull();
+    expect(q('#model')).toBeNull();
+    expect(q('[data-testid="server-status"]')).toBeNull();
     await cmp.openPicker({ kind: 'add' });
     await cmp.takeCapture(cmp.sources()[0]);
     await settle();

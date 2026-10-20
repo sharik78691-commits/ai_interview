@@ -174,8 +174,21 @@ function samplesToWav(samples: Float32Array, sourceRate: number, targetRate: num
   ascii(36, 'data');
   view.setUint32(40, frames * 2, true);
 
+  writePcm16(view, 44, samples, ratio, frames);
+  return buffer;
+}
+/**
+ * Resample mono float PCM to 16-bit little-endian samples at `ratio`
+ * (source rate / target rate), starting at byte `offset` of `view`.
+ */
+function writePcm16(
+  view: DataView,
+  offset: number,
+  samples: Float32Array,
+  ratio: number,
+  frames: number,
+): void {
   const last = samples.length - 1;
-  let offset = 44;
   for (let i = 0; i < frames; i++) {
     const position = i * ratio;
     let value: number;
@@ -198,5 +211,16 @@ function samplesToWav(samples: Float32Array, sourceRate: number, targetRate: num
     view.setInt16(offset, clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff, true);
     offset += 2;
   }
+}
+
+/**
+ * Raw 16 kHz mono PCM16 (no WAV header) for the live transcript stream, with
+ * `prefix` bytes reserved at the front for the frame tag.
+ */
+export function toPcm16(samples: Float32Array, sourceRate: number, prefix = 0): ArrayBuffer {
+  const ratio = sourceRate / WAV_RATE;
+  const frames = samples.length ? Math.max(1, Math.floor(samples.length / ratio)) : 0;
+  const buffer = new ArrayBuffer(prefix + frames * 2);
+  if (frames) writePcm16(new DataView(buffer), prefix, samples, ratio, frames);
   return buffer;
 }

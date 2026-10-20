@@ -13,7 +13,7 @@ import time
 import httpx
 
 from app.core.config import get_settings
-from app.core.http import shared_http
+from app.core.http import prewarm, shared_http
 from app.providers.stt.base import STTProvider
 
 logger = logging.getLogger(__name__)
@@ -23,7 +23,8 @@ logger = logging.getLogger(__name__)
 # the waits SHORT: this is a LIVE interview, and a user staring at silence for
 # 5s of backoff notices far more than a dropped clip (the UI can always fall
 # back to pasting the question).
-MAX_ATTEMPTS = 3
+# (Per instance: see STTProvider.max_attempts.)
+MAX_ATTEMPTS = STTProvider.max_attempts
 BACKOFF_SECONDS = (0.75, 1.5)
 # Per-attempt timeout. Clips are at most ~30s of audio and whisper-turbo
 # transcribes them in 1–3s, so 30s already covers a slow provider; the old 60s
@@ -90,11 +91,15 @@ class GroqWhisperSTTProvider(STTProvider):
 
     name = "whisper"
 
-    def __init__(self, api_key: str = "", base_url: str = "", model: str = "") -> None:
+    def __init__(
+        self, api_key: str = "", base_url: str = "", model: str = "", send_prompt: bool = True
+    ) -> None:
         settings = get_settings()
         self.api_key = api_key or settings.stt_api_key or settings.llm_api_key
         self.base_url = (base_url or settings.stt_base_url or settings.llm_base_url).rstrip("/")
         self.model = model or settings.stt_model
+        # Some hosts mis-handle the vocabulary prompt (see "whisper-deepinfra").
+        self.send_prompt = send_prompt
 
     @property
     def available(self) -> bool:
@@ -117,8 +122,9 @@ class GroqWhisperSTTProvider(STTProvider):
             "model": self.model,
             "response_format": "json",
             "temperature": "0",
-            "prompt": STT_PROMPT,
         }
+        if self.send_prompt:
+            data["prompt"] = STT_PROMPT
         language = get_settings().stt_language
         if language:
             data["language"] = language
@@ -138,7 +144,8 @@ class GroqWhisperSTTProvider(STTProvider):
 
         t0 = time.perf_counter()
         last_error: str = ""
-        for attempt in range(MAX_ATTEMPTS):
+        attempts = self.max_attempts
+        for attempt in range(attempts):
             # Shared pool: no per-call TLS handshake across retries.
             async with shared_http() as client:
                 resp = await client.post(
@@ -160,14 +167,14 @@ class GroqWhisperSTTProvider(STTProvider):
                 "STT failed (%s) attempt %s/%s: %s",
                 resp.status_code,
                 attempt + 1,
-                MAX_ATTEMPTS,
+                attempts,
                 body[:200],
             )
 
             # Rate limit / transient server error -> back off and retry.
             if resp.status_code == 429 or resp.status_code >= 500:
                 last_error = self._describe(resp.status_code, body)
-                if attempt < MAX_ATTEMPTS - 1:
+                if attempt < attempts - 1:
                     await asyncio.sleep(self._retry_delay(resp, attempt))
                     continue
                 raise STTRequestError(last_error)
@@ -320,7 +327,8 @@ class GeminiTranscribeSTTProvider(STTProvider):
 
         t0 = time.perf_counter()
         last_error: str = ""
-        for attempt in range(MAX_ATTEMPTS):
+        attempts = self.max_attempts
+        for attempt in range(attempts):
             async with shared_http() as client:
                 resp = await client.post(
                     url,
@@ -358,13 +366,13 @@ class GeminiTranscribeSTTProvider(STTProvider):
                 "STT failed (gemini) %s attempt %s/%s: %s",
                 resp.status_code,
                 attempt + 1,
-                MAX_ATTEMPTS,
+                attempts,
                 body_text[:200],
             )
 
             if resp.status_code == 429 or resp.status_code >= 500:
                 last_error = f"Speech-to-text service error (HTTP {resp.status_code})."
-                if attempt < MAX_ATTEMPTS - 1:
+                if attempt < attempts - 1:
                     await asyncio.sleep(GroqWhisperSTTProvider._retry_delay(resp, attempt))
                     continue
                 raise STTRequestError(last_error)
@@ -470,7 +478,8 @@ class GeminiLiveSTTProvider(STTProvider):
         )
         t0 = time.perf_counter()
         last_error = ""
-        for attempt in range(MAX_ATTEMPTS):
+        attempts = self.max_attempts
+        for attempt in range(attempts):
             try:
                 text = await asyncio.wait_for(
                     self._session(pcm, rate), timeout=REQUEST_TIMEOUT_SECONDS
@@ -487,7 +496,7 @@ class GeminiLiveSTTProvider(STTProvider):
                 logger.warning(
                     "STT failed (gemini-live) attempt %s/%s: %s %s",
                     attempt + 1,
-                    MAX_ATTEMPTS,
+                    attempts,
                     type(exc).__name__,
                     (reason or str(exc))[:200].replace(self.api_key, "[redacted]"),
                 )
@@ -500,7 +509,7 @@ class GeminiLiveSTTProvider(STTProvider):
                         f"Transcription failed (Live API closed: {reason[:120] or code})."
                     ) from None
                 last_error = "Speech-to-text service error. Try again in a moment."
-                if attempt < MAX_ATTEMPTS - 1:
+                if attempt < attempts - 1:
                     await asyncio.sleep(BACKOFF_SECONDS[min(attempt, len(BACKOFF_SECONDS) - 1)])
         raise STTRequestError(last_error or "Transcription failed.")
 
@@ -550,8 +559,9 @@ class GeminiLiveSTTProvider(STTProvider):
 def get_stt_provider() -> STTProvider:
     """Pick the enabled+default STT provider, or mock when none is usable.
 
-    Four models are offered (Groq Whisper + OpenAI gpt-4o-mini-transcribe +
-    Google Gemini 3.5 Transcribe + Google Gemini 3.5 Transcribe Live).
+    Five models are offered (Groq Whisper + OpenAI gpt-4o-mini-transcribe +
+    Google Gemini 3.5 Transcribe + Google Gemini 3.5 Transcribe Live +
+    DeepInfra Whisper).
     Admin can enable/disable either and set a default via the ai_model_config
     table (see /api/admin/stt-models). A model is used only when it is enabled
     AND its provider key is present.
@@ -576,7 +586,10 @@ def get_stt_provider() -> STTProvider:
                 api_key=sp["api_key"], base_url=sp["base_url"], model=sp["model_id"]
             )
         return GroqWhisperSTTProvider(
-            api_key=sp["api_key"], base_url=sp["base_url"], model=sp["model_id"]
+            api_key=sp["api_key"],
+            base_url=sp["base_url"],
+            model=sp["model_id"],
+            send_prompt=sp.get("send_prompt", True),
         )
     return MockSTTProvider()
 
@@ -584,6 +597,7 @@ def get_stt_provider() -> STTProvider:
 # --- STT model catalog + admin selection (enable/disable + default) ---
 
 _STT_DEFAULT_KEY = "whisper"
+DEEPINFRA_OPENAI_URL = "https://api.deepinfra.com/v1/openai"
 
 
 def _stt_specs() -> list[dict]:
@@ -626,6 +640,21 @@ def _stt_specs() -> list[dict]:
             "api_key": s.gemini_api_key,
             # Only exposes bidiGenerateContent (Live API over a WebSocket).
             "api_style": "gemini_live",
+        },
+        {
+            # Same Whisper large-v3-turbo as Groq, served by DeepInfra over the
+            # OpenAI-compatible /audio/transcriptions path.
+            "key": "whisper-deepinfra",
+            "provider": "DeepInfra",
+            "display_name": "Whisper — DeepInfra",
+            "model_id": s.stt_model_5,
+            "base_url": DEEPINFRA_OPENAI_URL,
+            "api_key": s.deepinfra_api_key,
+            # DeepInfra treats the vocabulary prompt as preceding speech and
+            # DROPS the start of the question ("Can you explain X, and how…"
+            # came back as "And how…"). Measured 2026-10-20: without the
+            # prompt the full question is returned.
+            "send_prompt": False,
         },
     ]
 
@@ -685,3 +714,16 @@ def active_stt_model() -> str | None:
     if provider.available and hasattr(provider, "model"):
         return provider.model
     return None
+
+
+async def prewarm_stt() -> bool:
+    """Warm the pooled connection to the active STT host (interviewer audio start).
+
+    Only the OpenAI-compatible / Gemini-native HTTP providers are warmed; the
+    Gemini Live provider opens its own WebSocket per clip, and the mock has no host.
+    """
+    provider = get_stt_provider()
+    base_url = getattr(provider, "base_url", "") if getattr(provider, "available", False) else ""
+    if not base_url or not base_url.startswith("http"):
+        return False
+    return await prewarm(base_url)
