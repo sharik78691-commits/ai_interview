@@ -486,7 +486,6 @@ describe('Only the interviewer is heard (never the candidate mic)', () => {
       subs: [],
       route: { snapshot: { queryParamMap: { get: () => null } } },
       settings: { value: {} },
-      aiModels: stub(),
       ws: stub(),
       transcription,
       resumeService: stub(),

@@ -5,25 +5,11 @@
   <div class="card form">
     <label class="lbl" for="model">AI model</label>
     <select id="model" [(ngModel)]="aiModel">
-      <option value="auto">Auto (backend default)</option>
       @for (m of aiModelList; track m.key) {
-        <option [value]="m.key" [disabled]="!m.available">
-          {{ m.displayName }}{{ m.isDefault ? ' (Default)' : '' }}{{ !m.available ? ' — unavailable' : '' }}
-        </option>
+        <option [value]="m.key">{{ m.displayName }}</option>
       }
     </select>
-    @if (aiModelList.length) {
-      <p class="muted small" style="margin-top:-4px">
-        @for (m of aiModelList; track m.key) {
-          @if (m.key === aiModel) {
-            {{ m.provider }}@if (m.freeTier) { · Free tier } · {{ m.capabilities }}
-          }
-        }
-        @if (aiModel === 'auto') {
-          The backend picks the default model automatically.
-        }
-      </p>
-    }
+    <p class="muted small" style="margin-top:-4px">{{ aiModelHint() }}</p>
     <label class="lbl" for="stt">Speech-to-text provider</label>
     <select id="stt" [(ngModel)]="sttProvider">
       <option value="browser">Browser (Web Speech API)</option>

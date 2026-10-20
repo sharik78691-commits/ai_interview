@@ -383,7 +383,11 @@ def test_ai_models_endpoint_shape() -> None:
 
 
 def test_analyze_rejects_unknown_model() -> None:
+    # Only admins can pick a model, so only their keys are validated.
+    from tests.test_model_choice_admin_only import _promote_to_admin
+
     authenticate(client, "models1@example.com")
+    _promote_to_admin("models1@example.com")
     r = client.post(
         "/api/interview/analyze",
         json={"question": "What is REST?", "model": "evil-model"},

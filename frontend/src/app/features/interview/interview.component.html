@@ -172,41 +172,17 @@
 
         <div class="divider"></div>
 
-        <!-- AI model -->
-        <div class="field">
-          <label class="lbl" for="aimodel">AI model</label>
-          <select id="aimodel" [ngModel]="selectedModel" (ngModelChange)="onModelChange($event)">
-            @for (m of aiModelList; track m.key) {
-              <option [value]="m.key" [disabled]="!m.available">
-                {{ m.displayName }}{{ m.isDefault ? ' (Default)' : '' }}{{ !m.available ? ' — unavailable' : '' }}
-              </option>
-            } @empty {
-              <option value="">Default</option>
-            }
-          </select>
-          @if (selectedModelDetail(); as detail) {
-            <p class="muted small hint">
-              {{ detail.provider }}
-              @if (detail.freeTier) { · Free tier }
-              @if (!detail.available) { · <strong>Unavailable</strong> — pick another model or retry later. }
-            </p>
-            @if (detail.capabilities) {
-              <p class="muted small hint sub">{{ detail.capabilities }}</p>
-            }
-          }
-          @if (lastUsedModel || lastUsedProvider) {
-            <p class="muted small hint sub">Answering with: {{ lastUsedProvider || lastUsedModel }}</p>
-          }
-          @if (status === 'error') {
+        @if (status === 'error') {
+          <div class="field">
             <div class="btn-row">
               <button class="btn-ghost btn-sm" (click)="retryGuidance()" [disabled]="!lastQuestion && !guidance">
                 ↻ Retry
               </button>
             </div>
-          }
-        </div>
+          </div>
 
-        <div class="divider"></div>
+          <div class="divider"></div>
+        }
 
         <!-- Answer depth -->
         <div class="field">
