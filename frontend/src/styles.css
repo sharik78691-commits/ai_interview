@@ -147,7 +147,7 @@ button, input, select, textarea { font-family: inherit; }
 .btn-ghost:hover { background: rgba(255,255,255,.09); }
 .btn-sm { padding: 8px 14px; font-size: .7671rem; border-radius: 8px; }
 input[type="text"], select, textarea {
-  width: 100%; background: #0d1322; border: 1px solid var(--border-strong);
+  width: 100%; background: #0a1a12; border: 1px solid var(--border-strong);
   border-radius: 10px; color: var(--text); padding: 11px 14px; font-size: .8303rem;
   outline: none; transition: border .15s;
 }
@@ -206,13 +206,13 @@ label.lbl { display: block; font-size: .6769rem; font-weight: 700; color: var(--
 .legal-table th, .legal-table td { text-align: left; vertical-align: top; padding: 10px 12px; border: 1px solid var(--border); line-height: 1.55; }
 .legal-table th { color: var(--muted); font-weight: 600; background: var(--panel); }
 
-.info { max-width: 1080px; padding: 52px 24px 72px; display: grid; gap: 44px; }
+.container.info { max-width: 1080px; padding: 52px 24px 72px; display: grid; gap: 44px; }
 .info-head { text-align: center; max-width: 720px; margin: 0 auto; }
 .info-head h1 { font-size: clamp(1.9rem, 4.5vw, 2.8rem); font-weight: 800; letter-spacing: -0.02em; margin-bottom: 12px; }
 .info-head .lead { color: var(--muted); font-size: 1.05rem; line-height: 1.7; }
-.info h2 { font-size: 1.35rem; font-weight: 800; margin-bottom: 16px; }
-.info h3 { font-size: 1rem; font-weight: 700; margin-bottom: 6px; }
-.info p { line-height: 1.7; }
+.container.info h2 { font-size: 1.35rem; font-weight: 800; margin-bottom: 16px; }
+.container.info h3 { font-size: 1rem; font-weight: 700; margin-bottom: 6px; }
+.container.info p { line-height: 1.7; }
 .info a { color: var(--accent); }
 .info-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
 .info-grid .card p { font-size: .92rem; }

@@ -19,60 +19,65 @@
         </button>
       </div>
     </div>
-  } @else {
-  <!-- ======================= DESKTOP APP DOWNLOAD ======================= -->
-  <div class="card desktop-card">
-    <div class="desktop-head">
-      <h3>🖥️ Desktop app <span class="opt-tag">recommended for interviews</span></h3>
-      @if (desktopApp.version) {
-        <span class="ver">v{{ desktopApp.version }}</span>
-      }
-    </div>
-    <p class="muted small">
-      Take the interview in the desktop app — it stays
-      <strong>invisible on screen share</strong>: Zoom, Google Meet, and Microsoft Teams are
-      not able to see the screen while screen sharing is in progress. The AI assists you
-      and hears the meeting automatically.
-    </p>
-    <ul class="dl-points">
-      <li>🫥 Invisible during screen share — your copilot never leaks to interviewers</li>
-      <li>⚡ Auto meeting audio — no tab to pick, works even on headphones</li>
-      <li>✨ Same AI guidance as the website, in a floating helper window</li>
-    </ul>
-    <div class="dl-row">
-      @if (desktopApp.windowsUrl) {
-        <a class="btn-primary btn-sm" [href]="desktopApp.windowsUrl" download>
-          ⬇ Download for Windows
-        </a>
-      } @else {
-        <button class="btn-primary btn-sm" type="button" disabled title="The Windows installer link is not published yet">
-          ⬇ Download for Windows
-        </button>
-      }
-      @if (desktopApp.macUrl) {
-        <a class="btn-ghost btn-sm" [href]="desktopApp.macUrl" download>
-          ⬇ Download for macOS
-        </a>
-      } @else {
-        <button class="btn-ghost btn-sm" type="button" disabled title="macOS build coming soon">
-          ⬇ macOS — coming soon
-        </button>
-      }
-    </div>
-    @if (!desktopApp.windowsUrl && !desktopApp.macUrl) {
-      <p class="muted small dl-note">Download links appear here as soon as the desktop build is published.</p>
-    }
-  </div>
   }
 
-  <h1>Prepare your interview</h1>
-  <p class="muted">Upload your resume (optional) and paste the job description — the AI tunes every answer to your background. A position title and job description are required to start.</p>
+  <header class="page-head">
+    <h1>Prepare your interview</h1>
+    <p class="muted">Upload your resume (optional) and paste the job description — the AI tunes every answer to your background. A position title and job description are required to start.</p>
+  </header>
   <app-error-banner [message]="error" (dismiss)="error=''"></app-error-banner>
-  <div class="banner info">🎙 Browser mic note: live transcription uses the Web Speech API (best in Chrome/Edge). You can always type questions manually or use Demo mode.</div>
 
-  <div class="grid2" style="margin-top:18px">
+  @if (!isDesktop) {
+  <!-- ======================= DESKTOP APP DOWNLOAD ======================= -->
+  <section class="card app-card">
+    <span class="app-ico" aria-hidden="true">
+      <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>
+    </span>
+    <div class="app-body">
+      <div class="app-title">
+        <h3>Desktop app</h3>
+        <span class="opt-tag">Recommended for interviews</span>
+        @if (desktopApp.version) {
+          <span class="ver">v{{ desktopApp.version }}</span>
+        }
+      </div>
+      <p class="muted small">
+        Take the interview in the desktop app — it stays <strong>invisible on screen share</strong>:
+        Zoom, Google Meet and Microsoft Teams can't see it while you share your screen. The AI hears the meeting automatically.
+      </p>
+      <ul class="dl-points">
+        <li>Invisible during screen share</li>
+        <li>Auto meeting audio — works on headphones</li>
+        <li>Same AI guidance, in a floating window</li>
+      </ul>
+    </div>
+    <div class="app-actions">
+      @if (desktopApp.windowsUrl) {
+        <a class="btn-primary btn-sm" [href]="desktopApp.windowsUrl" download>⬇ Download for Windows</a>
+      } @else {
+        <button class="btn-primary btn-sm" type="button" disabled title="The Windows installer link is not published yet">⬇ Download for Windows</button>
+      }
+      @if (desktopApp.macUrl) {
+        <a class="btn-ghost btn-sm" [href]="desktopApp.macUrl" download>⬇ Download for macOS</a>
+      } @else {
+        <button class="btn-ghost btn-sm" type="button" disabled title="macOS build coming soon">macOS — coming soon</button>
+      }
+      @if (!desktopApp.windowsUrl && !desktopApp.macUrl) {
+        <p class="muted small dl-note">Links appear here once the desktop build is published.</p>
+      }
+    </div>
+  </section>
+  }
+
+  <p class="mic-note">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+    <span><strong>Browser mic note:</strong> live transcription uses the Web Speech API (best in Chrome/Edge). You can always type questions manually or use Demo mode.</span>
+  </p>
+
+  <div class="grid2 work-grid">
     <div class="card">
-      <h3>📄 Resume <span class="opt-tag">optional</span>
+      <div class="card-head">
+        <h3>📄 Resume <span class="opt-tag">optional</span></h3>
         @if (serverResumes.length || resumeData) {
           <button
             class="btn-ghost btn-sm update-btn"
@@ -83,9 +88,9 @@
             ↻ Update resume
           </button>
         }
-      </h3>
+      </div>
       <input #updateFileInput type="file" hidden accept=".pdf,.docx,.txt" (change)="onFilePicked($event)">
-      <p class="muted small">PDF, DOCX or TXT</p>
+      <p class="muted small card-sub">PDF, DOCX or TXT</p>
       <div class="drop" [class.over]="dragOver" (dragover)="$event.preventDefault(); dragOver=true" (dragleave)="dragOver=false" (drop)="onDrop($event)">
         @if (uploading) {
           <p>Uploading…</p>
@@ -112,11 +117,13 @@
               @for (r of serverResumes; track r.id) {
                 <li class="resume-row" [class.active]="r.is_active">
                   <div class="resume-meta">
-                    <strong>{{ r.filename }}</strong>
+                    <div class="name-line">
+                      <strong>{{ r.filename }}</strong>
+                      @if (r.is_active) {
+                        <span class="tag active-tag">Active</span>
+                      }
+                    </div>
                     <span class="muted small">{{ fmtDate(r.created_at) }} · {{ formatSize(r.size_bytes) }}</span>
-                    @if (r.is_active) {
-                      <span class="tag active-tag">Active</span>
-                    }
                   </div>
                   <div class="resume-actions">
                     <button
@@ -209,7 +216,10 @@
     </div>
 
     <div class="card">
-      <h3>💼 Target role <span class="req-tag">Required</span></h3>
+      <div class="card-head">
+        <h3>💼 Target role <span class="req-tag">Required</span></h3>
+      </div>
+      <p class="muted small card-sub">The position and job description you're interviewing for</p>
       @if (serverOk) {
         <div class="resume-lib">
           <h4 class="lib-title">Saved roles
@@ -226,11 +236,13 @@
               @for (r of serverRoles; track r.id) {
                 <li class="resume-row" [class.active]="r.is_active">
                   <div class="resume-meta">
-                    <strong>{{ r.position || '(No title)' }}</strong>
+                    <div class="name-line">
+                      <strong>{{ r.position || '(No title)' }}</strong>
+                      @if (r.is_active) {
+                        <span class="tag active-tag">Active</span>
+                      }
+                    </div>
                     <span class="muted small">{{ fmtDate(r.created_at) }} · {{ r.chars }} chars</span>
-                    @if (r.is_active) {
-                      <span class="tag active-tag">Active</span>
-                    }
                   </div>
                   <div class="resume-actions">
                     @if (!r.is_active) {
@@ -260,16 +272,16 @@
           }
         </div>
       }
-      <label class="lbl" for="position">Position <span class="req">*</span>
-        <span class="count">({{ targetPosition.length }}/200)</span>
+      <label class="lbl field-lbl" for="position"><span>Position <span class="req">*</span></span>
+        <span class="count">{{ targetPosition.length }}/200</span>
       </label>
       <p class="muted small hint">(If you are a developer or programmer, please mention programming language) · max 200 characters.</p>
       <input id="position" type="text" [(ngModel)]="targetPosition" maxlength="200" placeholder="e.g. Senior Backend Engineer (Python, AWS)">
       @if (positionError) {
         <p class="field-err">{{ positionError }}</p>
       }
-      <label class="lbl" for="jd">Job description <span class="req">*</span>
-        <span class="count">({{ jobDescription.length }} / 2000 chars)</span>
+      <label class="lbl field-lbl" for="jd"><span>Job description <span class="req">*</span></span>
+        <span class="count">{{ jobDescription.length }}/2000</span>
       </label>
       <textarea id="jd" [(ngModel)]="jobDescription" rows="11" maxlength="2000" placeholder="Paste the full job description…"></textarea>
       @if (jdError) {
@@ -278,10 +290,10 @@
       <button class="btn-primary wide" (click)="prepare()" [disabled]="preparing">
         {{ preparing ? 'Preparing…' : 'Prepare Interview →' }}
       </button>
-      <button class="btn-green wide save-role" (click)="saveRole()" [disabled]="savingRole">
+      <button class="btn-ghost wide save-role" (click)="saveRole()" [disabled]="savingRole">
         {{ savingRole ? 'Saving…' : '💾 Save role' }}
       </button>
-      <p class="muted small" style="margin-top:8px">Position and job description are required to start. Resume is optional.</p>
+      <p class="muted small form-foot">Position and job description are required to start. Resume is optional.</p>
     </div>
   </div>
 

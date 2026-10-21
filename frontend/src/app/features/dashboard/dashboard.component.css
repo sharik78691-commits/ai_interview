@@ -1,26 +1,69 @@
-.page { padding: 36px 24px 60px; }
-.page h1 { font-size: 1.8rem; font-weight: 800; }
+.page { padding: 40px 24px 72px; }
+.page-head { margin-bottom: 22px; }
+.page-head h1 { font-size: clamp(1.6rem, 3vw, 2.1rem); font-weight: 800; letter-spacing: -0.02em; line-height: 1.2; }
+.page-head p { margin-top: 8px; max-width: 760px; font-size: .9rem; line-height: 1.6; }
+
+/* Desktop-app promo: icon | text | actions on one row, stacks on mobile. */
+.app-card { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 20px; align-items: center; margin-bottom: 16px; }
+.app-ico { width: 48px; height: 48px; border-radius: 14px; background: var(--tint); color: var(--accent); display: inline-flex; align-items: center; justify-content: center; align-self: start; }
+.app-ico svg, .mic-note svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.app-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
+.app-title h3 { margin: 0; }
+.app-title .opt-tag { margin-left: 0; color: var(--accent); background: var(--tint); border-color: var(--border); }
+.app-body .dl-points { flex-direction: row; flex-wrap: wrap; gap: 6px 18px; margin-top: 10px; }
+.app-body .dl-points li { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+.app-body .dl-points li::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.app-actions { display: flex; flex-direction: column; gap: 8px; min-width: 210px; }
+.app-actions .btn-sm { width: 100%; }
+.app-actions button[disabled] { cursor: not-allowed; opacity: .6; }
+.app-actions .dl-note { margin: 0; text-align: center; font-size: .68rem; }
+
+/* Slim one-line note (was a full banner). */
+.mic-note { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 12px; border: 1px solid var(--border); background: var(--bg2); color: var(--muted); font-size: .78rem; line-height: 1.5; }
+.mic-note svg { width: 18px; height: 18px; flex-shrink: 0; color: var(--accent); }
+.mic-note strong { color: var(--text); }
+
+.work-grid { margin-top: 16px; }
+/* Grid items default to min-width:auto, so a long filename (nowrap) widened the card past the phone screen. */
+.work-grid > .card { min-width: 0; }
+.resume-lib .hint { margin-top: 8px; }
+.card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 34px; }
+.card-head h3 { margin: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 0; }
+.card-sub { margin-top: 2px; }
+.field-lbl { display: flex !important; align-items: baseline; justify-content: space-between; gap: 8px; }
+.form-foot { margin-top: 10px; text-align: center; }
+.name-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.name-line .tag { flex-shrink: 0; }
+
+@media (max-width: 860px) {
+  .page { padding: 28px 16px 64px; }
+  .app-card { grid-template-columns: auto minmax(0, 1fr); }
+  .app-actions { grid-column: 1 / -1; min-width: 0; flex-direction: row; flex-wrap: wrap; }
+  .app-actions .btn-sm { width: auto; flex: 1 1 180px; }
+  .app-actions .dl-note { width: 100%; }
+}
 .drop { margin-top: 14px; border: 1.5px dashed var(--border-strong); border-radius: 12px; padding: 28px 18px; text-align: center; color: var(--muted); transition: border .15s, background .15s; }
-.drop.over { border-color: var(--accent); background: rgba(110,139,255,.07); }
+.drop { background: var(--bg); }
+.drop.over { border-color: var(--accent); background: var(--tint); }
 .pick { cursor: pointer; margin-top: 10px; }
 .ok { color: var(--green); font-weight: 700; }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
-.chip { font-size: .78rem; background: rgba(110,139,255,.12); border: 1px solid rgba(110,139,255,.3); color: #c3d0ff; padding: 4px 11px; border-radius: 999px; }
+.chip { font-size: .74rem; font-weight: 600; background: var(--tint); border: 1px solid var(--border); color: var(--accent); padding: 4px 11px; border-radius: 999px; }
 .exp { margin: 12px 0 0 18px; }
 .wide { width: 100%; margin-top: 18px; }
 .save-role { margin-top: 10px; }
 /* Editor save buttons row. */
 .btn-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
 /* "Update resume" button beside the Resume heading (shown when one exists). */
-.update-btn { margin-left: 8px; vertical-align: middle; }
+.update-btn { flex-shrink: 0; }
 /* Small badges (Active / editor status). */
 .tag {
   display: inline-block;
   font-size: 0.68rem;
   font-weight: 700;
-  background: rgba(110, 139, 255, 0.12);
-  border: 1px solid rgba(110, 139, 255, 0.3);
-  color: #c3d0ff;
+  background: var(--tint);
+  border: 1px solid var(--border);
+  color: var(--accent);
   padding: 2px 9px;
   border-radius: 999px;
 }
@@ -66,11 +109,13 @@
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--bg);
+  transition: border-color .15s;
 }
+.resume-row:hover { border-color: var(--border-strong); }
 .resume-row.active {
-  border-color: rgba(110, 139, 255, 0.45);
-  background: rgba(110, 139, 255, 0.06);
+  border-color: var(--accent);
+  background: var(--tint);
 }
 .resume-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .resume-meta strong {
@@ -84,16 +129,14 @@
 .active-tag {
   align-self: flex-start;
   margin-top: 2px;
-  background: rgba(74, 222, 128, 0.12);
-  border-color: rgba(74, 222, 128, 0.4);
-  color: #4ade80;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
 }
 /* ------------------------- Desktop download card ------------------------ */
 .desktop-card {
   margin: 0 0 20px;
-  border-color: rgba(110, 139, 255, 0.35);
-  background:
-    linear-gradient(180deg, rgba(110, 139, 255, 0.07), rgba(110, 139, 255, 0.02));
+  border-color: var(--border-strong);
 }
 .desktop-head {
   display: flex;
@@ -110,9 +153,9 @@
 .ver {
   font-size: 0.7rem;
   font-weight: 700;
-  color: #c3d0ff;
-  background: rgba(110, 139, 255, 0.12);
-  border: 1px solid rgba(110, 139, 255, 0.3);
+  color: var(--muted);
+  background: var(--bg2);
+  border: 1px solid var(--border);
   border-radius: 999px;
   padding: 3px 10px;
   white-space: nowrap;
@@ -142,7 +185,7 @@
 /* "optional" tag next to the Resume / Target role headings. */
 .opt-tag {
   font-size: .62rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
-  color: var(--muted2); background: rgba(110,139,255,.1);
+  color: var(--muted); background: var(--bg2);
   border: 1px solid var(--border-strong); border-radius: 999px;
   padding: 2px 8px; margin-left: 6px; vertical-align: middle;
 }
@@ -152,4 +195,10 @@
   color: #f87171; background: rgba(248, 113, 113, .1);
   border: 1px solid rgba(248, 113, 113, .4); border-radius: 999px;
   padding: 2px 8px; margin-left: 6px; vertical-align: middle;
+}
+/* Phones: give the file/role name the full row; actions drop below it. */
+@media (max-width: 560px) {
+  .resume-row { flex-wrap: wrap; }
+  .resume-meta { flex: 1 1 100%; }
+  .resume-actions { width: 100%; justify-content: flex-end; }
 }
