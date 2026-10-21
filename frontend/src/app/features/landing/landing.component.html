@@ -33,7 +33,9 @@
         <circle class="c4" cx="30" cy="34" r="3.5" fill="#fb7185"/>
         <!-- envelope back -->
         <path d="M30 104a8 8 0 0 1 8-8h124a8 8 0 0 1 8 8v54a8 8 0 0 1-8 8H38a8 8 0 0 1-8-8z" fill="var(--accent2)"/>
-        <!-- letter -->
+        <!-- letter: clipped to the envelope so it never shows below the pocket -->
+        <defs><clipPath id="letter-clip"><rect x="0" y="0" width="200" height="160"/></clipPath></defs>
+        <g clip-path="url(#letter-clip)">
         <g class="rise">
           <rect x="46" y="30" width="108" height="112" rx="7" fill="var(--paper)" class="paper"/>
           <text x="100" y="54" text-anchor="middle" class="letter-title">OFFER LETTER</text>
@@ -41,6 +43,7 @@
           <rect x="62" y="74" width="58" height="4" rx="2" fill="#c5e8d4"/>
           <circle cx="100" cy="104" r="15" fill="#d3f0df"/>
           <path class="check" d="M92.5 104.5l5 5 10-10" fill="none" stroke="#137547" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </g>
         </g>
         <!-- envelope front -->
         <path d="M30 100l70 44 70-44v58a8 8 0 0 1-8 8H38a8 8 0 0 1-8-8z" fill="var(--accent)"/>

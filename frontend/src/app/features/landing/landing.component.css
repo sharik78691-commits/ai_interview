@@ -35,7 +35,7 @@ svg { display: block; }
 .conf-blue { fill: #3a86ff; }
 :host-context(:root:not([data-theme="light"])) .conf-blue { fill: #60a5fa; }
 
-@keyframes rise { 0%, 15% { transform: translateY(38px); } 50%, 100% { transform: translateY(0); } }
+@keyframes rise { 0%, 15% { transform: translateY(16px); } 50%, 100% { transform: translateY(0); } }
 @keyframes conf { 0% { transform: translateY(-10px) rotate(0); opacity: 0; } 25% { opacity: 1; } 100% { transform: translateY(30px) rotate(200deg); opacity: 0; } }
 @keyframes draw { 0%, 45% { stroke-dashoffset: 24; } 70%, 100% { stroke-dashoffset: 0; } }
 .rise { animation: rise 3.6s cubic-bezier(.2, .8, .2, 1) infinite alternate; }
