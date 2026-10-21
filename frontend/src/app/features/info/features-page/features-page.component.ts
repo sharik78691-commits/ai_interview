@@ -72,7 +72,7 @@ export class FeaturesPageComponent {
         { icon: '📄', title: 'Resume library', text: 'Upload PDF, DOCX or TXT resumes (up to 10 MB), fix the extracted text, keep up to four and pick the active one.' },
         { icon: '🎯', title: 'Target roles', text: 'Save up to four job titles with their job descriptions and switch the active role before an interview.' },
         { icon: '🧩', title: 'Structured output', text: 'Answer points, STAR outlines for behavioral questions, code hints and complexity notes for coding questions, examples, key takeaways and likely follow-ups.' },
-        { icon: '🧠', title: 'Model choice', text: 'Choose from the AI models currently enabled on the service (for example Groq, Gemini, Qwen, OpenAI or DeepSeek models, as available).' },
+        { icon: '🧠', title: 'Latest AI models', text: 'Answers use the AI model we have chosen as the best fit for speed and quality (for example Gemini, Groq, Qwen, OpenAI or DeepSeek models), updated as better models arrive.' },
       ],
     },
     {

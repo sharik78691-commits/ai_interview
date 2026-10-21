@@ -351,6 +351,35 @@ def test_rejected_before_processing_costs_nothing(gemini):
     assert c.get("/api/billing/me/usage").json()["used"] == 0
 
 
+def test_default_plan_features_use_practice_wording(client):
+    with SessionLocal() as db:
+        for plan in db.scalars(select(SubscriptionPlan)).all():
+            feats = json.loads(plan.features_json)
+            assert "Real-time AI answer guidance" not in feats
+            assert "Choice of available AI models" not in feats
+        assert db.get(SchemaMigration, pricing_service.FEATURE_COPY_MIGRATION) is not None
+
+
+def test_feature_copy_migration_fixes_existing_plans_once_and_keeps_admin_text(client):
+    with SessionLocal() as db:
+        plan = db.scalar(select(SubscriptionPlan).where(SubscriptionPlan.code == "7-days"))
+        plan.features_json = json.dumps(["Real-time AI answer guidance", "My custom perk",
+                                         "Choice of available AI models"])
+        db.delete(db.get(SchemaMigration, pricing_service.FEATURE_COPY_MIGRATION))
+        db.commit()
+        subs.seed_default_plans(db)
+        db.refresh(plan)
+        assert json.loads(plan.features_json) == [
+            "Instant AI answer guidance for interview practice", "My custom perk",
+            "Latest AI models, chosen and updated by us"]
+        # Runs once: a later admin edit back to the old wording is respected.
+        plan.features_json = json.dumps(["Real-time AI answer guidance"])
+        db.commit()
+        subs.seed_default_plans(db)
+        db.refresh(plan)
+        assert json.loads(plan.features_json) == ["Real-time AI answer guidance"]
+
+
 def test_admin_has_unlimited_screenshot_analyses_without_a_plan(gemini, monkeypatch):
     # The per-minute spend guard still applies to admins; lift it to test the count.
     monkeypatch.setattr("app.api.screenshots.ANALYZE_PER_MINUTE", 1000)
