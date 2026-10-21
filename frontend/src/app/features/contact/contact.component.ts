@@ -1,4 +1,5 @@
 import { Component } from '@angular/core';
+import { BUSINESS } from '../../core/business-info';
 
 /**
  * Public Contact page — required for Razorpay / Cashfree merchant approval
@@ -11,5 +12,6 @@ import { Component } from '@angular/core';
   styleUrl: './contact.component.css',
 })
 export class ContactComponent {
-  supportEmail = 'support@oyeinterview.com';
+  readonly biz = BUSINESS;
+  supportEmail = BUSINESS.email;
 }

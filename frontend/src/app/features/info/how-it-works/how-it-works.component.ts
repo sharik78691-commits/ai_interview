@@ -32,11 +32,11 @@ import { RouterLink } from '@angular/router';
       </section>
 
       <section>
-        <h2>During an interview session</h2>
+        <h2>During a practice session</h2>
         <ol class="steps">
           <li class="card">
             <h3>Start a session and share audio</h3>
-            <p class="muted">Pick the meeting tab or window whose audio you want transcribed, and optionally turn on your microphone. You can also just type questions.</p>
+            <p class="muted">Pick the mock-interview or practice-call tab or window whose audio you want transcribed, and optionally turn on your microphone. You can also just type questions.</p>
           </li>
           <li class="card">
             <h3>Questions are detected</h3>

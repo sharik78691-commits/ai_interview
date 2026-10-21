@@ -1,5 +1,6 @@
 import { Component } from '@angular/core';
 import { RouterLink } from '@angular/router';
+import { BUSINESS } from '../../../core/business-info';
 
 /** Global footer: product, trust and legal links on every page. */
 @Component({
@@ -12,8 +13,12 @@ import { RouterLink } from '@angular/router';
         <div class="brand">
           <strong>OyeInterview</strong>
           <p class="muted small">
-            Real-time, resume-aware AI interview guidance. An independently developed
+            Resume-aware AI interview practice and preparation. An independently developed
             software product.
+          </p>
+          <p class="muted small" data-testid="footer-operator">
+            Operated by {{ biz.operatorName }}, {{ biz.location }}<br />
+            <a [href]="'mailto:' + biz.email">{{ biz.email }}</a>
           </p>
           <p class="muted small">Use responsibly and follow the rules of every interview process.</p>
         </div>
@@ -22,6 +27,7 @@ import { RouterLink } from '@angular/router';
           <a routerLink="/features">Features</a>
           <a routerLink="/how-it-works">How it works</a>
           <a routerLink="/pricing">Pricing</a>
+          <a routerLink="/about">About us</a>
           <a routerLink="/contact">Contact</a>
         </nav>
         <nav aria-label="Trust">
@@ -34,10 +40,11 @@ import { RouterLink } from '@angular/router';
           <a routerLink="/terms">Terms</a>
           <a routerLink="/privacy-policy">Privacy Policy</a>
           <a routerLink="/refund-policy">Refund &amp; Cancellation</a>
+          <a routerLink="/shipping-policy">Shipping &amp; Delivery</a>
         </nav>
       </div>
       <div class="container foot-base muted small">
-        <span>© {{ year }} OyeInterview</span>
+        <span>© {{ year }} OyeInterview · {{ biz.operatorName }}</span>
         <span>AI suggestions can be wrong — always verify before relying on them.</span>
       </div>
     </footer>
@@ -59,4 +66,5 @@ import { RouterLink } from '@angular/router';
 })
 export class SiteFooterComponent {
   readonly year = new Date().getFullYear();
+  readonly biz = BUSINESS;
 }

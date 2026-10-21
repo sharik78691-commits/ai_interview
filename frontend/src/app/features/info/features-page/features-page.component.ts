@@ -20,7 +20,7 @@ interface Feature {
       <header class="info-head">
         <h1>Features</h1>
         <p class="lead">
-          What OyeInterview does today — in the browser, with your own resume and target role.
+          What OyeInterview does today to help you practise and prepare — in the browser, with your own resume and target role.
         </p>
       </header>
 
@@ -56,9 +56,9 @@ interface Feature {
 export class FeaturesPageComponent {
   readonly groups: { title: string; items: Feature[] }[] = [
     {
-      title: 'Live interview help',
+      title: 'Practice-session help',
       items: [
-        { icon: '🎧', title: 'Interviewer audio detection', text: 'Share the meeting tab or window audio and OyeInterview transcribes short clips to spot the interviewer’s questions automatically.' },
+        { icon: '🎧', title: 'Interviewer audio detection', text: 'Share the audio of a mock interview or practice call and OyeInterview transcribes short clips to spot the questions automatically.' },
         { icon: '🎙', title: 'Microphone transcription', text: 'Your own voice is transcribed by your browser’s speech recognition, separately from the interviewer audio.' },
         { icon: '⌨️', title: 'Typed questions', text: 'Type or paste any question when audio isn’t available — you get the same structured answer.' },
         { icon: '⚡', title: 'Streaming answers', text: 'Answer points appear while the model is still writing, then the full structured answer replaces them.' },
