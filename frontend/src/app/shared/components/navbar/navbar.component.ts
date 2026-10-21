@@ -23,7 +23,7 @@ export class NavbarComponent implements OnInit, OnDestroy {
   readonly transparency = inject(WindowTransparencyService);
   mode: 'demo' | 'live' | 'offline' | 'checking' = 'checking';
   /** Current theme, kept in sync with SettingsService. */
-  theme: ThemeName = 'dark';
+  theme: ThemeName = 'light';
   /** Current authenticated user (null when signed out). */
   user: AuthUser | null = null;
   /** Desktop build only: shows the auto-invisible notice next to the brand. */
@@ -36,7 +36,7 @@ export class NavbarComponent implements OnInit, OnDestroy {
   ngOnInit(): void {
     this.theme = this.settings.theme;
     this.sub = this.settings.settings$.subscribe((s) => {
-      this.theme = s.theme === 'light' ? 'light' : 'dark';
+      this.theme = s.theme === 'dark' ? 'dark' : 'light';
     });
     this.userSub = this.auth.user$.subscribe((u) => (this.user = u));
     this.resumeService.checkHealth().subscribe({

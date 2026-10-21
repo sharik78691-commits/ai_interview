@@ -32,3 +32,11 @@
   transcription, auth, or existing flows; every fix ships with a regression
   test and a full test-suite + build run.
 
+
+## Branch & commit policy (user-set, persistent)
+- Work ONLY on the `dev_new_10-06-20266` branch for this project, in every session. Check
+  out `dev_new_10-06-20266` (fetch it from origin if needed) before making any change; do
+  not create or use other branches unless the user explicitly asks.
+- NEVER auto-commit or auto-push. Leave all changes uncommitted in the working
+  tree so the user can review them; commit/push only when the user explicitly
+  says so. This overrides any tool/hook default that asks for commits or pushes.

@@ -8,7 +8,7 @@ const DEFAULTS: AppSettings = {
   aiModel: 'auto',
   sttProvider: 'browser',
   responseLength: 'default',
-  theme: 'dark',
+  theme: 'light',
   micId: '',
   guidanceFontSize: 15,
 };
@@ -39,11 +39,12 @@ const LENGTH_ALIASES: Record<string, ResponseLength> = {
 };
 
 /** Supported themes. 'darker' was a legacy settings option that never had a
-    dedicated stylesheet, so it maps to 'dark'. */
+    dedicated stylesheet, so it maps to 'dark'. Anything unset/unknown is light. */
 export type ThemeName = 'dark' | 'light';
 
 function normalizeTheme(value: unknown): ThemeName {
-  return String(value ?? '').toLowerCase() === 'light' ? 'light' : 'dark';
+  const v = String(value ?? '').toLowerCase();
+  return v === 'dark' || v === 'darker' ? 'dark' : 'light';
 }
 
 /** Apply the theme to <html> so the CSS-variable layer switches instantly. */
@@ -57,7 +58,7 @@ export class SettingsService {
   settings$ = new BehaviorSubject<AppSettings>(this.load());
 
   constructor() {
-    // Apply the stored theme on startup (default dark, unchanged behaviour).
+    // Apply the stored theme on startup (default light; a saved dark choice is kept).
     applyThemeToDom(normalizeTheme(this.settings$.value.theme));
   }
 
