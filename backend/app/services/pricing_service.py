@@ -49,13 +49,22 @@ DEFAULT_CURRENCIES = [
 ]
 
 _DEFAULT_FEATURES = [
-    "Real-time AI answer guidance",
+    "Instant AI answer guidance for interview practice",
     "Resume- and job-description-aware answers",
     "Technical, behavioral and coding questions",
     "Meeting / tab audio transcription",
     "Answer length control (short / medium / long)",
-    "Choice of available AI models",
+    "Latest AI models, chosen and updated by us",
 ]
+
+#: One-time copy fix for plans created before 2026-10-22 (wording for payment
+#: gateway review). Only exact old strings are replaced, so features an admin
+#: wrote or edited are left untouched.
+FEATURE_COPY_MIGRATION = "2026_10_feature_copy_v1"
+_FEATURE_COPY_FIXES = {
+    "Real-time AI answer guidance": "Instant AI answer guidance for interview practice",
+    "Choice of available AI models": "Latest AI models, chosen and updated by us",
+}
 
 #: Initial catalogue (2026-10). Amounts are INR paise; durations exact hours.
 #: Codes 3-days / 7-days / 1-month / 3-months are the rows that already
@@ -280,6 +289,7 @@ def ensure_catalogue(db: Session) -> int:
     """
     ensure_currencies(db)
     if _mark(db, CATALOGUE_MIGRATION):
+        _migrate_feature_copy(db)
         db.commit()
         return 0
     reason = "Initial catalogue: 5 plans (2026-10 pricing)"
@@ -317,9 +327,31 @@ def ensure_catalogue(db: Session) -> int:
     for pay in db.scalars(select(Payment).where(Payment.screenshot_allowance == 0)):
         pay.screenshot_allowance = per_day * subs.days_for_hours(pay.duration_hours or pay.duration_days * 24)
     db.add(SchemaMigration(name=CATALOGUE_MIGRATION))
+    _migrate_feature_copy(db)
     db.commit()
     logger.info("Plan catalogue migration %s applied (%d plan(s) created)", CATALOGUE_MIGRATION, created)
     return created
+
+
+def _migrate_feature_copy(db: Session) -> None:
+    """Apply ``_FEATURE_COPY_FIXES`` to every plan once (caller commits)."""
+    if _mark(db, FEATURE_COPY_MIGRATION):
+        return
+    changed = 0
+    for plan in db.scalars(select(SubscriptionPlan)).all():
+        try:
+            features = json.loads(plan.features_json or "[]")
+        except ValueError:
+            continue
+        if not isinstance(features, list):
+            continue
+        fixed = [_FEATURE_COPY_FIXES.get(f, f) if isinstance(f, str) else f for f in features]
+        if fixed != features:
+            plan.features_json = json.dumps(fixed)
+            changed += 1
+    db.add(SchemaMigration(name=FEATURE_COPY_MIGRATION))
+    db.flush()
+    logger.info("Plan feature copy migration %s applied (%d plan(s) updated)", FEATURE_COPY_MIGRATION, changed)
 
 
 # ------------------------------------------------------------ public views
@@ -339,6 +371,7 @@ def count_prices(db: Session) -> dict[str, int]:
 
 __all__ = [
     "CATALOGUE_MIGRATION",
+    "FEATURE_COPY_MIGRATION",
     "DEFAULT_CURRENCIES",
     "DEFAULT_PLANS",
     "Quote",

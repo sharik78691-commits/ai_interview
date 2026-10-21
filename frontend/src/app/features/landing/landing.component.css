@@ -120,6 +120,24 @@ svg { display: block; }
 .price strong { font-size: 34px; font-weight: 800; letter-spacing: -0.02em; line-height: 1; }
 .price span { font-size: 14px; }
 .per-day { font-size: 13px; font-weight: 600; color: var(--accent); margin-top: 8px; }
+/* Same animated highlight as the Pricing page's "(Unlimited Interview Sessions)". */
+.unlimited {
+  display: inline-block; font-size: 13px; font-weight: 700; margin-top: 4px;
+  color: var(--accent);
+  background: linear-gradient(110deg, var(--accent) 0%, var(--accent) 38%, #fff 50%, var(--accent) 62%, var(--accent) 100%);
+  background-size: 250% 100%;
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: flashlight 2.8s ease-in-out infinite;
+}
+@keyframes flashlight { from { background-position: 150% 0; } to { background-position: -50% 0; } }
+:root[data-theme='light'] .unlimited,
+:host-context(:root[data-theme='light']) .unlimited {
+  background-image: linear-gradient(110deg, var(--accent) 0%, var(--accent) 38%, #7ee2b0 50%, var(--accent) 62%, var(--accent) 100%);
+}
+@media (prefers-reduced-motion: reduce) {
+  .unlimited { animation: none; background: none; -webkit-text-fill-color: currentColor; color: var(--accent); }
+}
 .plan-desc { font-size: 14px; margin-top: 6px; line-height: 1.5; }
 .feats { display: grid; gap: 8px; margin: 16px 0 20px; padding-top: 16px; border-top: 1px solid var(--border); font-size: 14px; color: var(--muted); }
 .feats li { display: flex; gap: 8px; align-items: flex-start; line-height: 1.4; }

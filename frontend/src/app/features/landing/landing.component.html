@@ -129,7 +129,7 @@
       <a routerLink="/features" class="sec-link">Explore all features →</a>
     </div>
     <div class="feat-tiles">
-      <div class="tile"><span class="ico sm" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 14v-2a9 9 0 0 1 18 0v2"/><path d="M21 15a2 2 0 0 1-2 2h-1v-5h3zM3 15a2 2 0 0 0 2 2h1v-5H3z"/></svg></span><b>Interviewer audio</b><span class="muted">Questions detected from the call</span></div>
+      <div class="tile"><span class="ico sm" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 14v-2a9 9 0 0 1 18 0v2"/><path d="M21 15a2 2 0 0 1-2 2h-1v-5h3zM3 15a2 2 0 0 0 2 2h1v-5H3z"/></svg></span><b>Question detection</b><span class="muted">Picked up from your practice session</span></div>
       <div class="tile"><span class="ico sm" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M13 3L5 14h6l-1 7 8-11h-6z"/></svg></span><b>Streaming answers</b><span class="muted">Points first, full answer next</span></div>
       <div class="tile"><span class="ico sm" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3l2.6 5.6 6 .7-4.5 4.1 1.2 6L12 16.4 6.7 19.4l1.2-6L3.4 9.3l6-.7z"/></svg></span><b>STAR outlines</b><span class="muted">Behavioral stories, structured</span></div>
       <div class="tile"><span class="ico sm" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h10M4 18h7"/></svg></span><b>Your length</b><span class="muted">Short, medium or long answers</span></div>
@@ -157,7 +157,7 @@
       <li>
         <span class="step-no">2</span>
         <span class="jbadge" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 14v-2a9 9 0 0 1 18 0v2"/><path d="M21 15a2 2 0 0 1-2 2h-1v-5h3zM3 15a2 2 0 0 0 2 2h1v-5H3z"/></svg></span>
-        <h3>Share interviewer audio</h3>
+        <h3>Share practice-session audio</h3>
         <p class="muted">Or just type the question</p>
       </li>
       <li>
@@ -196,6 +196,7 @@
               <p class="small muted"><s>{{ money(p.regular_price_minor, p.currency) }}</s> {{ p.promo_label || 'Limited-time price' }}</p>
             }
             <p class="per-day">≈ {{ perDay(p) }} per day</p>
+            <p class="unlimited" data-testid="plan-unlimited">(Unlimited Interview Sessions)</p>
             @if (p.description) { <p class="plan-desc muted">{{ p.description }}</p> }
             <ul class="feats">
               @for (f of p.features.slice(0, 3); track f) {
