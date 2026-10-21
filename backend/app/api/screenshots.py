@@ -6,7 +6,8 @@ POST /api/screenshots/analyze  — analyze 1..N screenshots with the server's
                                  Gemini key (GEMINI_API_KEY in the server .env)
 
 The desktop .exe holds no AI key; it calls these with the user's session.
-Each screenshot uses one credit from the caller's active plan; the backend
+Each screenshot uses one credit from the caller's active plan (admins are
+unlimited); the backend
 is the only place that checks or changes credits (see
 ``screenshot_credit_service`` for the reserve/complete/release policy).
 Send an ``Idempotency-Key`` header so a retried request is never charged twice.
@@ -59,6 +60,8 @@ def _usage(db: Session, user: User) -> dict:
         "allowance": s.allowance, "used": s.used, "remaining": s.remaining,
         "totalRemaining": s.total_remaining,
         "expiresAt": s.expires_at.isoformat() if s.expires_at else None,
+        # Admins are never charged (see screenshot_credit_service).
+        "unlimited": bool(user.is_admin),
     }
 
 

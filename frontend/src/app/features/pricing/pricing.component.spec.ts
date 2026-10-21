@@ -72,8 +72,6 @@ describe('PricingComponent (database-driven)', () => {
     const text = (render().nativeElement as HTMLElement).textContent ?? '';
     expect(text).toContain(formatMoney(3000, 'INR')); // 90000 paise / 30 days
     expect(text).toContain('per day');
-    expect(text).toContain('unlimited interviews');
-    expect(text).toContain('~8 screenshot analyses per day'); // 240 / 30
   });
 
   it('separates one-time passes from longer plans', () => {

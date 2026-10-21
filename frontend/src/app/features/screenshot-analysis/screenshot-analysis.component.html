@@ -9,7 +9,7 @@
       </h1>
       <p class="muted small hotkey-steps" data-testid="title-hotkey-steps">
         Press <strong>Ctrl+Shift+S</strong> to capture a screenshot → choose the screen with the
-        <kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd> arrow keys → press <kbd>Enter</kbd> — it is captured and analyzed immediately.
+        <kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd> arrow keys → press <kbd>Enter</kbd> or click it — it is captured and analyzed immediately.
       </p>
       <p class="muted">Turn screenshots of interview questions into clear answer guidance for practice and preparation.</p>
     </div>
@@ -36,13 +36,16 @@
       <!-- Capture -->
       <div class="card">
         <div class="sec-head">
-          <h3>Screenshots <span class="muted small">({{ shots().length }}/{{ config.activeModel().limits.maxImages }})</span></h3>
-          @if (shots().length) { <button class="btn-ghost sm" (click)="clearAll()">Clear all</button> }
+          <h3>Screenshot</h3>
         </div>
-        <button class="btn-primary wide" (click)="openPicker({ kind: 'add' })" [disabled]="atLimit() || analyzing()" data-testid="capture-btn">
+        <button class="btn-primary wide" (click)="openPicker()" [disabled]="analyzing()" data-testid="capture-btn">
           📸 Capture Screen
         </button>
-        @if (config.usage(); as u) {
+        @if (config.usage()?.unlimited) {
+          <p class="small credits" data-testid="credits-remaining">
+            <strong>Unlimited</strong> screenshot analyses <span class="muted">· admin account</span>
+          </p>
+        } @else if (config.usage(); as u) {
           <p class="small credits" [class.err]="u.totalRemaining === 0" data-testid="credits-remaining">
             <strong>{{ u.remaining }}</strong> screenshot credit{{ u.remaining === 1 ? '' : 's' }} left{{ u.planName ? ' on ' + u.planName : '' }}
             @if (u.totalRemaining !== u.remaining) { <span class="muted">({{ u.totalRemaining }} across all plans)</span> }
@@ -51,7 +54,7 @@
           </p>
         }
         <p class="muted small">You choose exactly which screen or window to capture. Nothing is captured in the background, and the screen flashes briefly each time a capture is taken.</p>
-        <p class="muted small hotkey-tip" data-testid="capture-hotkey-tip">Shortcut: press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> to open the screen picker — use the arrow keys (← → ↑ ↓) to choose a screen, then press <kbd>Enter</kbd> to capture and analyze it immediately. It works from any page — the app opens this page with the picker ready.</p>
+        <p class="muted small hotkey-tip" data-testid="capture-hotkey-tip">Shortcut: press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> to open the screen picker — use the arrow keys (← → ↑ ↓) to choose a screen, then press <kbd>Enter</kbd> (or click it) to capture and analyze it immediately. One screenshot at a time — a new capture replaces the previous one. It works from any page — the app opens this page with the picker ready.</p>
         @if (captureNotice()) { <p class="ok small" role="status">✓ {{ captureNotice() }}</p> }
 
         @if (shots().length) {
@@ -65,10 +68,7 @@
                   <span class="muted small">{{ s.image.width }}×{{ s.image.height }}</span>
                 </div>
                 <div class="ctl">
-                  <button class="btn-ghost sm" (click)="move(i, -1)" [disabled]="i === 0" aria-label="Move up">↑</button>
-                  <button class="btn-ghost sm" (click)="move(i, 1)" [disabled]="i === shots().length - 1" aria-label="Move down">↓</button>
-                  <button class="btn-ghost sm" (click)="openPicker({ kind: 'replace', index: i })" aria-label="Replace screenshot">Replace</button>
-                  <button class="btn-ghost sm" (click)="remove(i)" aria-label="Remove screenshot">✕</button>
+                  <button class="btn-ghost sm" (click)="remove()" [disabled]="analyzing()" aria-label="Remove screenshot">✕</button>
                 </div>
               </li>
             }
@@ -82,13 +82,13 @@
         }
 
         <button class="btn-primary wide" (click)="analyze()" [disabled]="!canAnalyze()" data-testid="analyze-btn">
-          {{ analyzing() ? 'Analyzing…' : 'Analyze screenshots' }}
+          {{ analyzing() ? 'Analyzing…' : result() ? 'Analyze again' : 'Analyze screenshot' }}
         </button>
         @if (config.serverReady() === false) { <p class="muted small">Analysis is unavailable until the server is set up.</p> }
         @if (analyzing()) {
           <div class="progress" role="status" aria-live="polite">
             <div class="bar"><div class="bar-fill"></div></div>
-            <span class="muted small">Sending {{ shots().length }} screenshot{{ shots().length === 1 ? '' : 's' }} to {{ config.activeModel().displayName }} · {{ elapsed() }}s</span>
+            <span class="muted small">Sending screenshot to {{ config.activeModel().displayName }} · {{ elapsed() }}s</span>
           </div>
         }
       </div>
@@ -106,7 +106,7 @@
           <div class="empty">
             <p>📋</p>
             <strong>No analysis yet</strong>
-            <p class="muted small">Capture one or more screenshots, then press “Analyze screenshots”.</p>
+            <p class="muted small">Press Ctrl+Shift+S or “Capture Screen”, then pick a screen — the analysis starts automatically.</p>
           </div>
         }
       </div>
@@ -140,7 +140,7 @@
         <h3>Choose what to capture</h3>
         <button class="btn-ghost sm" (click)="closePicker()" [disabled]="capturing()">Cancel</button>
       </div>
-      <p class="muted small">Click a screen or window to add it, or use the arrow keys and press <strong>Enter</strong> to capture and analyze at once.</p>
+      <p class="muted small">Click a screen or window, or use the arrow keys and press <strong>Enter</strong> — it is captured and analyzed at once.</p>
       @if (loadingSources()) {
         <p class="muted">Looking for screens and windows…</p>
       } @else {

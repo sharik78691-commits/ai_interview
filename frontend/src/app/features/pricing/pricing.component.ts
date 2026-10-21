@@ -169,13 +169,6 @@ export class PricingComponent implements OnInit {
     return formatMoney(Math.round(p.price_minor / days), p.currency);
   }
 
-  /** Screenshot analyses available per day of access. */
-  screenshotsPerDay(p: Plan): string {
-    const days = Math.max(p.duration_hours / 24, 1);
-    const n = p.screenshot_allowance / days;
-    return Number.isInteger(n) ? `${n}` : n.toFixed(1);
-  }
-
   ctaLabel(p: Plan): string {
     if (!p.available) return `Not yet available in ${p.currency}`;
     if (!p.payable) return `${p.currency} payments coming soon`;

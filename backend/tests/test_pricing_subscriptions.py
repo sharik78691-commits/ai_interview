@@ -351,6 +351,47 @@ def test_rejected_before_processing_costs_nothing(gemini):
     assert c.get("/api/billing/me/usage").json()["used"] == 0
 
 
+def test_admin_has_unlimited_screenshot_analyses_without_a_plan(gemini, monkeypatch):
+    # The per-minute spend guard still applies to admins; lift it to test the count.
+    monkeypatch.setattr("app.api.screenshots.ANALYZE_PER_MINUTE", 1000)
+    c = _admin("unlimited-admin@example.com")
+    cfg = c.get("/api/screenshots/config").json()
+    assert cfg["usage"]["unlimited"] is True
+    for i in range(12):  # more than any small plan allows, and no plan at all
+        r = _analyze(c, 1, key=f"adm-req-{i:04d}")
+        assert r.status_code == 200, r.text
+        assert r.json()["usage"]["unlimited"] is True
+    with SessionLocal() as db:
+        rows = db.scalars(select(ScreenshotUsage).where(
+            ScreenshotUsage.user_email == "unlimited-admin@example.com")).all()
+        assert len(rows) == 12
+        assert all(r.status == "completed" and r.subscription_id is None for r in rows)
+    # Idempotency still applies to admins.
+    r = _analyze(c, 1, key="adm-req-0000")
+    assert r.status_code == 409 and r.json()["detail"]["code"] == "DUPLICATE_REQUEST"
+
+
+def test_admin_with_a_plan_is_not_charged_and_failures_release_cleanly(gemini, monkeypatch):
+    # The per-minute spend guard still applies to admins; lift it to test the count.
+    monkeypatch.setattr("app.api.screenshots.ANALYZE_PER_MINUTE", 1000)
+    c = _admin("planned-admin@example.com")
+    _buy(c, "1-day")
+    for i in range(10):  # beyond the 1-day pass's 8 credits
+        assert _analyze(c, 1, key=f"padm-req-{i:04d}").status_code == 200
+    assert c.get("/api/billing/me/usage").json()["used"] == 0
+    gemini["fail"] = "PROVIDER_ERROR"
+    assert _analyze(c, 1, key="padm-fail-0001").status_code == 502
+    gemini["fail"] = None
+    assert c.get("/api/billing/me/usage").json()["used"] == 0
+
+
+def test_non_admin_still_needs_a_plan(gemini):
+    c = _client("plain-user@example.com")
+    r = _analyze(c, 1)
+    assert r.status_code == 402 and r.json()["detail"]["code"] == "SUBSCRIPTION_REQUIRED"
+    assert c.get("/api/screenshots/config").json()["usage"]["unlimited"] is False
+
+
 def test_concurrent_reservations_never_exceed_allowance():
     _client("race@example.com")
     pid = _payment("race@example.com", "1-day", status="paid")
