@@ -1,6 +1,13 @@
 <nav class="nav" [class.desktop]="isDesktop">
   <div class="container nav-inner">
-    <a routerLink="/" class="brand"><span class="logo">◈</span> AI Interview Assistant
+    <a routerLink="/" class="brand" aria-label="OyeInterview home">
+      <svg class="logo-mark" viewBox="0 0 100 100" width="28" height="28" aria-hidden="true">
+        <rect width="100" height="100" rx="24" class="lm-tile"/>
+        <rect x="28" y="20" width="44" height="36" rx="3" class="lm-paper"/>
+        <path d="M40 38 L47 45 L60 31" fill="none" class="lm-check" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M18 48 L50 68 L82 48 L82 82 L18 82Z" class="lm-env"/>
+      </svg>
+      <span class="wordmark">OYE<span>INTERVIEW</span></span>
       @if (mode === 'live') { <span class="live-badge">LIVE AI</span> }
       @else if (mode === 'demo') { <span class="demo-badge" title="Template answers — add an LLM key for live AI">DEMO</span> }
       @else if (mode === 'offline') { <span class="off-badge" title="Backend unreachable">OFFLINE</span> }
@@ -44,6 +51,7 @@
         <button class="logout-btn" (click)="logout()" [disabled]="signingOut">{{ signingOut ? 'Signing out…' : 'Sign out' }}</button>
       } @else {
         <a routerLink="/login" routerLinkActive="active" class="signin-link">Sign in</a>
+        <a routerLink="/register" class="btn-primary nav-cta">Get started</a>
       }
     </div>
   </div>

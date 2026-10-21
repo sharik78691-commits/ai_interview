@@ -70,7 +70,10 @@
 [data-theme="light"] .nav { background: rgba(255,255,255,.86) !important; }
 [data-theme="light"] .links a:hover { background: rgba(15,23,42,.06) !important; }
 [data-theme="light"] .links a.active { color: #0e5c37 !important; }
-[data-theme="light"] .logo { background: linear-gradient(135deg, #137547 0%, #0e5c37 100%) !important; -webkit-background-clip: text !important; background-clip: text !important; }
+[data-theme="light"] .lm-tile { fill: #137547 !important; }
+[data-theme="light"] .lm-paper { fill: #ffffff !important; }
+[data-theme="light"] .lm-check { stroke: #137547 !important; }
+[data-theme="light"] .lm-env { fill: #0e5c37 !important; }
 [data-theme="light"] .demo-badge { color: #137547 !important; }
 [data-theme="light"] .live-badge { color: #047857 !important; }
 [data-theme="light"] .off-badge { color: #b91c1c !important; }
