@@ -1,5 +1,6 @@
 import { DatePipe } from '@angular/common';
 import { Component, ElementRef, OnDestroy, OnInit, computed, inject, signal, viewChild } from '@angular/core';
+import { RouterLink } from '@angular/router';
 import { AnalysisHistoryService } from '../../core/screenshot/analysis-history.service';
 import { validateImages } from '../../core/screenshot/image-validation';
 import { ModelConfigService } from '../../core/screenshot/model-config.service';
@@ -10,6 +11,7 @@ import {
   CaptureSource,
   CapturedImage,
   HistoryEntry,
+  PLAN_ERROR_CODES,
   ScreenshotError,
 } from '../../core/screenshot/screenshot.models';
 import { ErrorBannerComponent } from '../../shared/components/error-banner/error-banner.component';
@@ -29,7 +31,7 @@ type PickerMode = { kind: 'add' } | { kind: 'replace'; index: number };
 @Component({
   selector: 'app-screenshot-analysis',
   standalone: true,
-  imports: [DatePipe, ErrorBannerComponent, AnalysisResultComponent],
+  imports: [DatePipe, RouterLink, ErrorBannerComponent, AnalysisResultComponent],
   templateUrl: './screenshot-analysis.component.html',
   styleUrl: './screenshot-analysis.component.css',
 })
@@ -58,6 +60,8 @@ export class ScreenshotAnalysisComponent implements OnInit, OnDestroy {
   readonly error = signal('');
   readonly result = signal<AnalysisResult | null>(null);
   readonly resultModel = signal('');
+  /** Last analysis was refused for lack of a plan / credits: offer the Pricing page. */
+  readonly needsPlan = signal(false);
 
   readonly validation = computed(() =>
     this.shots().length
@@ -275,18 +279,21 @@ export class ScreenshotAnalysisComponent implements OnInit, OnDestroy {
   async analyze(): Promise<void> {
     if (!this.canAnalyze()) return;
     this.error.set('');
+    this.needsPlan.set(false);
     this.result.set(null);
     this.analyzing.set(true);
     this.elapsed.set(0);
     this.timer = setInterval(() => this.elapsed.update((n) => n + 1), 1000);
     try {
       const images = this.shots().map((s) => s.image);
-      const { result, model } = await this.analysis.analyze(images);
+      const { result, model, usage } = await this.analysis.analyze(images);
       this.result.set(result);
       this.resultModel.set(model);
+      if (usage) this.config.usage.set(usage);
       this.history.add(result, model, images.length);
     } catch (e) {
       this.error.set(this.message(e));
+      this.needsPlan.set(e instanceof ScreenshotError && PLAN_ERROR_CODES.includes(e.code));
     } finally {
       this.stopTimer();
       this.analyzing.set(false);

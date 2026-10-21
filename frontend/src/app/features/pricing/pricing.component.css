@@ -109,3 +109,23 @@
 .field { display: grid; gap: 6px; }
 .field input { padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--bg2); color: var(--text); }
 .checkout-actions { display: flex; gap: 10px; justify-content: flex-end; }
+
+/* "(Unlimited Interview Sessions)" on passes — a soft flashlight sweep across the text */
+.unlimited {
+  display: inline-block; font-weight: 700; white-space: nowrap;
+  color: var(--accent);
+  background: linear-gradient(110deg, var(--accent) 0%, var(--accent) 38%, #fff 50%, var(--accent) 62%, var(--accent) 100%);
+  background-size: 250% 100%;
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: flashlight 2.8s ease-in-out infinite;
+}
+@keyframes flashlight { from { background-position: 150% 0; } to { background-position: -50% 0; } }
+:root[data-theme='light'] .unlimited,
+:host-context(:root[data-theme='light']) .unlimited {
+  background-image: linear-gradient(110deg, var(--accent) 0%, var(--accent) 38%, #7ee2b0 50%, var(--accent) 62%, var(--accent) 100%);
+}
+@media (max-width: 400px) { .unlimited { white-space: normal; } }
+@media (prefers-reduced-motion: reduce) {
+  .unlimited { animation: none; background: none; -webkit-text-fill-color: currentColor; color: var(--accent); }
+}

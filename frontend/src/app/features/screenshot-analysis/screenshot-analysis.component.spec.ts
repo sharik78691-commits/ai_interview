@@ -1,4 +1,5 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { provideRouter } from '@angular/router';
 import {
   RESULT,
   b64,
@@ -136,6 +137,49 @@ describe('ScreenshotAnalysisComponent (desktop flow)', () => {
     expect(cmp.analyzing()).toBeFalse();
     expect(cmp.result()).toBeNull();
     expect(cmp.history.entries().length).toBe(0);
+  });
+
+  const USAGE = { planName: 'Weekly', allowance: 40, used: 3, remaining: 37, totalRemaining: 37, expiresAt: null };
+
+  it('shows remaining screenshot credits from config and updates them after an analysis', async () => {
+    await setup({
+      getConfig: async () => ({ ok: true, models: cmp.config.models(), defaultModel: 'gemini-3.5-flash-lite', serverReady: true, usage: USAGE }),
+      analyze: async () => ({ ok: true, result: RESULT, model: 'Gemini 3.5 Flash Lite', usage: { ...USAGE, used: 4, remaining: 36, totalRemaining: 36 } }),
+    });
+    expect(q('[data-testid="credits-remaining"]')!.textContent).toContain('37 screenshot credits left on Weekly');
+    await cmp.openPicker({ kind: 'add' });
+    await cmp.takeCapture(cmp.sources()[0]);
+    await cmp.analyze();
+    await settle();
+    expect(q('[data-testid="credits-remaining"]')!.textContent).toContain('36 screenshot credits left');
+  });
+
+  it('hides the credits line when the server does not report usage', async () => {
+    await setup();
+    expect(q('[data-testid="credits-remaining"]')).toBeNull();
+  });
+
+  for (const code of ['NO_CREDITS', 'SUBSCRIPTION_REQUIRED']) {
+    it(`${code}: shows the server message and a link to Pricing`, async () => {
+      TestBed.configureTestingModule({ providers: [provideRouter([])] });
+      await setup({ analyze: async () => ({ ok: false, error: { code, message: 'Buy a pass on the Pricing page.' } }) });
+      await cmp.openPicker({ kind: 'add' });
+      await cmp.takeCapture(cmp.sources()[0]);
+      await cmp.analyze();
+      await settle();
+      expect(cmp.error()).toBe('Buy a pass on the Pricing page.');
+      const link = q('[data-testid="plan-cta"] a') as HTMLAnchorElement;
+      expect(link.getAttribute('href')).toContain('/pricing');
+    });
+  }
+
+  it('does not offer Pricing for other errors', async () => {
+    await setup({ analyze: async () => ({ ok: false, error: { code: 'RATE_LIMITED', message: 'Slow down.' } }) });
+    await cmp.openPicker({ kind: 'add' });
+    await cmp.takeCapture(cmp.sources()[0]);
+    await cmp.analyze();
+    await settle();
+    expect(q('[data-testid="plan-cta"]')).toBeNull();
   });
 
   it('shows a clear error when capture or source listing fails', async () => {

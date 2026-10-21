@@ -56,6 +56,22 @@ export interface AnalysisResult {
   code: CodeAnalysis | null;
 }
 
+/**
+ * Screenshot credits from the backend (1 credit = 1 screenshot). `remaining`
+ * is on the plan that will be charged next; `totalRemaining` across live plans.
+ */
+export interface ScreenshotUsage {
+  planName: string | null;
+  allowance: number;
+  used: number;
+  remaining: number;
+  totalRemaining: number;
+  expiresAt: string | null;
+}
+
+/** Error codes that mean "buy or renew a plan" (HTTP 402 from the backend). */
+export const PLAN_ERROR_CODES: readonly string[] = ['NO_CREDITS', 'SUBSCRIPTION_REQUIRED'];
+
 export interface HistoryEntry {
   id: string;
   createdAt: number;

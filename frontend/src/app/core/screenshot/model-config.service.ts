@@ -1,6 +1,6 @@
 import { Injectable, computed, signal } from '@angular/core';
 import { getScreenshotBridge } from './screenshot-bridge';
-import { ScreenshotError, ScreenshotModel } from './screenshot.models';
+import { ScreenshotError, ScreenshotModel, ScreenshotUsage } from './screenshot.models';
 
 /** Default model. Must match DEFAULT_MODEL_KEY in electron/screenshot/model-config.js. */
 export const DEFAULT_SCREENSHOT_MODEL_KEY = 'gemini-3.5-flash-lite';
@@ -41,6 +41,8 @@ export class ModelConfigService {
   readonly selectedKey = signal<string>(DEFAULT_SCREENSHOT_MODEL_KEY);
   /** true/false = server has / lacks its AI key; null = unknown (offline). */
   readonly serverReady = signal<boolean | null>(null);
+  /** Screenshot credits left (from the backend); null = unknown. */
+  readonly usage = signal<ScreenshotUsage | null>(null);
 
   readonly activeModel = computed(
     () =>
@@ -67,6 +69,7 @@ export class ModelConfigService {
     if (!res.ok) throw new ScreenshotError(res.error.code, res.error.message);
     this.models.set(res.models.length ? res.models : FALLBACK_MODELS);
     this.serverReady.set(typeof res.serverReady === 'boolean' ? res.serverReady : null);
+    this.usage.set(res.usage ?? null);
     this.selectedKey.set(this.resolveKey(readSaved(), this.models()));
   }
 

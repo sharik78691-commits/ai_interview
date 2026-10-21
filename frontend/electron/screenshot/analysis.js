@@ -3,9 +3,20 @@
 // The desktop app holds NO AI key. Screenshots go to our backend
 // (POST /api/screenshots/analyze) with the signed-in user's session; the
 // backend calls the model with GEMINI_API_KEY from the SERVER's .env.
+const { randomUUID } = require('node:crypto');
 const { validateImages } = require('./image-validation');
 
 const REQUEST_TIMEOUT_MS = 120_000;
+// One automatic retry when the request never reached the server (network
+// error). It reuses the same Idempotency-Key, so it can never be charged twice.
+const NETWORK_RETRIES = 1;
+const RETRY_DELAY_MS = 500;
+
+/**
+ * Idempotency-Key for one user-initiated analysis. The backend accepts
+ * 8–64 chars of [A-Za-z0-9_.:-]; without a key every retry is a new charge.
+ */
+const newRequestId = () => `ss-${randomUUID()}`;
 
 class AnalysisError extends Error {
   constructor(code, message) {
@@ -59,6 +70,24 @@ function normalizeResult(raw) {
   };
 }
 
+const asCount = (v) => (Number.isFinite(v) && v >= 0 ? Math.floor(v) : null);
+
+/** Screenshot credits from the backend's `usage` block; null when absent/unreadable. */
+function normalizeUsage(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const remaining = asCount(raw.remaining);
+  const totalRemaining = asCount(raw.totalRemaining);
+  if (remaining === null && totalRemaining === null) return null;
+  return {
+    planName: asString(raw.planName) || null,
+    allowance: asCount(raw.allowance) ?? 0,
+    used: asCount(raw.used) ?? 0,
+    remaining: remaining ?? 0,
+    totalRemaining: totalRemaining ?? remaining ?? 0,
+    expiresAt: asString(raw.expiresAt) || null,
+  };
+}
+
 /** Server error body is { detail: { code, message } } (or a plain FastAPI detail). */
 function mapServerError(status, body) {
   const detail = body?.detail;
@@ -70,6 +99,9 @@ function mapServerError(status, body) {
   }
   if (status === 403) {
     return new AnalysisError('SESSION_EXPIRED', 'Your session expired. Sign in again and retry.');
+  }
+  if (status === 402) {
+    return new AnalysisError('SUBSCRIPTION_REQUIRED', 'Screenshot analysis needs an active plan. Buy a pass on the Pricing page.');
   }
   if (status === 413) {
     return new AnalysisError('TOO_LARGE', 'The screenshots are too large together. Remove some.');
@@ -83,28 +115,15 @@ function mapServerError(status, body) {
   return new AnalysisError('REQUEST_FAILED', `The analysis request failed (HTTP ${status}).`);
 }
 
-/**
- * @param {{ model: object, images: object[], apiBase: string, fetchImpl?: typeof fetch, timeoutMs?: number }} args
- */
-async function analyzeScreenshots({
-  model,
-  images,
-  apiBase,
-  fetchImpl = fetch,
-  timeoutMs = REQUEST_TIMEOUT_MS,
-}) {
-  const check = validateImages(images, model.limits);
-  if (!check.ok) throw new AnalysisError('VALIDATION', check.errors.map((e) => e.message).join(' '));
-
+/** One POST attempt; throws AnalysisError TIMEOUT / NETWORK when no response arrives. */
+async function postOnce({ apiBase, fetchImpl, timeoutMs, requestId, body }) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
-  let res;
   try {
-    res = await fetchImpl(`${apiBase}/api/screenshots/analyze`, {
+    return await fetchImpl(`${apiBase}/api/screenshots/analyze`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      // Only the image bytes + type leave the machine (no source names).
-      body: JSON.stringify({ images: images.map((i) => ({ mimeType: i.mimeType, data: i.data })) }),
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': requestId },
+      body,
       signal: controller.signal,
     });
   } catch (err) {
@@ -114,6 +133,39 @@ async function analyzeScreenshots({
     throw new AnalysisError('NETWORK', 'Could not reach the server. Check your connection.');
   } finally {
     clearTimeout(timer);
+  }
+}
+
+/**
+ * One user-initiated analysis: a single Idempotency-Key for every attempt.
+ * @param {{ model: object, images: object[], apiBase: string, fetchImpl?: typeof fetch, timeoutMs?: number, requestId?: string, retries?: number, retryDelayMs?: number }} args
+ * @returns {Promise<{ result: object, usage: object | null, requestId: string }>}
+ */
+async function runAnalysis({
+  model,
+  images,
+  apiBase,
+  fetchImpl = fetch,
+  timeoutMs = REQUEST_TIMEOUT_MS,
+  requestId = newRequestId(),
+  retries = NETWORK_RETRIES,
+  retryDelayMs = RETRY_DELAY_MS,
+}) {
+  const check = validateImages(images, model.limits);
+  if (!check.ok) throw new AnalysisError('VALIDATION', check.errors.map((e) => e.message).join(' '));
+
+  // Only the image bytes + type leave the machine (no source names).
+  const payload = JSON.stringify({ images: images.map((i) => ({ mimeType: i.mimeType, data: i.data })) });
+  let res;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      res = await postOnce({ apiBase, fetchImpl, timeoutMs, requestId, body: payload });
+      break;
+    } catch (err) {
+      // A timeout may have reached the server (and still be running): don't retry it.
+      if (err.code !== 'NETWORK' || attempt >= retries) throw err;
+      await new Promise((r) => setTimeout(r, retryDelayMs));
+    }
   }
 
   const text = await res.text().catch(() => '');
@@ -127,29 +179,49 @@ async function analyzeScreenshots({
   if (!body || body.ok !== true) {
     throw new AnalysisError('BAD_RESPONSE', 'The server returned an unreadable response.');
   }
-  return normalizeResult(body.result);
+  return { result: normalizeResult(body.result), usage: normalizeUsage(body.usage), requestId };
 }
 
-/** GET /api/screenshots/config — true/false when known, null when unreachable. */
-async function fetchServerReady({ apiBase, fetchImpl = fetch, timeoutMs = 10_000 }) {
+/** Same as runAnalysis, returning only the normalized result. */
+async function analyzeScreenshots(args) {
+  return (await runAnalysis(args)).result;
+}
+
+/**
+ * GET /api/screenshots/config — ready: true/false when known, null when
+ * unreachable; usage: the caller's screenshot credits (null when unknown).
+ */
+async function fetchServerConfig({ apiBase, fetchImpl = fetch, timeoutMs = 10_000 }) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetchImpl(`${apiBase}/api/screenshots/config`, { signal: controller.signal });
-    if (!res.ok) return null;
+    if (!res.ok) return { ready: null, usage: null };
     const body = JSON.parse(await res.text());
-    return typeof body?.configured === 'boolean' ? body.configured : null;
+    return {
+      ready: typeof body?.configured === 'boolean' ? body.configured : null,
+      usage: normalizeUsage(body?.usage),
+    };
   } catch {
-    return null;
+    return { ready: null, usage: null };
   } finally {
     clearTimeout(timer);
   }
 }
 
+/** GET /api/screenshots/config — true/false when known, null when unreachable. */
+async function fetchServerReady(args) {
+  return (await fetchServerConfig(args)).ready;
+}
+
 module.exports = {
   AnalysisError,
   normalizeResult,
+  normalizeUsage,
+  newRequestId,
+  runAnalysis,
   analyzeScreenshots,
+  fetchServerConfig,
   fetchServerReady,
   redact,
 };
