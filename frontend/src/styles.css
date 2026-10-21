@@ -71,6 +71,7 @@
 [data-theme="light"] .links a:hover { background: rgba(15,23,42,.06) !important; }
 [data-theme="light"] .links a.active { color: #0e5c37 !important; }
 [data-theme="light"] .lm-tile { fill: #137547 !important; }
+[data-theme="light"] .lm-back { fill: #0b4a2c !important; }
 [data-theme="light"] .lm-paper { fill: #ffffff !important; }
 [data-theme="light"] .lm-check { stroke: #137547 !important; }
 [data-theme="light"] .lm-env { fill: #0e5c37 !important; }
@@ -223,3 +224,5 @@ label.lbl { display: block; font-size: .6769rem; font-weight: 700; color: var(--
 }
 .callout { border-left: 3px solid var(--accent); padding: 12px 16px; background: var(--panel); border-radius: 0 12px 12px 0; }
 .cta-row { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; }
+/* Brand logo on the auth cards (login / register / forgot / reset). */
+.auth-head .logo-img { display: block; width: 52px; height: 52px; margin: 0 auto 16px; border-radius: 14px; box-shadow: 0 10px 24px -12px rgba(19, 117, 71, .55); }
