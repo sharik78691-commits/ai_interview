@@ -1,8 +1,10 @@
 """Public pricing, user billing, checkout/verification and gateway webhooks.
 
-GET  /api/plans                          public, database-driven pricing
+GET  /api/plans?currency=INR|USD         public, database-driven pricing
+GET  /api/pricing/currencies             currencies shown on the pricing page
 GET  /api/payments/gateways              payment methods available right now
-GET  /api/billing/me                     the caller's subscription + history
+GET  /api/billing/me                     the caller's subscription + history + credits
+GET  /api/billing/me/usage               the caller's screenshot credits only
 POST /api/billing/trial                  start the one-time free trial (if offered)
 POST /api/payments/checkout              create a gateway order (server-priced)
 POST /api/payments/{gateway}/verify      confirm a checkout server-side
@@ -15,7 +17,7 @@ gateway signature over the raw body and exempt from CSRF by design.
 """
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
@@ -36,17 +38,20 @@ from app.providers.payments.registry import available_gateways, get_gateway
 from app.schemas.billing import (
     CheckoutRequest,
     CheckoutResponse,
+    CurrencyOut,
     GatewayOut,
     MockSimulateRequest,
     MyBilling,
     PlanPublic,
     SubscriptionOut,
     TrialRequest,
+    UsageOut,
     VerifyRequest,
     VerifyResponse,
 )
-from app.services import payment_service, subscription_service as subs
-from app.services.billing_views import payment_out, plan_public, subscription_out
+from app.services import payment_service, pricing_service as pricing, subscription_service as subs
+from app.services import screenshot_credit_service as credits
+from app.services.billing_views import payment_out, plan_public, subscription_out, usage_out
 
 logger = logging.getLogger(__name__)
 
@@ -65,10 +70,48 @@ def _gateway_http_error(exc: Exception) -> HTTPException:
 # ---------------------------------------------------------------- public
 
 
+def _payable_now(db: Session, code: str) -> tuple[bool, list[str]]:
+    """Currency payments switched on AND accepted by a configured gateway."""
+    cur = pricing.get_currency(db, code)
+    gws = [g["key"] for g in available_gateways() if code in g["currencies"]]
+    return bool(cur and cur.payments_enabled and gws), gws
+
+
 @router.get("/plans", response_model=list[PlanPublic])
-def public_plans(db: Session = Depends(get_db)) -> list[PlanPublic]:
-    """Active plans with the price checkout will charge right now."""
-    return [plan_public(p) for p in subs.list_plans(db)]
+def public_plans(
+    db: Session = Depends(get_db),
+    currency: str = Query(default="INR", pattern=r"^[A-Za-z]{3}$"),
+) -> list[PlanPublic]:
+    """Active public plans priced in ``currency`` (what checkout would charge now).
+
+    A plan without a live price in that currency is returned with
+    ``available=false`` so the page can say so instead of guessing a price.
+    """
+    code = currency.upper()
+    cur = pricing.get_currency(db, code)
+    if cur is None or not cur.display_enabled:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Prices in {code} are not offered.")
+    payable, _ = _payable_now(db, code)
+    plans = subs.list_plans(db, public_only=True)
+    now = subs.utcnow()
+    prices = pricing.current_prices(db, [p.id for p in plans], now)
+    return [
+        plan_public(p, now, quote=pricing.quote(p, code, prices, now), currency=code, payable=payable)
+        for p in plans
+    ]
+
+
+@router.get("/pricing/currencies", response_model=list[CurrencyOut])
+def public_currencies(db: Session = Depends(get_db)) -> list[CurrencyOut]:
+    out = []
+    for c in pricing.list_currencies(db):
+        if not c.display_enabled:
+            continue
+        payable, gws = _payable_now(db, c.code)
+        out.append(CurrencyOut(code=c.code, name=c.name, minor_digits=c.minor_digits,
+                               display_enabled=True, payments_enabled=c.payments_enabled,
+                               payable_now=payable, gateways=gws, sort_order=c.sort_order))
+    return out
 
 
 @router.get("/payments/gateways", response_model=list[GatewayOut])
@@ -96,13 +139,22 @@ def my_billing(user: User = Depends(require_user), db: Session = Depends(get_db)
             )
         )
     )
+    sub_by_payment = {s.payment_id: s.id for s in rows if s.payment_id}
     return MyBilling(
         current=subscription_out(current, now) if current else None,
         access_ends_at=subs.access_ends_at(db, user.id, now),
         subscriptions=[subscription_out(s, now) for s in rows],
-        payments=[payment_out(p) for p in payment_service.payment_history(db, user.id)],
+        payments=[payment_out(p, sub_by_payment.get(p.id))
+                  for p in payment_service.payment_history(db, user.id)],
         trial_used=trial_used,
+        usage=usage_out(credits.summary(db, user.id, now)),
     )
+
+
+@router.get("/billing/me/usage", response_model=UsageOut)
+def my_usage(user: User = Depends(require_user), db: Session = Depends(get_db)) -> UsageOut:
+    """Screenshot credits of the applicable subscription (server-computed)."""
+    return usage_out(credits.summary(db, user.id))
 
 
 @router.post("/billing/trial", response_model=SubscriptionOut, status_code=201)
@@ -126,8 +178,11 @@ async def checkout(
     rate_limit_key("checkout", str(user.id), 10)
     try:
         result = await payment_service.create_checkout(
-            db, user, plan_id=body.plan_id, gateway_name=body.gateway, phone=body.phone
+            db, user, plan_id=body.plan_id, gateway_name=body.gateway, phone=body.phone,
+            currency=body.currency, idempotency_key=body.idempotency_key,
         )
+    except payment_service.DuplicateCheckout as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     except (subs.SubscriptionError, payment_service.PaymentError) as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
     except PaymentGatewayError as exc:

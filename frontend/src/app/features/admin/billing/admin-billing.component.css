@@ -43,3 +43,42 @@ tr.click:hover, tr.click:focus { background: rgba(110, 139, 255, .07); outline: 
 .plan-form label.check { display: flex; align-items: center; gap: 8px; color: var(--text); }
 .plan-form .span2 { grid-column: span 2; }
 @media (max-width: 640px) { .plan-form .span2 { grid-column: auto; } }
+
+/* ---- overview, usage, pricing additions (2026-10) ---- */
+.ab-tabs { flex-wrap: wrap; }
+.ab-tabs button.on { background: var(--tint); }
+.w140 { width: 140px; }
+.check-inline { display: inline-flex; align-items: center; gap: 6px; }
+.kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
+.kpi { display: grid; gap: 4px; padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); }
+.kpi strong { font-size: 1.35rem; font-weight: 800; }
+.kpi-label { color: var(--muted); font-size: .74rem; text-transform: uppercase; letter-spacing: .04em; }
+.ov-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.ov-grid .card { display: grid; gap: 8px; align-content: start; }
+.ov-grid h4 { font-size: .9rem; font-weight: 700; }
+.rev strong { font-size: 1.2rem; }
+.bar-row { display: grid; grid-template-columns: minmax(90px, 1fr) 2fr auto; gap: 8px; align-items: center; font-size: .82rem; }
+.bar { height: 8px; border-radius: 999px; background: var(--tint); overflow: hidden; }
+.bar-fill { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
+.bar-fill[data-status='failed'] { background: var(--red); }
+.bar-fill[data-status='created'] { background: var(--amber); }
+.bar-val { font-variant-numeric: tabular-nums; color: var(--muted); }
+.th-sort { background: none; border: 0; padding: 0; color: inherit; font: inherit; text-transform: inherit; letter-spacing: inherit; cursor: pointer; }
+.th-sort:hover { color: var(--text); }
+.tag { display: inline-block; padding: 1px 8px; border-radius: 999px; background: var(--tint); color: var(--accent); font-size: .7rem; font-weight: 700; }
+.credit-edit { display: inline-flex; gap: 4px; margin-left: 6px; }
+.warn { color: var(--amber); font-weight: 700; }
+.status[data-status='refunded'], .status[data-status='disputed'] { color: var(--red); }
+.status[data-status='completed'] { color: var(--green); }
+.status[data-status='reserved'] { color: var(--amber); }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; }
+.kv dt { color: var(--muted); }
+.details { max-width: 320px; }
+.plan-form-body { display: grid; grid-template-columns: 1fr 260px; gap: 16px; align-items: start; }
+.preview { display: grid; gap: 6px; position: sticky; top: 12px; }
+.pcard { display: grid; gap: 6px; padding: 16px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--card); }
+.pcard.rec { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.pcard h5 { font-size: 1rem; font-weight: 800; }
+.pcard-type { font-size: .7rem; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+.pcard-price { font-size: 1.6rem; font-weight: 800; }
+@media (max-width: 860px) { .plan-form-body { grid-template-columns: 1fr; } .preview { position: static; } }

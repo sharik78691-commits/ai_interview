@@ -4,11 +4,13 @@ import { Observable } from 'rxjs';
 import { API_BASE_URL } from '../api/api-config';
 import {
   CheckoutResponse,
+  Currency,
   Gateway,
   GatewayKey,
   MyBilling,
   Plan,
   Subscription,
+  Usage,
   VerifyResponse,
 } from '../models/billing.models';
 
@@ -24,8 +26,17 @@ export class BillingService {
   private readonly http = inject(HttpClient);
   private readonly base = inject(API_BASE_URL);
 
-  plans(): Observable<Plan[]> {
-    return this.http.get<Plan[]>(`${this.base}/api/plans`);
+  /** Plans priced in `currency` (server-side amounts; never computed here). */
+  plans(currency = 'INR'): Observable<Plan[]> {
+    return this.http.get<Plan[]>(`${this.base}/api/plans`, { params: { currency } });
+  }
+
+  currencies(): Observable<Currency[]> {
+    return this.http.get<Currency[]>(`${this.base}/api/pricing/currencies`);
+  }
+
+  myUsage(): Observable<Usage> {
+    return this.http.get<Usage>(`${this.base}/api/billing/me/usage`);
   }
 
   gateways(): Observable<Gateway[]> {
@@ -40,11 +51,24 @@ export class BillingService {
     return this.http.post<Subscription>(`${this.base}/api/billing/trial`, { plan_id: planId });
   }
 
-  checkout(planId: number, gateway: GatewayKey, phone = ''): Observable<CheckoutResponse> {
+  /**
+   * Start a checkout. Only the plan, currency and gateway are sent — the
+   * amount is decided by the server. `idempotencyKey` (one per attempt)
+   * makes a double-click or retry open no second order.
+   */
+  checkout(
+    planId: number,
+    gateway: GatewayKey,
+    phone = '',
+    currency = 'INR',
+    idempotencyKey?: string,
+  ): Observable<CheckoutResponse> {
     return this.http.post<CheckoutResponse>(`${this.base}/api/payments/checkout`, {
       plan_id: planId,
       gateway,
       phone,
+      currency,
+      ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {}),
     });
   }
 

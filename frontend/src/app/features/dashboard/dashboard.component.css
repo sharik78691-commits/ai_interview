@@ -202,3 +202,15 @@
   .resume-meta { flex: 1 1 100%; }
   .resume-actions { width: 100%; justify-content: flex-end; }
 }
+
+/* ---- plan & screenshot credits card ---- */
+.plan-card { display: grid; gap: 10px; margin-bottom: 18px; }
+.plan-main { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 14px; }
+.plan-main h3 { font-size: 1.05rem; font-weight: 800; margin: 4px 0 2px; }
+.plan-usage { display: grid; gap: 6px; min-width: min(320px, 100%); }
+.plan-meter { height: 8px; border-radius: 999px; background: var(--tint); overflow: hidden; }
+.plan-meter span { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
+.plan-meter span.full { background: var(--amber); }
+.plan-card a { color: var(--accent); }
+.plan-card a.btn-primary { color: var(--on-accent); }
+.plan-link { justify-self: start; }

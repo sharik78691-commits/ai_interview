@@ -27,6 +27,44 @@
   </header>
   <app-error-banner [message]="error" (dismiss)="error=''"></app-error-banner>
 
+  @if (billing(); as b) {
+    <!-- ======================= PLAN & SCREENSHOT CREDITS ======================= -->
+    <section class="card plan-card" aria-label="Your plan">
+      @if (b.current; as c) {
+        <div class="plan-main">
+          <div>
+            <span class="opt-tag">Active plan</span>
+            <h3>{{ c.plan_name }}</h3>
+            <p class="muted small">Ends {{ c.expires_at | date: 'medium' }} (your local time)</p>
+          </div>
+          @if (b.usage; as u) {
+            <div class="plan-usage">
+              <span class="small">Screenshot usage: <strong>{{ u.used }} / {{ u.allowance }}</strong> · {{ u.remaining }} left</span>
+              <div class="plan-meter" role="progressbar" [attr.aria-valuenow]="u.used" aria-valuemin="0" [attr.aria-valuemax]="u.allowance" aria-label="Screenshots used">
+                <span [style.width.%]="usagePercent(u.used, u.allowance)" [class.full]="u.remaining === 0"></span>
+              </div>
+              @if (u.total_remaining === 0) {
+                <span class="small">All screenshot analyses used. <a routerLink="/pricing">Buy another pass</a></span>
+              }
+            </div>
+          }
+        </div>
+        <a routerLink="/billing" class="small plan-link">Billing &amp; history →</a>
+      } @else {
+        <div class="plan-main">
+          <div>
+            <h3>No active plan</h3>
+            <p class="muted small">
+              @if (b.payments.length && b.payments[0].status === 'created') { Your last payment is still pending — the plan activates once the gateway confirms it. }
+              @else { Passes start at 24 hours and include screenshot analyses. }
+            </p>
+          </div>
+          <a routerLink="/pricing" class="btn-primary btn-sm">See plans</a>
+        </div>
+      }
+    </section>
+  }
+
   @if (!isDesktop) {
   <!-- ======================= DESKTOP APP DOWNLOAD ======================= -->
   <section class="card app-card">

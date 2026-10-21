@@ -201,6 +201,22 @@ class RazorpayGateway(PaymentGateway):
         if event_type == "payment.failed":
             reason = str(payment.get("error_description") or "Payment failed.")[:300]
             return replace(base, outcome="failed", failure_reason=reason)
+        # refund.processed: payload.refund.entity {id, amount, currency, payment_id}
+        # plus payload.payment.entity (with order_id) — Razorpay webhook docs.
+        if event_type == "refund.processed":
+            refund = (payload.get("refund") or {}).get("entity") or {}
+            return replace(
+                base, outcome="refunded", reference=str(refund.get("id") or "")[:100],
+                amount_minor=int(refund["amount"]) if "amount" in refund else None,
+                currency=str(refund.get("currency") or "") or base.currency,
+            )
+        if event_type in ("payment.dispute.created", "payment.dispute.lost"):
+            dispute = (payload.get("dispute") or {}).get("entity") or {}
+            return replace(
+                base, outcome="disputed" if event_type.endswith("created") else "dispute_lost",
+                reference=str(dispute.get("id") or "")[:100],
+                failure_reason=str(dispute.get("reason_code") or "")[:300],
+            )
         return base
 
 

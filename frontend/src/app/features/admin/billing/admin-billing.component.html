@@ -1,9 +1,12 @@
 <section class="ab">
   <div class="ab-top">
-    <nav class="ab-tabs" aria-label="Subscription sections">
+    <nav class="ab-tabs" aria-label="Billing sections">
+      <button type="button" [class.on]="view === 'overview'" (click)="setView('overview')">Overview</button>
       <button type="button" [class.on]="view === 'subscriptions'" (click)="setView('subscriptions')">Subscriptions</button>
       <button type="button" [class.on]="view === 'payments'" (click)="setView('payments')">Payments</button>
+      <button type="button" [class.on]="view === 'usage'" (click)="setView('usage')">Screenshot usage</button>
       <button type="button" [class.on]="view === 'plans'" (click)="setView('plans')">Plans &amp; pricing</button>
+      <button type="button" [class.on]="view === 'audit'" (click)="setView('audit')">Audit log</button>
     </nav>
     <form class="ab-lookup" (ngSubmit)="lookupUser()">
       <input name="lookup" [(ngModel)]="userLookup" placeholder="User ID or email" aria-label="Find user by ID or email" />
@@ -11,8 +14,8 @@
     </form>
   </div>
 
-  @if (error()) { <div class="banner error">{{ error() }}</div> }
-  @if (info()) { <div class="banner info">{{ info() }}</div> }
+  @if (error()) { <div class="banner error" role="alert">{{ error() }}</div> }
+  @if (info()) { <div class="banner info" role="status">{{ info() }}</div> }
 
   <!-- ================================================= user detail -->
   @if (detail(); as d) {
@@ -26,50 +29,63 @@
       </div>
       <p class="small">
         @if (d.current) {
-          Active: <strong>{{ d.current.plan_name }}</strong> · access until <strong>{{ d.access_ends_at | date: 'medium' }}</strong>
+          Applicable: <strong>{{ d.current.plan_name }}</strong> · access until <strong>{{ d.access_ends_at | date: 'medium' }}</strong>
+          @if (d.usage) { · screenshots <strong>{{ d.usage.used }} / {{ d.usage.allowance }}</strong> ({{ d.usage.remaining }} left, {{ d.usage.total_remaining }} across all plans) }
         } @else {
           <span class="muted">No active subscription.</span>
         }
       </p>
 
       <div class="ab-grant">
-        <h4>Grant access (manual — recorded separately from payments)</h4>
+        <h4>Grant access (manual — recorded separately from payments, never shown as paid)</h4>
         <div class="row">
           <select [(ngModel)]="grantPlanId" aria-label="Plan">
             <option [ngValue]="null">— custom days —</option>
-            @for (p of plans(); track p.id) { <option [ngValue]="p.id">{{ p.name }} ({{ duration(p.duration_days) }})</option> }
+            @for (p of plans(); track p.id) { <option [ngValue]="p.id">{{ p.name }} ({{ hours(p.duration_hours, p.duration_unit) }}, {{ p.screenshot_allowance }} screenshots)</option> }
           </select>
           <input type="number" min="1" max="3660" [(ngModel)]="grantDays" placeholder="Days (overrides plan)" aria-label="Days" />
+          <input type="number" min="0" max="100000" [(ngModel)]="grantCredits" placeholder="Screenshots (default: plan)" aria-label="Screenshot credits" />
           <input class="grow" [(ngModel)]="grantReason" maxlength="500" placeholder="Reason (required, audited)" aria-label="Reason" />
           <button type="button" class="btn-primary btn-sm" [disabled]="busy()" (click)="grant()">Grant</button>
         </div>
       </div>
 
-      <h4>Subscription periods</h4>
+      <h4>Subscriptions</h4>
       <div class="row small">
         <label>Extend by <input type="number" min="1" max="3660" [(ngModel)]="actionDays" class="w80" /> days</label>
-        <input class="grow" [(ngModel)]="actionReason" maxlength="500" placeholder="Reason for extend / revoke (required, audited)" aria-label="Action reason" />
+        <input class="grow" [(ngModel)]="actionReason" maxlength="500" placeholder="Reason for extend / cancel / revoke / credit change (required, audited)" aria-label="Action reason" />
       </div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Plan</th><th>Source</th><th>Starts</th><th>Expires</th><th>Status</th><th>Amount</th><th></th></tr></thead>
+          <thead><tr><th>ID</th><th>Plan</th><th>Source</th><th>Activated</th><th>Expires</th><th>Status</th><th>Screenshots</th><th>Amount</th><th></th></tr></thead>
           <tbody>
             @for (s of d.subscriptions; track s.id) {
               <tr>
+                <td class="mono small">#{{ s.id }}</td>
                 <td>{{ s.plan_name }}</td>
                 <td class="cap">{{ s.source }}</td>
-                <td>{{ s.starts_at | date: 'mediumDate' }}</td>
+                <td>{{ s.starts_at | date: 'medium' }}</td>
                 <td>{{ s.expires_at | date: 'medium' }}</td>
                 <td><span class="status" [attr.data-status]="s.status">{{ s.status }}</span></td>
-                <td>{{ s.source === 'payment' ? money(s.amount_minor, s.currency) : '—' }}</td>
+                <td>
+                  {{ s.screenshots_used }} / {{ s.screenshot_allowance }}
+                  @if (isLive(s)) {
+                    <span class="credit-edit">
+                      <input type="number" min="0" class="w80" [(ngModel)]="creditDraft[s.id]" [attr.aria-label]="'New allowance for subscription ' + s.id" />
+                      <button type="button" class="btn-ghost btn-sm" [disabled]="busy()" (click)="saveCredits(s)">Set</button>
+                    </span>
+                  }
+                </td>
+                <td>{{ s.source === 'payment' ? money(s.amount_minor, s.currency) : 'Not paid' }}</td>
                 <td class="actions">
-                  @if (s.status !== 'revoked') {
+                  @if (isLive(s)) {
                     <button type="button" class="btn-ghost btn-sm" [disabled]="busy()" (click)="extend(s)">Extend</button>
+                    <button type="button" class="btn-ghost btn-sm" [disabled]="busy()" (click)="cancelSub(s)">Cancel</button>
                     <button type="button" class="btn-ghost btn-sm danger" [disabled]="busy()" (click)="revoke(s)">Revoke</button>
                   }
                 </td>
               </tr>
-            } @empty { <tr><td colspan="7" class="muted">None.</td></tr> }
+            } @empty { <tr><td colspan="9" class="muted">None.</td></tr> }
           </tbody>
         </table>
       </div>
@@ -80,7 +96,7 @@
           <thead><tr><th>Date</th><th>Plan</th><th>Amount</th><th>Status</th><th>Gateway</th><th>Order / payment ID</th></tr></thead>
           <tbody>
             @for (p of d.payments; track p.id) {
-              <tr>
+              <tr class="click" (click)="openPayment(p)" tabindex="0" (keydown.enter)="openPayment(p)">
                 <td>{{ (p.paid_at || p.created_at) | date: 'medium' }}</td>
                 <td>{{ p.plan_name }}</td>
                 <td>{{ money(p.amount_minor, p.currency) }}</td>
@@ -97,7 +113,7 @@
       <ul class="audit small">
         @for (a of d.audit; track a.id) {
           <li>
-            <strong class="cap">{{ a.action.replace('_', ' ') }}</strong>
+            <strong class="cap">{{ label(a.action) }}</strong>
             · {{ a.created_at | date: 'medium' }}
             · {{ a.actor_user_id ? 'admin #' + a.actor_user_id : 'system' }}
             @if (a.reason) { · <em>{{ a.reason }}</em> }
@@ -107,17 +123,106 @@
     </div>
   }
 
+  <!-- ================================================= payment detail -->
+  @if (paymentDetail(); as pd) {
+    <div class="card ab-detail">
+      <div class="ab-detail-head">
+        <h3>Payment #{{ pd.payment.id }} <span class="status" [attr.data-status]="pd.payment.status">{{ pd.payment.status }}</span></h3>
+        <button type="button" class="btn-ghost btn-sm" (click)="paymentDetail.set(null)">Close</button>
+      </div>
+      <dl class="kv small">
+        <dt>User</dt><dd>{{ pd.payment.user_email }} #{{ pd.payment.user_id }}</dd>
+        <dt>Plan</dt><dd>{{ pd.payment.plan_name }} · {{ hours(pd.payment.duration_hours) }} · {{ pd.payment.screenshot_allowance }} screenshots</dd>
+        <dt>Amount</dt><dd>{{ money(pd.payment.amount_minor, pd.payment.currency) }} ({{ pd.payment.currency }})</dd>
+        <dt>Gateway</dt><dd class="cap">{{ pd.payment.gateway }} · {{ pd.payment.method || '—' }} · verified via {{ pd.payment.verified_via || '—' }}</dd>
+        <dt>Order ID</dt><dd class="mono">{{ pd.payment.gateway_order_id }}</dd>
+        <dt>Payment ID</dt><dd class="mono">{{ pd.payment.gateway_payment_id || '—' }}</dd>
+        <dt>Receipt</dt><dd class="mono">{{ pd.payment.receipt }}</dd>
+        <dt>Created / paid</dt><dd>{{ pd.payment.created_at | date: 'medium' }} / {{ (pd.payment.paid_at | date: 'medium') || '—' }}</dd>
+        @if (pd.payment.refunded_at || pd.payment.refund_reference) {
+          <dt>Refund / dispute</dt><dd>{{ (pd.payment.refunded_at | date: 'medium') || '' }} <span class="mono">{{ pd.payment.refund_reference }}</span></dd>
+        }
+        @if (pd.payment.failure_reason) { <dt>Note</dt><dd>{{ pd.payment.failure_reason }}</dd> }
+        <dt>Subscription</dt><dd>{{ pd.subscription ? '#' + pd.subscription.id + ' · ' + pd.subscription.status : 'none' }}</dd>
+      </dl>
+      <h4>Webhook events</h4>
+      <ul class="audit small">
+        @for (e of pd.webhook_events; track e.id) {
+          <li><strong>{{ e.event_type }}</strong> · {{ e.received_at | date: 'medium' }} · <span class="mono">{{ e.event_id }}</span>
+            @if (e.processing_error) { · <span class="danger">{{ e.processing_error }}</span> }</li>
+        } @empty { <li class="muted">No webhooks received for this payment.</li> }
+      </ul>
+      <p class="muted small">Refunds are issued in the gateway dashboard; the refund webhook then updates this payment and ends the access automatically.</p>
+    </div>
+  }
+
+  <!-- ====================================================== overview -->
+  @if (view === 'overview') {
+    <form class="filters" (ngSubmit)="loadOverview()">
+      <label class="small">From <input type="date" name="of" [(ngModel)]="range.date_from" /></label>
+      <label class="small">to <input type="date" name="ot" [(ngModel)]="range.date_to" /></label>
+      <button type="submit" class="btn-primary btn-sm">Apply</button>
+      <span class="muted small">Dates are UTC days. Active/expired counts are as of now.</span>
+    </form>
+    @if (overview(); as o) {
+      <div class="kpis">
+        <div class="kpi"><span class="kpi-label">Registered users</span><strong>{{ o.total_users | number }}</strong></div>
+        <div class="kpi"><span class="kpi-label">Active subscriptions</span><strong>{{ o.active_subscriptions | number }}</strong></div>
+        <div class="kpi"><span class="kpi-label">Expired</span><strong>{{ o.expired_subscriptions | number }}</strong></div>
+        <div class="kpi"><span class="kpi-label">Cancelled / revoked / refunded</span><strong>{{ o.ended_subscriptions | number }}</strong></div>
+        <div class="kpi"><span class="kpi-label">Pending payments</span><strong>{{ (o.payments_by_status['created'] || 0) | number }}</strong></div>
+        <div class="kpi"><span class="kpi-label">Successful payments</span><strong>{{ (o.payments_by_status['paid'] || 0) | number }}</strong></div>
+        <div class="kpi"><span class="kpi-label">Failed payments</span><strong>{{ (o.payments_by_status['failed'] || 0) | number }}</strong></div>
+        <div class="kpi"><span class="kpi-label">Payment success rate</span><strong>{{ o.payment_success_rate === null ? '—' : (o.payment_success_rate * 100 | number: '1.0-1') + '%' }}</strong></div>
+        <div class="kpi"><span class="kpi-label">Screenshots analyzed</span><strong>{{ o.screenshots_analyzed | number }}</strong>
+          <span class="muted small">{{ o.screenshot_requests | number }} requests · {{ o.screenshot_failures | number }} failed</span></div>
+      </div>
+
+      <div class="ov-grid">
+        <div class="card">
+          <h4>Revenue by currency</h4>
+          <p class="muted small">Shown separately — INR and USD are never added together.</p>
+          @for (r of o.revenue_by_currency; track r.currency) {
+            <p class="rev"><strong>{{ money(r.amount_minor, r.currency) }}</strong> <span class="muted small">{{ r.currency }} · {{ r.count }} payment(s)</span></p>
+          } @empty { <p class="muted small">No paid payments in this range.</p> }
+          @if (o.refunds_by_currency.length) {
+            <h4>Refunded</h4>
+            @for (r of o.refunds_by_currency; track r.currency) {
+              <p class="small">{{ money(r.amount_minor, r.currency) }} <span class="muted">· {{ r.count }}</span></p>
+            }
+          }
+        </div>
+        <div class="card">
+          <h4>Subscriptions by plan</h4>
+          @for (e of planEntries(o); track e[0]) {
+            <div class="bar-row"><span class="bar-label">{{ e[0] }}</span>
+              <span class="bar"><span class="bar-fill" [style.width.%]="(e[1] / maxOf(planEntries(o))) * 100"></span></span>
+              <span class="bar-val">{{ e[1] }}</span></div>
+          } @empty { <p class="muted small">No subscriptions in this range.</p> }
+        </div>
+        <div class="card">
+          <h4>Payments by status</h4>
+          @for (e of statusEntries(o); track e[0]) {
+            <div class="bar-row"><span class="bar-label cap">{{ e[0] }}</span>
+              <span class="bar"><span class="bar-fill" [attr.data-status]="e[0]" [style.width.%]="(e[1] / maxOf(statusEntries(o))) * 100"></span></span>
+              <span class="bar-val">{{ e[1] }}</span></div>
+          } @empty { <p class="muted small">No payments in this range.</p> }
+        </div>
+      </div>
+    }
+  }
+
   <!-- ================================================= subscriptions -->
   @if (view === 'subscriptions') {
     <form class="filters" (ngSubmit)="loadSubs()">
-      <input name="q" [(ngModel)]="subFilters.q" placeholder="User ID or email" />
+      <input name="q" [(ngModel)]="subFilters.q" placeholder="User ID, email, #sub ID or plan name" class="grow" />
       <select name="plan" [(ngModel)]="subFilters.plan_id">
         <option [ngValue]="null">All plans</option>
         @for (p of plans(); track p.id) { <option [ngValue]="p.id">{{ p.name }}</option> }
       </select>
       <select name="status" [(ngModel)]="subFilters.status">
         <option value="">Any status</option><option value="active">Active</option><option value="scheduled">Scheduled</option>
-        <option value="expired">Expired</option><option value="revoked">Revoked</option>
+        <option value="expired">Expired</option><option value="cancelled">Cancelled</option><option value="revoked">Revoked</option><option value="refunded">Refunded</option>
       </select>
       <select name="source" [(ngModel)]="subFilters.source">
         <option value="">Any source</option><option value="payment">Payment</option><option value="manual">Manual</option><option value="trial">Trial</option>
@@ -125,28 +230,45 @@
       <select name="gateway" [(ngModel)]="subFilters.gateway">
         <option value="">Any gateway</option><option value="razorpay">Razorpay</option><option value="cashfree">Cashfree</option><option value="mock">Test</option>
       </select>
-      <label class="small">Expires from <input type="date" name="ef" [(ngModel)]="subFilters.expires_from" /></label>
-      <label class="small">to <input type="date" name="et" [(ngModel)]="subFilters.expires_to" /></label>
+      <select name="cur" [(ngModel)]="subFilters.currency">
+        <option value="">Any currency</option>
+        @for (c of currencies(); track c.code) { <option [value]="c.code">{{ c.code }}</option> }
+      </select>
+      <select name="pst" [(ngModel)]="subFilters.payment_status">
+        <option value="">Any payment status</option><option value="paid">Paid</option><option value="refunded">Refunded</option><option value="disputed">Disputed</option>
+      </select>
+      <label class="small">Created <input type="date" name="cf" [(ngModel)]="subFilters.created_from" /> – <input type="date" name="ct" [(ngModel)]="subFilters.created_to" /></label>
+      <label class="small">Activated <input type="date" name="sf" [(ngModel)]="subFilters.starts_from" /> – <input type="date" name="st" [(ngModel)]="subFilters.starts_to" /></label>
+      <label class="small">Expires <input type="date" name="ef" [(ngModel)]="subFilters.expires_from" /> – <input type="date" name="et" [(ngModel)]="subFilters.expires_to" /></label>
       <button type="submit" class="btn-primary btn-sm">Apply</button>
     </form>
     @if (subs(); as s) {
-      <p class="muted small">{{ s.total }} result(s)</p>
+      <p class="muted small">{{ s.total }} result(s) · click a row for the user's full billing</p>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>User</th><th>Plan</th><th>Source</th><th>Gateway</th><th>Amount</th><th>Starts</th><th>Expires</th><th>Status</th></tr></thead>
+          <thead><tr>
+            <th>Sub</th><th>User</th><th>Plan</th><th>Status</th>
+            <th><button type="button" class="th-sort" (click)="sortSubs('starts_at')">Activated{{ sortMark(subFilters.sort, subFilters.order, 'starts_at') }}</button></th>
+            <th><button type="button" class="th-sort" (click)="sortSubs('expires_at')">Expires{{ sortMark(subFilters.sort, subFilters.order, 'expires_at') }}</button></th>
+            <th><button type="button" class="th-sort" (click)="sortSubs('screenshots_used')">Screenshots{{ sortMark(subFilters.sort, subFilters.order, 'screenshots_used') }}</button></th>
+            <th><button type="button" class="th-sort" (click)="sortSubs('amount_minor')">Amount{{ sortMark(subFilters.sort, subFilters.order, 'amount_minor') }}</button></th>
+            <th>Payment ref</th><th>Renewal</th>
+          </tr></thead>
           <tbody>
             @for (r of s.items; track r.id) {
               <tr class="click" (click)="openUser(r.user_id)" tabindex="0" (keydown.enter)="openUser(r.user_id)">
+                <td class="mono small">#{{ r.id }}</td>
                 <td>{{ r.user_email }} <span class="muted small">#{{ r.user_id }}</span></td>
-                <td>{{ r.plan_name }}</td>
-                <td class="cap">{{ r.source }}</td>
-                <td class="cap">{{ r.gateway || '—' }}</td>
-                <td>{{ r.source === 'payment' ? money(r.amount_minor, r.currency) : '—' }}</td>
-                <td>{{ r.starts_at | date: 'mediumDate' }}</td>
-                <td>{{ r.expires_at | date: 'mediumDate' }}</td>
+                <td>{{ r.plan_name }} <span class="muted small cap">{{ r.source }}</span></td>
                 <td><span class="status" [attr.data-status]="r.status">{{ r.status }}</span></td>
+                <td>{{ r.starts_at | date: 'medium' }}</td>
+                <td>{{ r.expires_at | date: 'medium' }}</td>
+                <td>{{ r.screenshots_used }} / {{ r.screenshot_allowance }} <span class="muted small">({{ r.screenshots_remaining }} left)</span></td>
+                <td>{{ r.source === 'payment' ? money(r.amount_minor, r.currency) : 'Not paid' }}</td>
+                <td class="mono small">{{ r.gateway_payment_id || (r.payment_id ? '#' + r.payment_id : '—') }} @if (r.gateway) { <span class="muted cap">{{ r.gateway }}</span> }</td>
+                <td class="small">{{ r.auto_renew ? 'Auto-renew' : 'No auto-renew' }}</td>
               </tr>
-            } @empty { <tr><td colspan="8" class="muted">No subscriptions match.</td></tr> }
+            } @empty { <tr><td colspan="10" class="muted">No subscriptions match.</td></tr> }
           </tbody>
         </table>
       </div>
@@ -167,39 +289,52 @@
         @for (p of plans(); track p.id) { <option [ngValue]="p.id">{{ p.name }}</option> }
       </select>
       <select name="pstatus" [(ngModel)]="payFilters.status">
-        <option value="">Any status</option><option value="paid">Paid</option><option value="created">Created</option>
-        <option value="failed">Failed</option><option value="cancelled">Cancelled</option>
+        <option value="">Any status</option><option value="paid">Paid</option><option value="created">Pending</option>
+        <option value="failed">Failed</option><option value="cancelled">Cancelled</option><option value="refunded">Refunded</option><option value="disputed">Disputed</option>
       </select>
       <select name="pgw" [(ngModel)]="payFilters.gateway">
         <option value="">Any gateway</option><option value="razorpay">Razorpay</option><option value="cashfree">Cashfree</option><option value="mock">Test</option>
       </select>
+      <select name="pcur" [(ngModel)]="payFilters.currency">
+        <option value="">Any currency</option>
+        @for (c of currencies(); track c.code) { <option [value]="c.code">{{ c.code }}</option> }
+      </select>
+      <label class="small">Created <input type="date" name="pdf" [(ngModel)]="payFilters.date_from" /> – <input type="date" name="pdt" [(ngModel)]="payFilters.date_to" /></label>
       <button type="submit" class="btn-primary btn-sm">Apply</button>
     </form>
     @if (payments(); as s) {
-      <p class="muted small">{{ s.total }} payment(s)</p>
+      <p class="muted small">{{ s.total }} payment(s) · click a row for details</p>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Date</th><th>User</th><th>Plan</th><th>Amount</th><th>Status</th><th>Gateway</th><th>Order / payment ID</th><th></th></tr></thead>
+          <thead><tr>
+            <th>ID</th>
+            <th><button type="button" class="th-sort" (click)="sortPayments('created_at')">Date{{ sortMark(payFilters.sort, payFilters.order, 'created_at') }}</button></th>
+            <th>User</th><th>Plan</th>
+            <th><button type="button" class="th-sort" (click)="sortPayments('amount_minor')">Amount{{ sortMark(payFilters.sort, payFilters.order, 'amount_minor') }}</button></th>
+            <th>Status</th><th>Gateway</th><th>Order / payment ID</th><th>Sub</th><th></th>
+          </tr></thead>
           <tbody>
             @for (p of s.items; track p.id) {
-              <tr>
+              <tr class="click" (click)="openPayment(p)" tabindex="0" (keydown.enter)="openPayment(p)">
+                <td class="mono small">#{{ p.id }}</td>
                 <td>{{ (p.paid_at || p.created_at) | date: 'medium' }}</td>
-                <td><button type="button" class="link" (click)="openUser(p.user_id)">{{ p.user_email }}</button></td>
+                <td><button type="button" class="link" (click)="$event.stopPropagation(); openUser(p.user_id)">{{ p.user_email }}</button> <span class="muted small">#{{ p.user_id }}</span></td>
                 <td>{{ p.plan_name }}</td>
                 <td>{{ money(p.amount_minor, p.currency) }}</td>
                 <td>
-                  <span class="status" [attr.data-status]="p.status">{{ p.status }}</span>
+                  <span class="status" [attr.data-status]="p.status">{{ p.status === 'created' ? 'pending' : p.status }}</span>
                   @if (p.failure_reason) { <div class="muted small">{{ p.failure_reason }}</div> }
                 </td>
                 <td class="cap">{{ p.gateway }}</td>
                 <td class="mono small">{{ p.gateway_order_id }}<br />{{ p.gateway_payment_id || '' }}</td>
+                <td class="mono small">{{ p.subscription_id ? '#' + p.subscription_id : '—' }}</td>
                 <td>
-                  @if (p.status !== 'paid') {
-                    <button type="button" class="btn-ghost btn-sm" [disabled]="busy()" (click)="reconcile(p)" title="Ask the gateway for the current status">Re-check</button>
+                  @if (p.status !== 'paid' && p.status !== 'refunded') {
+                    <button type="button" class="btn-ghost btn-sm" [disabled]="busy()" (click)="$event.stopPropagation(); reconcile(p)" title="Ask the gateway for the current status">Re-check</button>
                   }
                 </td>
               </tr>
-            } @empty { <tr><td colspan="8" class="muted">No payments match.</td></tr> }
+            } @empty { <tr><td colspan="10" class="muted">No payments match.</td></tr> }
           </tbody>
         </table>
       </div>
@@ -211,33 +346,117 @@
     }
   }
 
+  <!-- ========================================================= usage -->
+  @if (view === 'usage') {
+    <form class="filters" (ngSubmit)="loadUsage()">
+      <input name="uq" [(ngModel)]="usageFilters.q" placeholder="User ID, email or request ID" class="grow" />
+      <select name="uplan" [(ngModel)]="usageFilters.plan_id">
+        <option [ngValue]="null">All plans</option>
+        @for (p of plans(); track p.id) { <option [ngValue]="p.id">{{ p.name }}</option> }
+      </select>
+      <input name="usub" type="number" min="1" [(ngModel)]="usageFilters.subscription_id" placeholder="Subscription ID" class="w140" />
+      <select name="ust" [(ngModel)]="usageFilters.status">
+        <option value="">Any status</option><option value="completed">Completed</option><option value="failed">Failed</option><option value="reserved">In progress</option>
+      </select>
+      <label class="small check-inline"><input type="checkbox" name="ure" [(ngModel)]="usageFilters.retried" /> Retried only</label>
+      <label class="small">From <input type="date" name="udf" [(ngModel)]="usageFilters.date_from" /> – <input type="date" name="udt" [(ngModel)]="usageFilters.date_to" /></label>
+      <button type="submit" class="btn-primary btn-sm">Apply</button>
+    </form>
+    <p class="muted small">One credit = one screenshot. Failed analyses are not charged. Records are read-only — correct an allowance from the user's subscription instead.</p>
+    @if (usage(); as u) {
+      <p class="muted small">{{ u.total }} request(s)</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Time</th><th>User</th><th>Plan / sub</th><th>Request ID</th><th>Screenshots</th><th>Charged</th><th>Status</th><th>Attempts</th></tr></thead>
+          <tbody>
+            @for (r of u.items; track r.id) {
+              <tr>
+                <td>{{ r.created_at | date: 'medium' }}</td>
+                <td><button type="button" class="link" (click)="openUser(r.user_id)">{{ r.user_email }}</button> <span class="muted small">#{{ r.user_id }}</span></td>
+                <td>{{ r.plan_name || '—' }} <span class="muted small mono">{{ r.subscription_id ? '#' + r.subscription_id : '' }}</span></td>
+                <td class="mono small">{{ r.request_id }}</td>
+                <td>{{ r.credits }}</td>
+                <td>{{ r.credits_consumed }}</td>
+                <td><span class="status" [attr.data-status]="r.status">{{ r.status }}</span> @if (r.failure_code) { <span class="muted small">{{ r.failure_code }}</span> }</td>
+                <td [class.warn]="r.attempts > 1">{{ r.attempts }}</td>
+              </tr>
+            } @empty { <tr><td colspan="8" class="muted">No screenshot requests match.</td></tr> }
+          </tbody>
+        </table>
+      </div>
+      <div class="pager">
+        <button type="button" class="btn-ghost btn-sm" [disabled]="u.page <= 1" (click)="loadUsage(u.page - 1)">‹ Prev</button>
+        <span class="small muted">Page {{ u.page }} / {{ pages(u) }}</span>
+        <button type="button" class="btn-ghost btn-sm" [disabled]="u.page >= pages(u)" (click)="loadUsage(u.page + 1)">Next ›</button>
+      </div>
+    }
+  }
+
   <!-- ========================================================= plans -->
   @if (view === 'plans') {
+    <div class="card">
+      <h4>Currencies</h4>
+      <p class="muted small">"Shown" puts the currency in the pricing-page selector. "Payments" allows checkout in it — it only works when a configured gateway accepts that currency (set <span class="mono">RAZORPAY_CURRENCIES</span> / <span class="mono">CASHFREE_CURRENCIES</span> on the server after enabling international payments at the gateway).</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Currency</th><th>Live prices</th><th>Shown</th><th>Payments</th><th>Payable now</th></tr></thead>
+          <tbody>
+            @for (c of currencies(); track c.code) {
+              <tr>
+                <td><strong>{{ c.code }}</strong> <span class="muted small">{{ c.name }}</span></td>
+                <td>{{ c.live_prices }} / {{ plans().length }}</td>
+                <td><button type="button" class="btn-ghost btn-sm" (click)="toggleCurrency(c, 'display_enabled')">{{ c.display_enabled ? 'Shown' : 'Hidden' }}</button></td>
+                <td><button type="button" class="btn-ghost btn-sm" (click)="toggleCurrency(c, 'payments_enabled')">{{ c.payments_enabled ? 'Enabled' : 'Disabled' }}</button></td>
+                <td>
+                  @if (c.payable_now) { <span class="status" data-status="active">Yes</span> <span class="muted small">{{ c.gateways.join(', ') }}</span> }
+                  @else if (c.payments_enabled) { <span class="status" data-status="scheduled">No gateway accepts {{ c.code }}</span> }
+                  @else { <span class="muted small">Display only</span> }
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+      <input class="grow" [(ngModel)]="currencyReason" maxlength="500" placeholder="Reason for currency changes (optional, audited)" aria-label="Currency change reason" />
+    </div>
+
     <div class="row">
-      <p class="muted small grow">Changes apply to new checkouts immediately. Past payments keep the amount actually paid. Plans can be deactivated but never deleted.</p>
+      <p class="muted small grow">Changes apply to new checkouts immediately. Past payments keep the amount and currency actually paid. Prices are per currency and never converted automatically. Plans can be deactivated but never deleted.</p>
       <button type="button" class="btn-primary btn-sm" (click)="newPlan()">+ New plan</button>
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Order</th><th>Plan</th><th>Price</th><th>Duration</th><th>Trial</th><th>Promo</th><th>Status</th><th></th></tr></thead>
+        <thead><tr><th>Order</th><th>Plan</th><th>Duration</th><th>Screenshots</th><th>Billing</th>
+          @for (c of currencies(); track c.code) { <th>{{ c.code }} price</th> }
+          <th>Status</th><th></th></tr></thead>
         <tbody>
           @for (p of plans(); track p.id) {
             <tr>
               <td>{{ p.sort_order }}</td>
-              <td>{{ p.name }} <span class="muted small mono">{{ p.code }}</span></td>
-              <td>{{ money(p.regular_price_minor, p.currency) }}</td>
-              <td>{{ duration(p.duration_days) }}</td>
-              <td>{{ p.trial_days ? duration(p.trial_days) : '—' }}</td>
+              <td>{{ p.name }} <span class="muted small mono">{{ p.code }}</span> @if (p.is_highlighted) { <span class="tag">Recommended</span> }</td>
+              <td>{{ hours(p.duration_hours, p.duration_unit) }}</td>
+              <td>{{ p.screenshot_allowance }}</td>
+              <td class="small">{{ p.billing_type === 'recurring' ? 'Recurring (' + (p.billing_interval_days || '?') + 'd, prepaid)' : 'One-time' }}</td>
+              @for (c of currencies(); track c.code) {
+                <td>
+                  @if (currentPrice(p, c.code); as cp) {
+                    {{ money(cp.amount_minor, c.code) }} @if (!cp.is_active) { <span class="muted small">(off)</span> }
+                  } @else { <span class="muted">not set</span> }
+                  <button type="button" class="link small" (click)="editPrice(p, c.code)">edit</button>
+                  @if (c.code === p.currency && p.promo_price_minor !== null) {
+                    <div class="muted small">promo {{ money(p.promo_price_minor, p.currency) }} {{ p.is_promo ? '(live)' : '(not live)' }}</div>
+                  }
+                </td>
+              }
               <td>
-                @if (p.promo_price_minor !== null) {
-                  {{ money(p.promo_price_minor, p.currency) }}
-                  <span class="muted small">{{ p.is_promo ? '(live)' : '(not live)' }}</span>
-                } @else { — }
+                <span class="status" [attr.data-status]="p.is_active ? 'active' : 'expired'">{{ p.is_active ? 'active' : 'inactive' }}</span>
+                @if (!p.is_public) { <div class="muted small">hidden</div> }
               </td>
-              <td><span class="status" [attr.data-status]="p.is_active ? 'active' : 'expired'">{{ p.is_active ? 'active' : 'inactive' }}</span></td>
               <td class="actions">
                 <button type="button" class="btn-ghost btn-sm" (click)="editPlan(p)">Edit</button>
-                <button type="button" class="btn-ghost btn-sm" (click)="togglePlan(p)">{{ p.is_active ? 'Deactivate' : 'Activate' }}</button>
+                <button type="button" class="btn-ghost btn-sm" (click)="togglePlan(p, 'is_active')">{{ p.is_active ? 'Deactivate' : 'Activate' }}</button>
+                <button type="button" class="btn-ghost btn-sm" (click)="togglePlan(p, 'is_public')">{{ p.is_public ? 'Hide' : 'Show' }}</button>
+                <button type="button" class="btn-ghost btn-sm" (click)="showHistory(p)">History</button>
               </td>
             </tr>
           }
@@ -245,26 +464,93 @@
       </table>
     </div>
 
+    @if (priceForm; as pf) {
+      <form class="card plan-form" (ngSubmit)="savePrice()">
+        <h4>{{ pf.currency }} price — {{ pf.plan.name }}</h4>
+        <p class="muted small">Set explicitly. No exchange rate is applied. Changing the amount closes the current price and starts a new one (history kept).</p>
+        <div class="grid">
+          <label>Price ({{ pf.currency }})<input name="pamt" type="number" min="0" step="0.01" [(ngModel)]="pf.amount" required /></label>
+          <label>Starts (empty = now)<input name="pefrom" type="datetime-local" [(ngModel)]="pf.effective_from" /></label>
+          <label>Ends (optional)<input name="peto" type="datetime-local" [(ngModel)]="pf.effective_to" /></label>
+          <label>Razorpay plan ID (optional mapping)<input name="prz" [(ngModel)]="pf.razorpay_plan_id" maxlength="120" placeholder="plan_…" /></label>
+          <label class="span2">Reason (audited)<input name="preason" [(ngModel)]="pf.reason" maxlength="500" /></label>
+          <label class="check"><input name="pact" type="checkbox" [(ngModel)]="pf.is_active" /> Price active</label>
+        </div>
+        <div class="row end">
+          <button type="button" class="btn-ghost btn-sm" (click)="priceForm = null">Cancel</button>
+          <button type="submit" class="btn-primary btn-sm" [disabled]="busy()">Save price</button>
+        </div>
+      </form>
+    }
+
+    @if (priceHistory(); as h) {
+      <div class="card">
+        <div class="ab-detail-head">
+          <h4>Price history — {{ h.plan.name }}</h4>
+          <button type="button" class="btn-ghost btn-sm" (click)="priceHistory.set(null)">Close</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Currency</th><th>Amount</th><th>From</th><th>Until</th><th>Active</th><th></th></tr></thead>
+            <tbody>
+              @for (r of h.rows; track r.id) {
+                <tr>
+                  <td>{{ r.currency }}</td><td>{{ money(r.amount_minor, r.currency) }}</td>
+                  <td>{{ r.effective_from | date: 'medium' }}</td><td>{{ (r.effective_to | date: 'medium') || '—' }}</td>
+                  <td>{{ r.is_active ? 'yes' : 'no' }}</td><td>@if (r.is_current) { <span class="tag">current</span> }</td>
+                </tr>
+              } @empty { <tr><td colspan="6" class="muted">No prices yet.</td></tr> }
+            </tbody>
+          </table>
+        </div>
+      </div>
+    }
+
     @if (planForm; as f) {
       <form class="card plan-form" (ngSubmit)="savePlan()">
         <h4>{{ f.id ? 'Edit plan' : 'New plan' }}</h4>
-        <div class="grid">
-          <label>Code (URL-safe, permanent)<input name="code" [(ngModel)]="f.code" [disabled]="!!f.id" required pattern="[a-z0-9][a-z0-9-]{1,48}" /></label>
-          <label>Name<input name="name" [(ngModel)]="f.name" required maxlength="120" /></label>
-          <label>Price ({{ f.currency }})<input name="price" type="number" min="0" step="0.01" [(ngModel)]="f.price" required /></label>
-          <label>Currency<input name="currency" [(ngModel)]="f.currency" maxlength="3" required /></label>
-          <label>Duration (days)<input name="dur" type="number" min="1" max="3660" [(ngModel)]="f.duration_days" required /></label>
-          <label>Free trial (days, 0 = none)<input name="trial" type="number" min="0" max="365" [(ngModel)]="f.trial_days" /></label>
-          <label>Sort order<input name="sort" type="number" [(ngModel)]="f.sort_order" /></label>
-          <label>Badge<input name="badge" [(ngModel)]="f.badge" maxlength="40" placeholder="e.g. Most popular" /></label>
-          <label class="span2">Description<input name="desc" [(ngModel)]="f.description" maxlength="2000" /></label>
-          <label class="span2">Features (one per line)<textarea name="features" rows="4" [(ngModel)]="f.features"></textarea></label>
-          <label>Promo price (empty = none)<input name="promo" type="number" min="0" step="0.01" [(ngModel)]="f.promo_price" /></label>
-          <label>Promo label<input name="plabel" [(ngModel)]="f.promo_label" maxlength="60" /></label>
-          <label>Promo starts<input name="ps" type="datetime-local" [(ngModel)]="f.promo_starts_at" /></label>
-          <label>Promo ends<input name="pe" type="datetime-local" [(ngModel)]="f.promo_ends_at" /></label>
-          <label class="check"><input name="hl" type="checkbox" [(ngModel)]="f.is_highlighted" /> Highlight on pricing page</label>
-          <label class="check"><input name="act" type="checkbox" [(ngModel)]="f.is_active" /> Active (visible &amp; purchasable)</label>
+        <div class="plan-form-body">
+          <div class="grid">
+            <label>Code (URL-safe, permanent)<input name="code" [(ngModel)]="f.code" [disabled]="!!f.id" required pattern="[a-z0-9][a-z0-9-]{1,48}" /></label>
+            <label>Name<input name="name" [(ngModel)]="f.name" required maxlength="120" /></label>
+            <label>Base price ({{ f.currency }})<input name="price" type="number" min="0" step="0.01" [(ngModel)]="f.price" required /></label>
+            <label>Base currency<input name="currency" [(ngModel)]="f.currency" maxlength="3" required [disabled]="!!f.id" /></label>
+            <label>Duration<input name="dur" type="number" min="1" [(ngModel)]="f.duration_value" required /></label>
+            <label>Unit
+              <select name="unit" [(ngModel)]="f.duration_unit"><option value="hours">hours</option><option value="days">days</option></select>
+            </label>
+            <label>Screenshot analyses<input name="shots" type="number" min="0" max="100000" [(ngModel)]="f.screenshot_allowance" required /></label>
+            <label>Billing type
+              <select name="btype" [(ngModel)]="f.billing_type"><option value="one_time">One-time pass</option><option value="recurring">Recurring (sold prepaid)</option></select>
+            </label>
+            @if (f.billing_type === 'recurring') {
+              <label>Billing interval (days)<input name="bint" type="number" min="1" max="3660" [(ngModel)]="f.billing_interval_days" /></label>
+            }
+            <label>Free trial (days, 0 = none)<input name="trial" type="number" min="0" max="365" [(ngModel)]="f.trial_days" /></label>
+            <label>Display order<input name="sort" type="number" [(ngModel)]="f.sort_order" /></label>
+            <label>Badge<input name="badge" [(ngModel)]="f.badge" maxlength="40" placeholder="Only if true (no fake urgency)" /></label>
+            <label class="span2">Description<input name="desc" [(ngModel)]="f.description" maxlength="2000" /></label>
+            <label class="span2">Features (one per line)<textarea name="features" rows="4" [(ngModel)]="f.features"></textarea></label>
+            <label>Promo price (empty = none)<input name="promo" type="number" min="0" step="0.01" [(ngModel)]="f.promo_price" /></label>
+            <label>Promo label<input name="plabel" [(ngModel)]="f.promo_label" maxlength="60" /></label>
+            <label>Promo starts<input name="ps" type="datetime-local" [(ngModel)]="f.promo_starts_at" /></label>
+            <label>Promo ends<input name="pe" type="datetime-local" [(ngModel)]="f.promo_ends_at" /></label>
+            <label class="span2">Reason for change (optional, audited)<input name="reason" [(ngModel)]="f.reason" maxlength="500" /></label>
+            <label class="check"><input name="hl" type="checkbox" [(ngModel)]="f.is_highlighted" /> Recommended plan</label>
+            <label class="check"><input name="act" type="checkbox" [(ngModel)]="f.is_active" /> Active (purchasable)</label>
+            <label class="check"><input name="pub" type="checkbox" [(ngModel)]="f.is_public" /> Listed on pricing page</label>
+          </div>
+          <aside class="preview" aria-label="Pricing card preview">
+            <span class="muted small">Preview</span>
+            <article class="pcard" [class.rec]="f.is_highlighted">
+              @if (f.badge) { <span class="tag">{{ f.badge }}</span> }
+              <span class="pcard-type">{{ billingLabel(f.billing_type) }}</span>
+              <h5>{{ f.name || 'Plan name' }}</h5>
+              <p class="pcard-price">{{ money(previewMinor(f), f.currency || 'INR') }}</p>
+              <p class="small">{{ hours(formHours(f), f.duration_unit) }} · {{ f.screenshot_allowance || 0 }} screenshot analyses</p>
+              <p class="muted small">{{ f.description }}</p>
+            </article>
+          </aside>
         </div>
         <div class="row end">
           <button type="button" class="btn-ghost btn-sm" (click)="planForm = null">Cancel</button>
@@ -272,5 +558,38 @@
         </div>
       </form>
     }
+  }
+
+  <!-- ========================================================= audit -->
+  @if (view === 'audit') {
+    <form class="filters" (ngSubmit)="loadAudit()">
+      <input name="auid" type="number" min="1" [(ngModel)]="auditFilters.user_id" placeholder="User ID" class="w140" />
+      <select name="aact" [(ngModel)]="auditFilters.action">
+        <option value="">Any action</option>
+        @for (a of auditActions; track a) {
+          <option [value]="a">{{ label(a) }}</option>
+        }
+      </select>
+      <label class="small">From <input type="date" name="adf" [(ngModel)]="auditFilters.date_from" /> – <input type="date" name="adt" [(ngModel)]="auditFilters.date_to" /></label>
+      <button type="submit" class="btn-primary btn-sm">Apply</button>
+    </form>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Time</th><th>Action</th><th>By</th><th>User</th><th>Sub / payment / plan</th><th>Reason</th><th>Change</th></tr></thead>
+        <tbody>
+          @for (a of auditRows(); track a.id) {
+            <tr>
+              <td>{{ a.created_at | date: 'medium' }}</td>
+              <td class="cap"><strong>{{ label(a.action) }}</strong></td>
+              <td>{{ a.actor_user_id ? 'admin #' + a.actor_user_id : 'system' }}</td>
+              <td>@if (a.user_id) { <button type="button" class="link" (click)="openUser(a.user_id)">{{ a.user_email || '#' + a.user_id }}</button> } @else { — }</td>
+              <td class="mono small">{{ a.subscription_id ? 'sub #' + a.subscription_id : '' }} {{ a.payment_id ? 'pay #' + a.payment_id : '' }} {{ a.plan_id ? 'plan #' + a.plan_id : '' }}</td>
+              <td><em>{{ a.reason }}</em></td>
+              <td class="mono small details">@for (kv of a.details | keyvalue; track kv.key) { <div>{{ kv.key }}: {{ kv.value | json }}</div> }</td>
+            </tr>
+          } @empty { <tr><td colspan="7" class="muted">No audit entries match.</td></tr> }
+        </tbody>
+      </table>
+    </div>
   }
 </section>

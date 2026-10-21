@@ -1,53 +1,127 @@
 <div class="container pricing">
   <header class="pricing-head">
-    <h1>Simple, prepaid pricing</h1>
+    <span class="eyebrow">Pricing</span>
+    <h1>Pay for the time you need</h1>
     <p class="muted lead">
-      Pay once for a fixed period of access. <strong>No auto-renewal, no stored
-      cards</strong> — when your period ends, you choose whether to buy again.
+      Every plan includes real-time interview guidance and a set number of
+      screenshot analyses. <strong>Prepaid, no auto-renewal, no stored cards</strong> —
+      access runs for the exact time shown, from the moment your payment is confirmed.
     </p>
+
+    @if (currencies().length > 1) {
+      <div class="currency" role="radiogroup" aria-label="Currency">
+        @for (c of currencies(); track c.code) {
+          <button
+            type="button"
+            role="radio"
+            class="cur-opt"
+            [class.on]="currency() === c.code"
+            [attr.aria-checked]="currency() === c.code"
+            (click)="setCurrency(c.code)"
+          >
+            {{ c.code }} <span class="cur-name">{{ c.name }}</span>
+          </button>
+        }
+      </div>
+    }
   </header>
 
   @if (loading()) {
-    <p class="muted center">Loading plans…</p>
+    <div class="plans skeleton" aria-busy="true" aria-label="Loading plans">
+      @for (i of [1, 2, 3]; track i) { <div class="plan sk"></div> }
+    </div>
   } @else if (loadError()) {
     <div class="banner error">{{ loadError() }}</div>
   } @else if (plans().length === 0) {
     <div class="banner info">No plans are available right now. Please check back soon.</div>
   } @else {
-    <div class="plans" [class.few]="plans().length < 4">
-      @for (p of plans(); track p.id) {
-        <article class="plan" [class.highlight]="p.is_highlighted">
-          @if (p.badge) {
-            <span class="plan-badge">{{ p.badge }}</span>
+    @if (noneAvailable()) {
+      <div class="banner info center">
+        Prices in {{ currency() }} are not available yet.
+        @if (currency() !== 'INR') {
+          <button type="button" class="link" (click)="setCurrency('INR')">See prices in INR</button>
+        }
+      </div>
+    } @else if (currencyInfo() && !currencyInfo()!.payable_now) {
+      <div class="banner info center">
+        {{ currency() }} prices are shown for reference — online payment in {{ currency() }} is not enabled yet.
+        @if (currency() !== 'INR') {
+          <button type="button" class="link" (click)="setCurrency('INR')">Pay in INR</button>
+        }
+      </div>
+    }
+
+    @if (passes().length) {
+      <section class="group" aria-labelledby="passes-title">
+        <div class="group-head">
+          <h2 id="passes-title">Passes</h2>
+          <p class="muted small">One-time payment for a short, exact window.</p>
+        </div>
+        <div class="plans">
+          @for (p of passes(); track p.id) {
+            <ng-container *ngTemplateOutlet="card; context: { $implicit: p }" />
           }
-          <h2>{{ p.name }}</h2>
-          <div class="price">
-            <span class="amount">{{ money(p.price_minor, p.currency) }}</span>
-            <span class="per">/ {{ duration(p.duration_days) }}</span>
-          </div>
-          @if (p.is_promo) {
-            <p class="promo small">
-              <s class="muted">{{ money(p.regular_price_minor, p.currency) }}</s>
-              {{ p.promo_label || 'Limited-time price' }}
-            </p>
+        </div>
+      </section>
+    }
+
+    @if (longPlans().length) {
+      <section class="group" aria-labelledby="plans-title">
+        <div class="group-head">
+          <h2 id="plans-title">Longer plans</h2>
+          <p class="muted small">Paid upfront for the whole period. Automatic renewal is not offered — buy again when you need more time.</p>
+        </div>
+        <div class="plans two">
+          @for (p of longPlans(); track p.id) {
+            <ng-container *ngTemplateOutlet="card; context: { $implicit: p }" />
           }
-          <p class="tagline muted">{{ p.description }}</p>
-          <ul class="feats">
-            @for (f of p.features; track f) {
-              <li>✓ {{ f }}</li>
-            }
-          </ul>
-          <p class="renew muted small">≈ {{ perDay(p) }} per day · one-time payment</p>
-          @if (p.trial_days > 0) {
-            <p class="muted small">Includes a {{ duration(p.trial_days) }} free trial (once per account) — start it from Billing.</p>
-          }
-          <button type="button" class="cta" [class.primary]="p.is_highlighted" (click)="choose(p)">
-            Get {{ p.name }}
-          </button>
-        </article>
-      }
-    </div>
+        </div>
+      </section>
+    }
   }
+
+  <ng-template #card let-p>
+    <article class="plan" [class.highlight]="p.is_highlighted" [class.unavailable]="!p.available">
+      @if (p.badge || p.is_highlighted) {
+        <span class="plan-badge">{{ p.badge || 'Recommended' }}</span>
+      }
+      <span class="plan-type">{{ billingLabel(p.billing_type) }}</span>
+      <h3>{{ p.name }}</h3>
+      @if (p.available) {
+        <div class="price">
+          <span class="amount">{{ money(p.price_minor, p.currency) }}</span>
+          <span class="per">{{ p.currency }}</span>
+        </div>
+        @if (p.is_promo) {
+          <p class="promo small">
+            <s class="muted">{{ money(p.regular_price_minor, p.currency) }}</s>
+            {{ p.promo_label || 'Promotional price' }}
+          </p>
+        }
+      } @else {
+        <div class="price"><span class="amount na">—</span></div>
+        <p class="muted small">Not yet priced in {{ p.currency }}.</p>
+      }
+      <ul class="facts">
+        <li><span class="fact-icon" aria-hidden="true">⏱</span><span><strong>{{ hours(p.duration_hours, p.duration_unit) }}</strong> of access</span></li>
+        <li><span class="fact-icon" aria-hidden="true">🖼</span><span><strong>{{ p.screenshot_allowance }}</strong> screenshot analyses</span></li>
+        <li><span class="fact-icon" aria-hidden="true">💳</span><span>{{ p.billing_type === 'recurring' ? 'Paid upfront · no auto-renewal' : 'One-time payment' }}</span></li>
+      </ul>
+      @if (p.description) { <p class="tagline muted small">{{ p.description }}</p> }
+      @if (p.trial_days > 0) {
+        <p class="muted small">Includes a {{ p.trial_days }}-day free trial (once per account) — start it from Billing.</p>
+      }
+      <button
+        type="button"
+        class="cta"
+        [class.primary]="p.is_highlighted"
+        [disabled]="!p.available || !p.payable"
+        (click)="choose(p)"
+      >
+        {{ ctaLabel(p) }}
+      </button>
+    </article>
+  </ng-template>
 
   @if (selected(); as plan) {
     <div class="checkout-backdrop" (click)="cancel()"></div>
@@ -55,21 +129,23 @@
       <h2 id="checkout-title">Checkout — {{ plan.name }}</h2>
       <p class="checkout-total">
         <span>Total</span>
-        <strong>{{ money(plan.price_minor, plan.currency) }}</strong>
+        <strong>{{ money(plan.price_minor, plan.currency) }} <span class="muted small">{{ plan.currency }}</span></strong>
       </p>
       <p class="muted small">
-        {{ duration(plan.duration_days) }} of access, starting now (or right after
-        any time you already have). Price is fixed by our server at checkout.
+        {{ hours(plan.duration_hours, plan.duration_unit) }} of access and
+        {{ plan.screenshot_allowance }} screenshot analyses, starting as soon as the
+        payment is confirmed. This is a separate purchase: any plan you already have
+        keeps its own time and screenshots. The price is fixed by our server.
       </p>
 
-      @if (gateways().length === 0) {
+      @if (currencyGateways().length === 0) {
         <div class="banner info">
-          Online payments are not enabled yet. Please contact support to purchase.
+          Online payments in {{ plan.currency }} are not enabled yet. Please contact support to purchase.
         </div>
       } @else {
         <fieldset class="gw">
           <legend class="small muted">Pay with</legend>
-          @for (g of gateways(); track g.key) {
+          @for (g of currencyGateways(); track g.key) {
             <label class="gw-opt">
               <input type="radio" name="gateway" [value]="g.key" [ngModel]="gateway" (ngModelChange)="onGatewayChange($event)" />
               {{ g.display_name }}
@@ -103,20 +179,22 @@
     <h2>Every plan includes</h2>
     <div class="grid3">
       <div class="card"><h3>⚡ Real-time guidance</h3><p class="muted">Answer points stream in while the question is being answered.</p></div>
+      <div class="card"><h3>🖼 Screenshot analysis</h3><p class="muted">Analyze screenshots of questions in the desktop app. One screenshot uses one analysis from your plan.</p></div>
       <div class="card"><h3>📄 Resume-aware</h3><p class="muted">Suggestions use your saved resume and target job description.</p></div>
       <div class="card"><h3>🎙 Interviewer audio</h3><p class="muted">Meeting or browser-tab audio is transcribed so questions are detected automatically.</p></div>
       <div class="card"><h3>🧠 Model choice</h3><p class="muted">Pick from the AI models enabled on the service at the time you use it.</p></div>
-      <div class="card"><h3>📏 Answer length</h3><p class="muted">Short, medium or long answers — switch any time during a session.</p></div>
-      <div class="card"><h3>🔁 No auto-renewal</h3><p class="muted">Nothing is charged again automatically. Buy another period only if you want one.</p></div>
+      <div class="card"><h3>🔁 No auto-renewal</h3><p class="muted">Nothing is charged again automatically. Buy another pass only if you want one.</p></div>
     </div>
   </section>
 
   <section class="faqs">
     <h2>Billing questions</h2>
-    <details class="card faq"><summary>Does any plan renew automatically?</summary><p class="muted">No. Every purchase is a one-time payment for a fixed period. We don't save cards or set up recurring mandates.</p></details>
-    <details class="card faq"><summary>What if I buy again before my period ends?</summary><p class="muted">The new period is added after your current one ends, so you don't lose any days.</p></details>
+    <details class="card faq"><summary>Does any plan renew automatically?</summary><p class="muted">No. Passes are one-time payments. The Monthly and Quarterly plans are also paid upfront for 30 or 90 days — we don't save cards or set up recurring mandates.</p></details>
+    <details class="card faq"><summary>When exactly does my access end?</summary><p class="muted">Exactly the time shown after your payment is confirmed — not at midnight. A 1 Day Pass bought at 11:15 PM ends at 11:15 PM the next day. Your Billing page shows the end time in your local time zone.</p></details>
+    <details class="card faq"><summary>What counts as a screenshot analysis?</summary><p class="muted">Each screenshot you analyze uses one from your plan's allowance. If an analysis fails on our side, it is not counted.</p></details>
+    <details class="card faq"><summary>What if I buy again before my plan ends?</summary><p class="muted">The new purchase starts immediately with its own time and screenshot allowance. Screenshots are used from the plan that ends soonest first, and nothing you already have is reset.</p></details>
+    <details class="card faq"><summary>Which currency am I charged in?</summary><p class="muted">The one shown at checkout. Prices in each currency are set by us directly — they are not converted live — and you are never charged in a different currency than the one you confirmed.</p></details>
     <details class="card faq"><summary>How do I pay?</summary><p class="muted">Through our payment partners (Razorpay or Cashfree, whichever is enabled). Available methods such as UPI, cards and net banking are offered on the gateway's own checkout page.</p></details>
-    <details class="card faq"><summary>When does my plan start?</summary><p class="muted">As soon as the payment gateway confirms the payment to our server — usually within seconds. If confirmation is delayed, your plan activates automatically when it arrives.</p></details>
     <details class="card faq"><summary>Can I get a refund?</summary><p class="muted">Refunds follow our <a routerLink="/refund-policy">Refund &amp; Cancellation Policy</a>. Please read it before purchasing.</p></details>
     <details class="card faq"><summary>Do prices include taxes?</summary><p class="muted">The amount shown at checkout is the amount you pay. <!-- CONFIRM: GST registration status and whether prices are tax-inclusive. -->Tax treatment is described in our Terms.</p></details>
   </section>

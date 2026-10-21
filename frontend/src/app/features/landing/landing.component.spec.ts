@@ -7,7 +7,9 @@ import { LandingComponent } from './landing.component';
 
 const PLAN: Plan = {
   id: 3, code: '1-month', name: '1 Month', description: 'Coverage', currency: 'INR',
-  duration_days: 30, trial_days: 0, price_minor: 90000, regular_price_minor: 90000,
+  duration_days: 30, duration_hours: 720, duration_unit: 'days', screenshot_allowance: 240,
+  billing_type: 'recurring', billing_interval_days: 30, auto_renew_available: false, available: true, payable: true,
+  trial_days: 0, price_minor: 90000, regular_price_minor: 90000,
   is_promo: false, promo_label: '', promo_ends_at: null, features: ['Real-time AI answer guidance'],
   badge: 'Most popular', is_highlighted: true,
 };

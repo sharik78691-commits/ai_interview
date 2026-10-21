@@ -184,12 +184,12 @@
             <div class="plan-head">
               <h3>{{ p.name }}</h3>
               @if (p.is_highlighted || p.badge) {
-                <span class="pill-badge">{{ p.badge || 'Most popular' }}</span>
+                <span class="pill-badge">{{ p.badge || 'Recommended' }}</span>
               }
             </div>
             <div class="price">
               <strong>{{ money(p.price_minor, p.currency) }}</strong>
-              <span class="muted">/ {{ duration(p.duration_days) }}</span>
+              <span class="muted">/ {{ hours(p.duration_hours, p.duration_unit) }}</span>
             </div>
             @if (p.is_promo) {
               <p class="small muted"><s>{{ money(p.regular_price_minor, p.currency) }}</s> {{ p.promo_label || 'Limited-time price' }}</p>

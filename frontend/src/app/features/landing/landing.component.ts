@@ -1,7 +1,7 @@
 import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
 import { BillingService } from '../../core/services/billing.service';
-import { Plan, durationLabel, formatMoney } from '../../core/models/billing.models';
+import { Plan, durationLabel, formatMoney, hoursLabel } from '../../core/models/billing.models';
 
 @Component({
   selector: 'app-landing',
@@ -24,9 +24,10 @@ export class LandingComponent implements OnInit {
   readonly money = formatMoney;
 
   perDay(p: Plan): string {
-    return formatMoney(Math.round(p.price_minor / Math.max(p.duration_days, 1)), p.currency);
+    return formatMoney(Math.round((p.price_minor * 24) / Math.max(p.duration_hours || p.duration_days * 24, 1)), p.currency);
   }
   readonly duration = durationLabel;
+  readonly hours = hoursLabel;
 
   ngOnInit(): void {
     this.billing.plans().subscribe({

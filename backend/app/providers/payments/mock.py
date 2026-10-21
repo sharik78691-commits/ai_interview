@@ -111,12 +111,13 @@ class MockGateway(PaymentGateway):
         return WebhookEvent(
             event_id=str(body.get("event_id")),
             event_type=str(body.get("type", "mock")),
-            outcome=outcome if outcome in ("paid", "failed") else "ignored",
+            outcome=outcome if outcome in ("paid", "failed", "refunded", "disputed", "dispute_lost") else "ignored",
             order_id=str(body.get("order_id", "")),
             gateway_payment_id=body.get("payment_id"),
             amount_minor=body.get("amount_minor"),
             currency=body.get("currency"),
             method="test",
+            reference=str(body.get("reference", "")),
         )
 
 
