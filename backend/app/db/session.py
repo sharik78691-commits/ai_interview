@@ -36,6 +36,11 @@ engine = create_engine(
 
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
 
+# Every new row with user_id gets its user_email snapshot (see the module).
+from app.db import email_snapshot as _email_snapshot  # noqa: E402
+
+_email_snapshot.install()
+
 
 def get_db() -> Iterator[Session]:
     """FastAPI dependency yielding a scoped session."""
@@ -256,6 +261,166 @@ def _ensure_activity_indexes() -> None:
         logger.warning("Could not ensure activity_log composite index (%s)", exc)
 
 
+def _add_missing_columns(table: str, wanted: list[tuple[str, str, str]]) -> list[str]:
+    """ALTER TABLE ... ADD COLUMN for each ``(name, pg_ddl, sqlite_ddl)`` missing.
+
+    Additive and idempotent; returns the names actually added. Data is never
+    touched here (backfills are separate, explicit statements).
+    """
+    from sqlalchemy import inspect
+
+    try:
+        existing = {c["name"] for c in inspect(engine).get_columns(table)}
+    except Exception as exc:
+        logger.warning("Could not inspect %s (%s); skipping column migration", table, exc)
+        return []
+    pg = engine.dialect.name == "postgresql"
+    added: list[str] = []
+    with engine.begin() as conn:
+        for name, pg_ddl, sqlite_ddl in wanted:
+            if name in existing:
+                continue
+            try:
+                logger.info("Adding missing column %s.%s", table, name)
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {pg_ddl if pg else sqlite_ddl}"))
+                added.append(name)
+            except Exception as exc:
+                logger.warning("Could not add %s.%s (%s)", table, name, exc)
+    return added
+
+
+def _ensure_billing_columns() -> None:
+    """Bring billing tables created by an earlier release up to date.
+
+    New columns get safe defaults; ``duration_hours`` is backfilled from the
+    legacy whole-day column (exactly ``days * 24``). Screenshot allowances
+    and the new catalogue are a one-time DATA migration
+    (``subscription_service.ensure_catalogue``), not done here.
+    Rollback: the added columns can be dropped; no existing column changes.
+    """
+    ts = ("TIMESTAMP WITH TIME ZONE", "DATETIME")
+    false = ("BOOLEAN DEFAULT FALSE NOT NULL", "BOOLEAN DEFAULT 0 NOT NULL")
+    true = ("BOOLEAN DEFAULT TRUE NOT NULL", "BOOLEAN DEFAULT 1 NOT NULL")
+    int0 = ("INTEGER DEFAULT 0 NOT NULL",) * 2
+
+    def col(name: str, ddl: tuple[str, ...]) -> tuple[str, str, str]:
+        return (name, ddl[0], ddl[-1])
+
+    one_time = ("VARCHAR(20) DEFAULT 'one_time' NOT NULL",) * 2
+    _add_missing_columns("subscription_plans", [
+        col("duration_hours", int0),
+        col("duration_unit", ("VARCHAR(10) DEFAULT 'days' NOT NULL",)),
+        col("screenshot_allowance", int0),
+        col("billing_type", one_time),
+        col("billing_interval_days", ("INTEGER",)),
+        col("is_public", true),
+    ])
+    _add_missing_columns("payments", [
+        col("duration_hours", int0),
+        col("screenshot_allowance", int0),
+        col("idempotency_key", ("VARCHAR(64)",)),
+        col("refunded_at", ts),
+        col("refund_reference", ("VARCHAR(100) DEFAULT '' NOT NULL",)),
+    ])
+    _add_missing_columns("user_subscriptions", [
+        col("screenshot_allowance", int0),
+        col("screenshots_used", int0),
+        col("billing_type", one_time),
+        col("auto_renew", false),
+        col("cancelled_at", ts),
+    ])
+    statements = [
+        "UPDATE subscription_plans SET duration_hours = duration_days * 24 WHERE duration_hours = 0",
+        "UPDATE payments SET duration_hours = duration_days * 24 WHERE duration_hours = 0",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_payments_user_idempotency "
+        "ON payments (user_id, idempotency_key)",
+        "CREATE INDEX IF NOT EXISTS ix_payments_currency_status ON payments (currency, status)",
+    ]
+    with engine.begin() as conn:
+        for sql in statements:
+            try:
+                conn.execute(text(sql))
+            except Exception as exc:
+                logger.warning("Billing migration step failed (%s): %s", exc, sql[:80])
+    if engine.dialect.name == "postgresql":
+        # SQLite cannot add a CHECK to an existing table; PostgreSQL can.
+        try:
+            with engine.begin() as conn:
+                exists = conn.execute(text(
+                    "SELECT 1 FROM pg_constraint WHERE conname = 'ck_user_subscriptions_credits'"
+                )).first()
+                if not exists:
+                    conn.execute(text(
+                        "ALTER TABLE user_subscriptions ADD CONSTRAINT ck_user_subscriptions_credits "
+                        "CHECK (screenshots_used >= 0 AND screenshots_used <= screenshot_allowance)"
+                    ))
+        except Exception as exc:
+            logger.warning("Could not add ck_user_subscriptions_credits (%s)", exc)
+
+
+def tables_missing_user_email() -> list[str]:
+    """Tables in the LIVE database that have ``user_id`` but no ``user_email``."""
+    from sqlalchemy import inspect
+
+    insp = inspect(engine)
+    missing = []
+    for table in insp.get_table_names():
+        cols = {c["name"] for c in insp.get_columns(table)}
+        if "user_id" in cols and "user_email" not in cols:
+            missing.append(table)
+    return sorted(missing)
+
+
+def _ensure_user_email_columns() -> None:
+    """Schema rule: every table with ``user_id`` also has ``user_email``.
+
+    Works on the ACTUAL database (including legacy tables with no ORM model,
+    e.g. old analytics tables), not only on the models: adds the column,
+    an index, and backfills empty values from ``users``. Rows whose user no
+    longer exists keep ``''`` and are reported — never deleted or invented.
+    The column name follows the existing convention (resumes.user_email).
+    Rollback: ``ALTER TABLE <t> DROP COLUMN user_email`` on the added tables.
+    """
+    from sqlalchemy import inspect
+
+    try:
+        for table in tables_missing_user_email():
+            _add_missing_columns(table, [("user_email", "VARCHAR(320) DEFAULT ''", "VARCHAR(320) DEFAULT ''")])
+        insp = inspect(engine)
+        tables = [
+            t for t in insp.get_table_names()
+            if {"user_id", "user_email"} <= {c["name"] for c in insp.get_columns(t)}
+        ]
+    except Exception as exc:
+        logger.warning("Could not ensure user_email columns (%s)", exc)
+        return
+    for table in tables:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(
+                    f"CREATE INDEX IF NOT EXISTS ix_{table}_user_email ON {table} (user_email)"
+                ))
+                filled = conn.execute(text(
+                    f"UPDATE {table} SET user_email = "
+                    f"(SELECT email FROM users WHERE users.id = {table}.user_id) "
+                    f"WHERE (user_email IS NULL OR user_email = '') AND user_id IS NOT NULL "
+                    f"AND EXISTS (SELECT 1 FROM users WHERE users.id = {table}.user_id)"
+                )).rowcount
+                orphans = conn.execute(text(
+                    f"SELECT COUNT(*) FROM {table} WHERE user_id IS NOT NULL "
+                    f"AND (user_email IS NULL OR user_email = '')"
+                )).scalar() or 0
+            if filled:
+                logger.info("Backfilled user_email on %d %s row(s)", filled, table)
+            if orphans:
+                logger.warning(
+                    "%s: %d row(s) reference a user that no longer exists; user_email left empty",
+                    table, orphans,
+                )
+        except Exception as exc:
+            logger.warning("Could not backfill %s.user_email (%s)", table, exc)
+
+
 def init_db() -> None:
     """Create the database (when missing), all tables, and missing columns.
 
@@ -278,3 +443,6 @@ def init_db() -> None:
     _ensure_resume_columns()
     _drop_activity_noise_columns()
     _ensure_activity_indexes()
+    _ensure_billing_columns()
+    # Last: also covers tables the steps above touched.
+    _ensure_user_email_columns()

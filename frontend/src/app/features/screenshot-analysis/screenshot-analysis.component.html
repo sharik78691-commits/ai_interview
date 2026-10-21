@@ -18,7 +18,12 @@
     </span>
   </div>
 
-  <app-error-banner [message]="error()" (dismiss)="error.set('')"></app-error-banner>
+  <app-error-banner [message]="error()" (dismiss)="error.set(''); needsPlan.set(false)"></app-error-banner>
+  @if (needsPlan()) {
+    <p class="small plan-cta" data-testid="plan-cta">
+      <a routerLink="/pricing" class="btn-primary sm">See plans &amp; buy credits</a>
+    </p>
+  }
 
   <div class="grid">
     <div class="col">
@@ -37,6 +42,14 @@
         <button class="btn-primary wide" (click)="openPicker({ kind: 'add' })" [disabled]="atLimit() || analyzing()" data-testid="capture-btn">
           📸 Capture Screen
         </button>
+        @if (config.usage(); as u) {
+          <p class="small credits" [class.err]="u.totalRemaining === 0" data-testid="credits-remaining">
+            <strong>{{ u.remaining }}</strong> screenshot credit{{ u.remaining === 1 ? '' : 's' }} left{{ u.planName ? ' on ' + u.planName : '' }}
+            @if (u.totalRemaining !== u.remaining) { <span class="muted">({{ u.totalRemaining }} across all plans)</span> }
+            <span class="muted">· 1 credit per screenshot</span>
+            @if (u.totalRemaining === 0) { · <a routerLink="/pricing">Buy more</a> }
+          </p>
+        }
         <p class="muted small">You choose exactly which screen or window to capture. Nothing is captured in the background, and the screen flashes briefly each time a capture is taken.</p>
         <p class="muted small hotkey-tip" data-testid="capture-hotkey-tip">Shortcut: press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> to open the screen picker — use the arrow keys (← → ↑ ↓) to choose a screen, then press <kbd>Enter</kbd> to capture and analyze it immediately. It works from any page — the app opens this page with the picker ready.</p>
         @if (captureNotice()) { <p class="ok small" role="status">✓ {{ captureNotice() }}</p> }

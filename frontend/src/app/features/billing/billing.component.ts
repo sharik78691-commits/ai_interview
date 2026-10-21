@@ -10,6 +10,7 @@ import {
   Plan,
   durationLabel,
   formatMoney,
+  hoursLabel,
 } from '../../core/models/billing.models';
 
 /**
@@ -41,6 +42,7 @@ export class BillingComponent implements OnInit {
 
   readonly money = formatMoney;
   readonly duration = durationLabel;
+  readonly hours = hoursLabel;
 
   ngOnInit(): void {
     const q = this.route.snapshot.queryParamMap;
@@ -113,6 +115,41 @@ export class BillingComponent implements OnInit {
   daysLeft(iso: string | null): number {
     if (!iso) return 0;
     return Math.max(0, Math.ceil((new Date(iso).getTime() - Date.now()) / 86_400_000));
+  }
+
+  /** "2 days 4 h" / "5 h 12 min" until an exact instant (server-provided). */
+  timeLeft(iso: string | null): string {
+    if (!iso) return '—';
+    const ms = Math.max(0, new Date(iso).getTime() - Date.now());
+    const mins = Math.floor(ms / 60_000);
+    const d = Math.floor(mins / 1440);
+    const h = Math.floor((mins % 1440) / 60);
+    const m = mins % 60;
+    if (d >= 2) return `${d} days ${h} h`;
+    if (d === 1) return `1 day ${h} h`;
+    return h ? `${h} h ${m} min` : `${m} min`;
+  }
+
+  /** The viewer's time-zone name, shown next to local expiry times. */
+  readonly timeZone = (() => {
+    try {
+      return Intl.DateTimeFormat().resolvedOptions().timeZone || 'local time';
+    } catch {
+      return 'local time';
+    }
+  })();
+
+  usagePercent(used: number, allowance: number): number {
+    return allowance > 0 ? Math.min(100, Math.round((used / allowance) * 100)) : 0;
+  }
+
+  /** Other live plans besides the applicable one (each keeps its own credits). */
+  otherLive(d: MyBilling): number {
+    return d.subscriptions.filter((s) => s.status === 'active' && s.id !== d.current?.id).length;
+  }
+
+  paymentStatus(status: string): string {
+    return status === 'created' ? 'pending' : status;
   }
 
   sourceLabel(source: string): string {

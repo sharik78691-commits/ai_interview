@@ -34,6 +34,14 @@ def _as_bool(value: str | None, default: bool = False) -> bool:
     return value.strip().lower() in ("1", "true", "yes", "on")
 
 
+def _currency_set(value: str | None) -> frozenset[str]:
+    """'INR, usd' -> {'INR', 'USD'} (3-letter codes only)."""
+    return frozenset(
+        c.strip().upper() for c in (value or "").split(",")
+        if len(c.strip()) == 3 and c.strip().isalpha()
+    )
+
+
 def _env(name: str, default: str) -> str:
     """``os.getenv`` that also falls back to ``default`` for a BLANK value."""
     value = os.getenv(name)
@@ -330,6 +338,12 @@ class Settings:
             _as_bool(os.getenv("PAYMENTS_MOCK_ENABLED"), default=not self._is_production())
             and not self._is_production()
         )
+        # Currencies each gateway may charge, comma-separated ISO codes.
+        # Default INR only: international currencies need the merchant
+        # account's international payments enabled at the gateway first
+        # (Razorpay: International Payments; Cashfree: global collections).
+        self.razorpay_currencies: frozenset[str] = _currency_set(os.getenv("RAZORPAY_CURRENCIES", "INR"))
+        self.cashfree_currencies: frozenset[str] = _currency_set(os.getenv("CASHFREE_CURRENCIES", "INR"))
         # Name shown in gateway checkout popups.
         self.payment_merchant_name: str = _env("PAYMENT_MERCHANT_NAME", "OyeInterview")
 

@@ -113,12 +113,20 @@ def _count(model, **where) -> int:
 # ---------------------------------------------------------------- plans
 
 
-def test_public_plans_seeded_from_previous_pricing_page(client):
+def test_public_plans_are_the_five_2026_10_plans(client):
     plans = client.get("/api/plans").json()
-    assert [(p["code"], p["price_minor"], p["duration_days"]) for p in plans] == [
-        ("3-days", 15000, 3), ("7-days", 30000, 7), ("1-month", 90000, 30), ("3-months", 200000, 90),
+    assert [(p["code"], p["price_minor"], p["duration_hours"], p["screenshot_allowance"],
+             p["billing_type"]) for p in plans] == [
+        ("1-day", 9900, 24, 8, "one_time"),
+        ("3-days", 19900, 72, 24, "one_time"),
+        ("7-days", 39900, 168, 56, "one_time"),
+        ("1-month", 99900, 720, 240, "recurring"),
+        ("3-months", 249000, 2160, 720, "recurring"),
     ]
     assert all(p["currency"] == "INR" for p in plans)
+    # Recurring plans are sold prepaid until auto-renewal exists.
+    assert not any(p["auto_renew_available"] for p in plans)
+    assert not any(p["badge"] or p["is_highlighted"] for p in plans)
 
 
 def test_seed_is_idempotent_and_never_overwrites_admin_edits():
@@ -143,11 +151,11 @@ def test_promo_price_applies_only_inside_window(client):
         plan.promo_starts_at, plan.promo_ends_at = now - timedelta(days=1), now + timedelta(days=1)
         db.commit()
         p = next(x for x in client.get("/api/plans").json() if x["code"] == "7-days")
-        assert (p["price_minor"], p["regular_price_minor"], p["is_promo"]) == (20000, 30000, True)
+        assert (p["price_minor"], p["regular_price_minor"], p["is_promo"]) == (20000, 39900, True)
         plan.promo_ends_at = now - timedelta(hours=1)
         db.commit()
         p = next(x for x in client.get("/api/plans").json() if x["code"] == "7-days")
-        assert (p["price_minor"], p["is_promo"]) == (30000, False)
+        assert (p["price_minor"], p["is_promo"]) == (39900, False)
     finally:
         db.close()
 
@@ -158,7 +166,7 @@ def test_promo_price_applies_only_inside_window(client):
 def test_full_mock_purchase_activates_subscription_once():
     c = _user_client("buyer@example.com")
     flow = _buy_with_mock(c)
-    assert flow["checkout"]["amount_minor"] == 90000  # server-priced
+    assert flow["checkout"]["amount_minor"] == 99900  # server-priced
     r1 = _verify(c, flow["order_id"], flow["sim"])
     assert r1.json()["status"] == "paid"
     r2 = _verify(c, flow["order_id"], flow["sim"])  # replay
@@ -231,18 +239,24 @@ def test_new_checkout_supersedes_older_unpaid_order():
     assert _count(Payment, user_id=uid, status="cancelled") == 1
 
 
-def test_renewal_stacks_after_current_period():
+def test_repurchase_starts_immediately_as_a_separate_subscription():
+    """Policy 2026-10: a second purchase is its own row, active right away,
+    with its own expiry and credits (nothing merged, nothing reset)."""
     c = _user_client("stack@example.com")
     for code in ("1-month", "7-days"):
         f = _buy_with_mock(c, code)
         _verify(c, f["order_id"], f["sim"])
     me = c.get("/api/billing/me").json()
     newest, first = me["subscriptions"][0], me["subscriptions"][1]
-    assert newest["is_renewal"] is True and newest["status"] == "scheduled"
-    assert newest["starts_at"] == first["expires_at"]
-    # Access ends 30 + 7 days from now (within a minute).
+    assert newest["is_renewal"] is True and newest["status"] == "active"
+    assert first["status"] == "active"
+    assert (newest["screenshot_allowance"], first["screenshot_allowance"]) == (56, 240)
+    # Access ends with the longer (30-day) plan, not 30 + 7 days.
     ends = subs.aware(__import__("datetime").datetime.fromisoformat(me["access_ends_at"]))
-    assert abs((ends - subs.utcnow()) - timedelta(days=37)) < timedelta(minutes=1)
+    assert abs((ends - subs.utcnow()) - timedelta(days=30)) < timedelta(minutes=1)
+    # Credits are drawn from the soonest-expiring plan first.
+    assert me["usage"]["subscription_id"] == newest["id"]
+    assert me["usage"]["total_remaining"] == 296
 
 
 def test_plan_price_change_never_changes_history():
@@ -250,12 +264,12 @@ def test_plan_price_change_never_changes_history():
     f = _buy_with_mock(c)
     _verify(c, f["order_id"], f["sim"])
     admin = _admin_client()
-    r = admin.patch(f"/api/admin/plans/{_plan_id()}", json={"price_minor": 99900},
+    r = admin.patch(f"/api/admin/plans/{_plan_id()}", json={"price_minor": 129900},
                     headers=csrf_headers(admin))
-    assert r.status_code == 200 and r.json()["price_minor"] == 99900
+    assert r.status_code == 200 and r.json()["price_minor"] == 129900
     pay = c.get("/api/billing/me").json()["payments"][0]
-    assert pay["amount_minor"] == 90000
-    assert next(p for p in c.get("/api/plans").json() if p["code"] == "1-month")["price_minor"] == 99900
+    assert pay["amount_minor"] == 99900
+    assert next(p for p in c.get("/api/plans").json() if p["code"] == "1-month")["price_minor"] == 129900
 
 
 # --------------------------------------------------------- authorization
@@ -540,7 +554,7 @@ def test_admin_filters_search_by_id_email_status_gateway():
     pays = admin.get("/api/admin/payments", params={"q": f["order_id"]}).json()
     assert pays["total"] == 1 and pays["items"][0]["status"] == "paid"
     summary = admin.get("/api/admin/users/billing-summary", params={"ids": str(uid)}).json()
-    assert summary[str(uid)]["plan_name"] == "1 Month"
+    assert summary[str(uid)]["plan_name"] == "Monthly Plan"
 
 
 def test_trial_only_once_and_only_when_offered():

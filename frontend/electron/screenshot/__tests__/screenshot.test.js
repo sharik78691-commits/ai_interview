@@ -4,7 +4,15 @@ const assert = require('node:assert/strict');
 
 const { DEFAULT_MODEL_KEY, listModels, resolveModel } = require('../model-config');
 const { validateImages, base64Bytes } = require('../image-validation');
-const { analyzeScreenshots, fetchServerReady, redact } = require('../analysis');
+const {
+  analyzeScreenshots,
+  fetchServerConfig,
+  fetchServerReady,
+  newRequestId,
+  normalizeUsage,
+  redact,
+  runAnalysis,
+} = require('../analysis');
 const { createCapture } = require('../capture');
 const { registerScreenshotIpc } = require('../ipc');
 
@@ -80,7 +88,9 @@ test('analysis: posts images to OUR backend with no API key, returns normalized 
   });
   assert.equal(seen.url, `${API}/api/screenshots/analyze`);
   assert.equal(seen.opts.method, 'POST');
-  assert.ok(!/goog|key/i.test(JSON.stringify(seen.opts.headers)), 'no key header leaves the app');
+  const { 'Idempotency-Key': _requestId, ...otherHeaders } = seen.opts.headers;
+  assert.ok(!/goog|key/i.test(JSON.stringify(otherHeaders)), 'no key header leaves the app');
+  assert.ok(!/AIza/.test(_requestId), 'the idempotency key is not an API key');
   const body = JSON.parse(seen.opts.body);
   assert.deepEqual(Object.keys(body.images[0]).sort(), ['data', 'mimeType']);
   assert.equal(result.topic, 'JavaScript');
@@ -121,6 +131,97 @@ test('server readiness: true/false from the backend, null when unreachable', asy
   assert.equal(await fetchServerReady({ apiBase: API, fetchImpl: fakeFetch(401, {}) }), null);
   assert.equal(await fetchServerReady({ apiBase: API, fetchImpl: async () => { throw new Error('offline'); } }), null);
 });
+
+// ---- credits: Idempotency-Key + remaining usage ----
+const REQUEST_ID_RE = /^[A-Za-z0-9_.:-]{8,64}$/; // backend's _REQUEST_ID_RE
+const USAGE = { allowance: 40, used: 3, remaining: 37, totalRemaining: 45, expiresAt: '2026-11-01T10:00:00+00:00' };
+const recorder = (responses) => {
+  const keys = [];
+  const fetchImpl = async (_url, opts) => {
+    keys.push(opts.headers['Idempotency-Key']);
+    const next = responses.shift();
+    if (next instanceof Error) throw next;
+    return next;
+  };
+  return { keys, fetchImpl };
+};
+const analyzeWith = (fetchImpl, extra = {}) =>
+  runAnalysis({ model: model(), images: [img(500)], apiBase: API, fetchImpl, retryDelayMs: 0, ...extra });
+
+test('credits: request ids match the backend format and are unique', () => {
+  const ids = new Set(Array.from({ length: 50 }, newRequestId));
+  assert.equal(ids.size, 50);
+  for (const id of ids) assert.match(id, REQUEST_ID_RE);
+});
+test('credits: every analysis sends an Idempotency-Key; a new analysis gets a new key', async () => {
+  const { keys, fetchImpl } = recorder([fakeFetch(200, goodBody)(), fakeFetch(200, goodBody)()]);
+  await analyzeWith(fetchImpl);
+  await analyzeWith(fetchImpl);
+  assert.equal(keys.length, 2);
+  for (const k of keys) assert.match(k, REQUEST_ID_RE);
+  assert.notEqual(keys[0], keys[1]);
+});
+test('credits: the automatic retry after a network error reuses the SAME key', async () => {
+  const { keys, fetchImpl } = recorder([new TypeError('fetch failed'), fakeFetch(200, goodBody)()]);
+  const out = await analyzeWith(fetchImpl);
+  assert.equal(out.result.topic, 'JavaScript');
+  assert.equal(keys.length, 2);
+  assert.equal(keys[0], keys[1]);
+  assert.equal(out.requestId, keys[0]);
+});
+test('credits: retries are bounded, and timeouts / HTTP errors are not retried', async () => {
+  const net = recorder([new TypeError('a'), new TypeError('b'), new TypeError('c')]);
+  assert.equal((await analyzeWith(net.fetchImpl).catch((e) => e)).code, 'NETWORK');
+  assert.equal(net.keys.length, 2);
+  assert.equal(new Set(net.keys).size, 1);
+
+  const http = recorder([fakeFetch(500, '<html>')(), fakeFetch(200, goodBody)()]);
+  assert.equal((await analyzeWith(http.fetchImpl).catch((e) => e)).code, 'SERVER_ERROR');
+  assert.equal(http.keys.length, 1);
+
+  let calls = 0;
+  const slow = (_u, { signal }) => {
+    calls++;
+    return new Promise((_r, rej) => signal.addEventListener('abort', () => rej(Object.assign(new Error('a'), { name: 'AbortError' }))));
+  };
+  assert.equal((await analyzeWith(slow, { timeoutMs: 20 }).catch((e) => e)).code, 'TIMEOUT');
+  assert.equal(calls, 1);
+});
+test('credits: a caller-supplied key is sent as-is', async () => {
+  const { keys, fetchImpl } = recorder([fakeFetch(200, goodBody)()]);
+  await analyzeWith(fetchImpl, { requestId: 'ss-fixed-key-123' });
+  assert.deepEqual(keys, ['ss-fixed-key-123']);
+});
+test('credits: success returns the remaining usage; config reports it too', async () => {
+  const { fetchImpl } = recorder([fakeFetch(200, { ...goodBody, creditsUsed: 1, usage: { ...USAGE, planName: 'Weekly' } })()]);
+  const out = await analyzeWith(fetchImpl);
+  assert.deepEqual(out.usage, { ...USAGE, planName: 'Weekly' });
+
+  const cfg = await fetchServerConfig({ apiBase: API, fetchImpl: fakeFetch(200, { configured: true, usage: USAGE }) });
+  assert.equal(cfg.ready, true);
+  assert.equal(cfg.usage.remaining, 37);
+  assert.equal(cfg.usage.totalRemaining, 45);
+  assert.deepEqual(await fetchServerConfig({ apiBase: API, fetchImpl: fakeFetch(401, {}) }), { ready: null, usage: null });
+  // Older servers without credits: no usage, analysis still works.
+  assert.equal((await analyzeWith(fakeFetch(200, goodBody))).usage, null);
+});
+test('credits: usage normalisation rejects junk', () => {
+  assert.equal(normalizeUsage(null), null);
+  assert.equal(normalizeUsage({}), null);
+  assert.equal(normalizeUsage({ remaining: 'lots' }), null);
+  const u = normalizeUsage({ remaining: 0, allowance: 0, used: 0, totalRemaining: 0, expiresAt: null });
+  assert.equal(u.remaining, 0);
+  assert.equal(u.expiresAt, null);
+  assert.equal(normalizeUsage({ remaining: -3, totalRemaining: 2 }).remaining, 0);
+});
+test('credits: NO_CREDITS / SUBSCRIPTION_REQUIRED (402) come through with their codes', async () => {
+  const code = async (p) => p.then(() => 'ok', (e) => e.code);
+  const detail = (c) => ({ detail: { code: c, message: 'Buy a pass on the Pricing page.' } });
+  assert.equal(await code(run(fakeFetch(402, detail('NO_CREDITS')))), 'NO_CREDITS');
+  assert.equal(await code(run(fakeFetch(402, detail('SUBSCRIPTION_REQUIRED')))), 'SUBSCRIPTION_REQUIRED');
+  assert.equal(await code(run(fakeFetch(402, ''))), 'SUBSCRIPTION_REQUIRED');
+  assert.equal(await code(run(fakeFetch(409, detail('DUPLICATE_REQUEST')))), 'DUPLICATE_REQUEST');
+});
 test('client limits fit the backend + Vercel body budget', () => {
   const { limits } = model();
   assert.ok(limits.maxImages <= 10);
@@ -128,7 +229,8 @@ test('client limits fit the backend + Vercel body budget', () => {
 });
 
 // ---- capture flow + IPC gating ----
-function fakeElectron({ sources, trustedSender = true }) {
+function fakeElectron({ sources, trustedSender = true, configExtra = {}, analyzeExtra = {} }) {
+  const headers = [];
   const handlers = {};
   const flashed = [];
   const nativeImg = (w, h, empty = false) => ({
@@ -157,13 +259,16 @@ function fakeElectron({ sources, trustedSender = true }) {
     getMainWindow: () => win,
     capture,
     apiBase: API,
-    fetchImpl: async (url) => {
+    fetchImpl: async (url, opts = {}) => {
       calls.push(url);
-      return url.endsWith('/config') ? fakeFetch(200, { configured: true })() : fakeFetch(200, goodBody)();
+      headers.push(opts.headers || {});
+      return url.endsWith('/config')
+        ? fakeFetch(200, { configured: true, ...configExtra })()
+        : fakeFetch(200, { ...goodBody, ...analyzeExtra })();
     },
   });
   const invoke = (ch, ...args) => handlers[ch]({ sender: trustedSender ? sender : {} }, ...args);
-  return { invoke, calls };
+  return { invoke, calls, headers };
 }
 
 const SOURCES = [
@@ -231,6 +336,22 @@ test('ipc: analyze goes to the backend and returns the result', async () => {
   assert.equal(ok.model, 'Gemini 3.5 Flash Lite');
   assert.deepEqual(calls, [`${API}/api/screenshots/analyze`]);
   assert.equal((await invoke('screenshot:analyze', DEFAULT_MODEL_KEY, [])).error.code, 'VALIDATION');
+});
+test('ipc: each analyze invoke sends its own Idempotency-Key and returns usage; config returns usage', async () => {
+  const { invoke, headers } = fakeElectron({
+    sources: SOURCES,
+    configExtra: { usage: USAGE },
+    analyzeExtra: { usage: { ...USAGE, used: 4, remaining: 36 } },
+  });
+  const cfg = await invoke('screenshot:get-config');
+  assert.equal(cfg.usage.remaining, 37);
+  const first = await invoke('screenshot:analyze', DEFAULT_MODEL_KEY, [img(500)]);
+  await invoke('screenshot:analyze', DEFAULT_MODEL_KEY, [img(500)]);
+  assert.equal(first.usage.remaining, 36);
+  const keys = headers.slice(1).map((h) => h['Idempotency-Key']);
+  assert.equal(keys.length, 2);
+  for (const k of keys) assert.match(k, REQUEST_ID_RE);
+  assert.notEqual(keys[0], keys[1]);
 });
 
 test('hotkey: Ctrl+Shift+S is app-wide — opens the Screenshots page elsewhere, the picker on that page', async () => {

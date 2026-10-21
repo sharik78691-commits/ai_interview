@@ -30,7 +30,13 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.models.billing import Payment, PaymentStatus, PaymentWebhookEvent
+from app.models.billing import (
+    Payment,
+    PaymentStatus,
+    PaymentWebhookEvent,
+    SubscriptionPlan,
+    SubscriptionStatus,
+)
 from app.models.user import User
 from app.providers.payments.base import (
     CustomerInfo,
@@ -38,7 +44,8 @@ from app.providers.payments.base import (
     VerifiedPayment,
     WebhookEvent,
 )
-from app.providers.payments.registry import get_gateway
+from app.providers.payments.registry import gateway_supports, get_gateway
+from app.services import pricing_service as pricing
 from app.services import subscription_service as subs
 
 logger = logging.getLogger(__name__)
@@ -46,6 +53,10 @@ logger = logging.getLogger(__name__)
 
 class PaymentError(ValueError):
     """Business-rule failure safe to show to the user."""
+
+
+class DuplicateCheckout(PaymentError):
+    """The same idempotency key was already used for a checkout."""
 
 
 @dataclass(frozen=True)
@@ -92,14 +103,43 @@ def _cancel_stale_orders(db: Session, user_id: int, plan_id: int) -> None:
     )
 
 
-async def create_checkout(
-    db: Session, user: User, *, plan_id: int, gateway_name: str, phone: str = ""
-) -> CheckoutResult:
-    gateway = get_gateway(gateway_name)  # raises GatewayNotConfigured
-    plan = await asyncio.to_thread(subs.get_active_plan, db, plan_id)
-    price = subs.effective_price(plan)
-    if price.amount_minor <= 0:
+def _quote_for_checkout(
+    db: Session, user_id: int, plan_id: int, currency: str, gateway: str, idempotency_key: str | None
+) -> tuple[SubscriptionPlan, pricing.Quote]:
+    """Every check that must pass BEFORE an order is created at the gateway."""
+    if idempotency_key and db.scalar(select(Payment.id).where(
+        Payment.user_id == user_id, Payment.idempotency_key == idempotency_key
+    )):
+        raise DuplicateCheckout("This checkout was already started. Refresh and try again.")
+    plan = subs.get_active_plan(db, plan_id)
+    cur = pricing.get_currency(db, currency)
+    if cur is None or not cur.display_enabled or not cur.payments_enabled:
+        raise PaymentError(f"Payments in {currency} are not available yet.")
+    if not gateway_supports(gateway, currency):
+        raise PaymentError(f"This payment method does not accept {currency}.")
+    quote = pricing.quote(plan, currency, pricing.current_prices(db, [plan.id]))
+    if quote is None:
+        raise PaymentError(f"This plan is not available in {currency} yet.")
+    if quote.amount_minor <= 0:
         raise PaymentError("This plan cannot be purchased online.")
+    return plan, quote
+
+
+async def create_checkout(
+    db: Session, user: User, *, plan_id: int, gateway_name: str, phone: str = "",
+    currency: str = "INR", idempotency_key: str | None = None,
+) -> CheckoutResult:
+    """Create a gateway order for a plan at the SERVER's price in ``currency``.
+
+    The browser chooses only the plan, currency and gateway; the amount comes
+    from ``plan_prices``. The currency must be enabled for payments and
+    supported by the chosen gateway — it is never silently switched.
+    """
+    gateway = get_gateway(gateway_name)  # raises GatewayNotConfigured
+    currency = (currency or "INR").upper()
+    plan, price = await asyncio.to_thread(
+        _quote_for_checkout, db, user.id, plan_id, currency, gateway.name, idempotency_key
+    )
     receipt = _new_receipt(user.id)
     order = await gateway.create_order(
         receipt=receipt,
@@ -118,15 +158,22 @@ async def create_checkout(
             plan_code=plan.code,
             plan_name=plan.name,
             duration_days=plan.duration_days,
+            duration_hours=subs.plan_hours(plan),
+            screenshot_allowance=plan.screenshot_allowance,
             amount_minor=price.amount_minor,
             currency=price.currency,
             gateway=gateway.name,
+            idempotency_key=idempotency_key or None,
             receipt=receipt,
             gateway_order_id=order.order_id,
             status=PaymentStatus.CREATED,
         )
         db.add(payment)
-        db.commit()
+        try:
+            db.commit()
+        except IntegrityError as exc:  # same key raced in from a second tab/click
+            db.rollback()
+            raise DuplicateCheckout("This checkout was already started. Refresh and try again.") from exc
         db.refresh(payment)
         return payment
 
@@ -167,6 +214,10 @@ def mark_paid(
         sub = subs.activate_from_payment(db, payment)  # returns the existing period
         db.commit()
         return VerifyResult("paid", payment.id, sub.id, "Payment already confirmed.")
+    if payment.status in (PaymentStatus.REFUNDED, PaymentStatus.DISPUTED):
+        # A late/replayed "paid" event must never re-grant refunded access.
+        db.commit()
+        return VerifyResult("failed", payment.id, None, f"Payment is {payment.status}.")
     if (amount_minor is not None and amount_minor != payment.amount_minor) or (
         currency and currency.upper() != payment.currency.upper()
     ):
@@ -211,10 +262,53 @@ def mark_failed(db: Session, payment_id: int, reason: str) -> VerifyResult:
     if payment.status == PaymentStatus.PAID:
         db.commit()
         return VerifyResult("paid", payment.id, None, "Payment already confirmed.")
+    if payment.status in (PaymentStatus.REFUNDED, PaymentStatus.DISPUTED):
+        db.commit()
+        return VerifyResult(payment.status, payment.id, None, f"Payment is {payment.status}.")
     payment.status = PaymentStatus.FAILED
     payment.failure_reason = (reason or "Payment failed.")[:300]
     db.commit()
     return VerifyResult("failed", payment.id, None, payment.failure_reason)
+
+
+def mark_refunded(
+    db: Session, payment_id: int, *, amount_minor: int | None, currency: str | None,
+    reference: str, reason: str = "Refunded at the payment gateway.",
+) -> VerifyResult:
+    """Refund policy: a FULL refund (or a lost chargeback) ends the access the
+    payment bought; a partial refund is recorded and access is kept. Usage
+    history is never deleted."""
+    payment = _lock_payment(db, payment_id)
+    if payment.status not in (PaymentStatus.PAID, PaymentStatus.DISPUTED, PaymentStatus.REFUNDED):
+        db.commit()
+        return VerifyResult(payment.status, payment.id, None, "Payment was not captured; nothing to refund.")
+    if currency and currency.upper() != payment.currency.upper():
+        logger.error("Refund currency %s != payment %s currency %s", currency, payment.id, payment.currency)
+    partial = amount_minor is not None and 0 < amount_minor < payment.amount_minor
+    payment.refund_reference = (reference or payment.refund_reference)[:100]
+    if partial:
+        payment.failure_reason = f"Partial refund of {amount_minor} {payment.currency} (access kept)."[:300]
+        db.commit()
+        logger.warning("Payment %s partially refunded (%s)", payment.id, amount_minor)
+        return VerifyResult(payment.status, payment.id, None, "Partial refund recorded.")
+    payment.status = PaymentStatus.REFUNDED
+    payment.refunded_at = payment.refunded_at or subs.utcnow()
+    sub = subs.end_for_payment(db, payment, status=SubscriptionStatus.REFUNDED, reason=reason)
+    db.commit()
+    logger.warning("Payment %s refunded -> subscription %s ended", payment.id, sub.id if sub else None)
+    return VerifyResult("refunded", payment.id, sub.id if sub else None, "Refund recorded; access ended.")
+
+
+def mark_disputed(db: Session, payment_id: int, *, reference: str, reason: str) -> VerifyResult:
+    """Chargeback opened: flag the payment for review; access is kept until
+    the dispute is lost (then ``mark_refunded``) or an admin revokes it."""
+    payment = _lock_payment(db, payment_id)
+    if payment.status == PaymentStatus.PAID:
+        payment.status = PaymentStatus.DISPUTED
+        payment.refund_reference = (reference or "")[:100]
+        payment.failure_reason = f"Dispute opened {reason}".strip()[:300]
+    db.commit()
+    return VerifyResult(payment.status, payment.id, None, "Dispute recorded.")
 
 
 def _apply(db: Session, payment_id: int, verified: VerifiedPayment, via: str) -> VerifyResult:
@@ -337,6 +431,17 @@ def _process_event(db: Session, gateway: str, event_row_id: int, event: WebhookE
         elif event.outcome == "failed":
             mark_failed(db, payment.id, event.failure_reason)
             status = "processed"
+        elif event.outcome == "refunded":
+            mark_refunded(db, payment.id, amount_minor=event.amount_minor,
+                          currency=event.currency, reference=event.reference)
+            status = "processed"
+        elif event.outcome == "disputed":
+            mark_disputed(db, payment.id, reference=event.reference, reason=event.failure_reason)
+            status = "processed"
+        elif event.outcome == "dispute_lost":
+            mark_refunded(db, payment.id, amount_minor=None, currency=None,
+                          reference=event.reference, reason="Chargeback lost at the payment gateway.")
+            status = "processed"
     except Exception as exc:  # keep the event row; gateways retry on 5xx
         db.rollback()
         row = _event_row(db, event_row_id)
@@ -377,7 +482,10 @@ def payment_history(db: Session, user_id: int, limit: int = 100) -> list[Payment
 
 __all__ = [
     "CheckoutResult",
+    "DuplicateCheckout",
     "PaymentError",
+    "mark_disputed",
+    "mark_refunded",
     "VerifyResult",
     "WebhookResult",
     "create_checkout",

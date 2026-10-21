@@ -19,20 +19,42 @@
           <div>
             <span class="pill live">Active</span>
             <h2>{{ c.plan_name }}</h2>
-            <p class="muted small">{{ sourceLabel(c.source) }} · started {{ c.starts_at | date: 'mediumDate' }}</p>
+            <p class="muted small">{{ sourceLabel(c.source) }} · activated {{ c.starts_at | date: 'medium' }}</p>
           </div>
           <div class="validity">
-            <strong>{{ daysLeft(d.access_ends_at) }}</strong>
+            <strong>{{ daysLeft(c.expires_at) }}</strong>
             <span class="muted small">days left</span>
           </div>
         </div>
         <p class="small">
-          Access valid until <strong>{{ d.access_ends_at | date: 'medium' }}</strong>
-          @if (d.access_ends_at !== c.expires_at) {
-            <span class="muted">(includes a queued renewal)</span>
-          }
+          This plan ends <strong>{{ c.expires_at | date: 'medium' }}</strong>
+          <span class="muted">({{ timeZone }}) · {{ timeLeft(c.expires_at) }} left</span>
         </p>
-        <p class="muted small">Plans don't renew automatically. <a routerLink="/pricing">Buy more time</a> whenever you need it — it's added after your current period.</p>
+        @if (d.access_ends_at && d.access_ends_at !== c.expires_at) {
+          <p class="muted small">You also have {{ otherLive(d) }} other active plan(s); your access lasts until {{ d.access_ends_at | date: 'medium' }}.</p>
+        }
+
+        @if (d.usage; as u) {
+          <div class="usage" [class.empty]="u.remaining === 0">
+            <div class="usage-head">
+              <span>Screenshot usage: <strong>{{ u.used }} / {{ u.allowance }}</strong></span>
+              <span class="muted small">Remaining: {{ u.remaining }} screenshot{{ u.remaining === 1 ? '' : 's' }}</span>
+            </div>
+            <div class="meter" role="progressbar" [attr.aria-valuenow]="u.used" aria-valuemin="0" [attr.aria-valuemax]="u.allowance" [attr.aria-label]="'Screenshots used: ' + u.used + ' of ' + u.allowance">
+              <span class="meter-fill" [style.width.%]="usagePercent(u.used, u.allowance)"></span>
+            </div>
+            @if (u.remaining === 0) {
+              <p class="small">
+                You've used every screenshot analysis in this plan.
+                @if (u.total_remaining > 0) { Your other plan still has {{ u.total_remaining }} — it's used automatically. }
+                @else { <a routerLink="/pricing">Buy another pass</a> to keep analyzing screenshots. }
+              </p>
+            } @else if (u.total_remaining > u.remaining) {
+              <p class="muted small">{{ u.total_remaining }} screenshots left across all your active plans.</p>
+            }
+          </div>
+        }
+        <p class="muted small">Renewal: none — plans don't renew automatically. <a routerLink="/pricing">Buy another pass</a> whenever you need it; it starts right away with its own time and screenshots.</p>
       } @else {
         <h2>No active plan</h2>
         <p class="muted">You can still sign in and use the free parts of the app. <a routerLink="/pricing">See plans</a>.</p>
@@ -69,7 +91,11 @@
                   <td>{{ (p.paid_at || p.created_at) | date: 'mediumDate' }}</td>
                   <td>{{ p.plan_name }} @if (p.is_renewal) {<span class="muted small">(renewal)</span>}</td>
                   <td>{{ money(p.amount_minor, p.currency) }}</td>
-                  <td><span class="status" [attr.data-status]="p.status">{{ p.status }}</span></td>
+                  <td>
+                    <span class="status" [attr.data-status]="p.status">{{ paymentStatus(p.status) }}</span>
+                    @if (p.status === 'created') { <div class="muted small">Not active until the gateway confirms it</div> }
+                    @if (p.status === 'failed' && p.failure_reason) { <div class="muted small">{{ p.failure_reason }}</div> }
+                  </td>
                   <td class="cap">{{ p.gateway }}</td>
                   <td class="mono small">{{ p.gateway_payment_id || p.gateway_order_id }}</td>
                 </tr>
@@ -88,15 +114,16 @@
         <div class="table-wrap">
           <table>
             <thead>
-              <tr><th>Plan</th><th>Type</th><th>Starts</th><th>Expires</th><th>Status</th></tr>
+              <tr><th>Plan</th><th>Type</th><th>Activated</th><th>Expires</th><th>Screenshots</th><th>Status</th></tr>
             </thead>
             <tbody>
               @for (s of d.subscriptions; track s.id) {
                 <tr>
                   <td>{{ s.plan_name }}</td>
                   <td>{{ sourceLabel(s.source) }}</td>
-                  <td>{{ s.starts_at | date: 'mediumDate' }}</td>
+                  <td>{{ s.starts_at | date: 'medium' }}</td>
                   <td>{{ s.expires_at | date: 'medium' }}</td>
+                  <td>{{ s.screenshots_used }} / {{ s.screenshot_allowance }}</td>
                   <td><span class="status" [attr.data-status]="s.status">{{ s.status }}</span></td>
                 </tr>
               }

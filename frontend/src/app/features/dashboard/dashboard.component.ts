@@ -1,6 +1,9 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { DatePipe } from '@angular/common';
+import { Component, OnInit, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { Router } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
+import { MyBilling } from '../../core/models/billing.models';
+import { BillingService } from '../../core/services/billing.service';
 import { ResumeData } from '../../core/models/interview.models';
 import { ResumeService, StoredResume } from '../../core/services/resume.service';
 import { TargetRole, TargetRoleDetail, TargetRoleService } from '../../core/services/target-role.service';
@@ -10,7 +13,7 @@ import { environment } from '../../../environments/environment';
 @Component({
   selector: 'app-dashboard',
   standalone: true,
-  imports: [FormsModule, ErrorBannerComponent],
+  imports: [FormsModule, ErrorBannerComponent, RouterLink, DatePipe],
   templateUrl: './dashboard.component.html',
   styleUrl: './dashboard.component.css',
 })
@@ -18,6 +21,9 @@ export class DashboardComponent implements OnInit {
   private resumeService = inject(ResumeService);
   private roleService = inject(TargetRoleService);
   private router = inject(Router);
+  private billingService = inject(BillingService);
+  /** Plan + screenshot credits (server-computed); null until loaded / on error. */
+  readonly billing = signal<MyBilling | null>(null);
   /** Desktop installer links + version for the download card (empty URL = coming soon). */
   readonly desktopApp = environment.desktopApp;
   /** Packaged desktop build: download card becomes an (updater) placeholder. */
@@ -75,7 +81,13 @@ export class DashboardComponent implements OnInit {
   actingRoleId: number | null = null;
   savingRole = false;
 
+  usagePercent(used: number, allowance: number): number {
+    return allowance > 0 ? Math.min(100, Math.round((used / allowance) * 100)) : 0;
+  }
+
   ngOnInit(): void {
+    // Plan card is informational: a billing outage never blocks the dashboard.
+    this.billingService.myBilling().subscribe({ next: (b) => this.billing.set(b), error: () => undefined });
     // Fresh browser / new device: pull the account's active resume + role in.
     this.resumeService.adoptActiveResume().subscribe((detail) => {
       if (detail) {

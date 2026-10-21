@@ -23,10 +23,31 @@ def get_gateway(name: str) -> PaymentGateway:
 def available_gateways() -> list[dict[str, str]]:
     """Gateways users may choose right now (configured only; mock in dev only)."""
     return [
-        {"key": g.name, "display_name": g.display_name}
+        {"key": g.name, "display_name": g.display_name,
+         "currencies": sorted(gateway_currencies(g.name))}
         for g in _GATEWAYS.values()
         if g.configured
     ]
+
+
+def gateway_currencies(name: str) -> frozenset[str]:
+    """Currencies this gateway is allowed to charge (from settings).
+
+    The mock gateway accepts INR and USD so the multi-currency flow can be
+    exercised in development; it never runs in production.
+    """
+    from app.core.config import get_settings
+
+    s = get_settings()
+    return {
+        "razorpay": s.razorpay_currencies,
+        "cashfree": s.cashfree_currencies,
+        "mock": frozenset({"INR", "USD"}),
+    }.get((name or "").strip().lower(), frozenset())
+
+
+def gateway_supports(name: str, currency: str) -> bool:
+    return (currency or "").upper() in gateway_currencies(name)
 
 
 def register_gateway(gateway: PaymentGateway) -> None:
@@ -34,4 +55,6 @@ def register_gateway(gateway: PaymentGateway) -> None:
     _GATEWAYS[gateway.name] = gateway
 
 
-__all__ = ["available_gateways", "get_gateway", "register_gateway"]
+__all__ = [
+    "available_gateways", "gateway_currencies", "gateway_supports", "get_gateway", "register_gateway",
+]

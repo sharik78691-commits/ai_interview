@@ -7,7 +7,25 @@ import pytest
 
 from app.core.config import get_settings
 from app.services import screenshot_service as svc
-from tests.conftest import authenticate, csrf_headers
+from tests.conftest import authenticate as _register, csrf_headers
+
+
+def authenticate(client, email: str = "tester@example.com", credits: int = 100) -> None:
+    """Register + give the user an active plan with screenshot credits
+    (analysis is credit-metered; credit rules have their own tests)."""
+    from sqlalchemy import select
+
+    from app.db.session import SessionLocal
+    from app.models.user import User
+    from app.services import subscription_service as subs
+
+    _register(client, email)
+    db = SessionLocal()
+    try:
+        user = db.scalar(select(User).where(User.email == email))
+        subs.grant(db, user, user, plan_id=None, days=1, screenshot_credits=credits, reason="test setup")
+    finally:
+        db.close()
 
 JPEG = base64.b64encode(b"\xff\xd8\xff\xe0" + b"0" * 200).decode()
 PNG = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"0" * 200).decode()

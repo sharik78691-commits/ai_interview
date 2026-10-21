@@ -3,7 +3,7 @@
 // Every handler rejects callers other than the main app window. No AI key
 // exists on this machine: analysis runs on the backend with the server's key.
 const { DEFAULT_MODEL_KEY, listModels, resolveModel } = require('./model-config');
-const { analyzeScreenshots, fetchServerReady, AnalysisError } = require('./analysis');
+const { runAnalysis, fetchServerConfig, AnalysisError } = require('./analysis');
 const { validateImages } = require('./image-validation');
 
 const fail = (err) => ({
@@ -37,6 +37,7 @@ function registerScreenshotIpc({ ipcMain, getMainWindow, globalShortcut, capture
     });
 
   handle('screenshot:get-config', async () => {
+    const server = await fetchServerConfig({ apiBase, fetchImpl });
     return {
       ok: true,
       models: listModels().map(({ key, provider, displayName, limits }) => ({
@@ -47,7 +48,9 @@ function registerScreenshotIpc({ ipcMain, getMainWindow, globalShortcut, capture
       })),
       defaultModel: DEFAULT_MODEL_KEY,
       // true/false = server has / lacks GEMINI_API_KEY; null = not reachable now.
-      serverReady: await fetchServerReady({ apiBase, fetchImpl }),
+      serverReady: server.ready,
+      // Screenshot credits left on the user's plan; null = unknown.
+      usage: server.usage,
     };
   });
 
@@ -144,8 +147,10 @@ function registerScreenshotIpc({ ipcMain, getMainWindow, globalShortcut, capture
     if (!check.ok) {
       throw new AnalysisError('VALIDATION', check.errors.map((e) => e.message).join(' '));
     }
-    const result = await analyzeScreenshots({ model, images, apiBase, fetchImpl });
-    return { ok: true, result, model: model.displayName };
+    // Each invoke is one user-initiated analysis: runAnalysis makes ONE
+    // Idempotency-Key and reuses it for its automatic retry.
+    const { result, usage } = await runAnalysis({ model, images, apiBase, fetchImpl });
+    return { ok: true, result, model: model.displayName, usage };
   });
 }
 

@@ -46,13 +46,28 @@ describe('BillingComponent', () => {
   it("shows the user's own plan, validity and payments", () => {
     const fixture = setup();
     http.expectOne('/api/billing/me').flush(ME);
-    http.expectOne('/api/plans').flush([]);
+    http.expectOne('/api/plans?currency=INR').flush([]);
     fixture.detectChanges();
     const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
     expect(text).toContain('1 Month');
     expect(text).toContain('days left');
     expect(text).toContain('₹900');
     expect(text).toContain('pay_1');
+  });
+
+  it('shows server-computed screenshot usage and an exhausted-allowance prompt', () => {
+    const fixture = setup();
+    http.expectOne('/api/billing/me').flush({
+      ...ME,
+      usage: { subscription_id: 1, plan_name: '1 Month', status: 'active', allowance: 8, used: 8, remaining: 0,
+               expires_at: '2099-01-01T00:00:00Z', total_remaining: 0 },
+    });
+    http.expectOne('/api/plans?currency=INR').flush([]);
+    fixture.detectChanges();
+    const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
+    expect(text).toContain('Screenshot usage: 8 / 8');
+    expect(text).toContain('Remaining: 0 screenshots');
+    expect(text).toContain('Buy another pass');
   });
 
   it('verifies a Cashfree return with the backend before showing success', async () => {
@@ -62,7 +77,7 @@ describe('BillingComponent', () => {
     req.flush({ status: 'paid', payment_id: 5, subscription_id: 1, message: '' });
     await fixture.whenStable();
     http.expectOne('/api/billing/me').flush(ME);
-    http.expectOne('/api/plans').flush([]);
+    http.expectOne('/api/plans?currency=INR').flush([]);
     expect(fixture.componentInstance.notice()).toContain('Payment confirmed');
   });
 });

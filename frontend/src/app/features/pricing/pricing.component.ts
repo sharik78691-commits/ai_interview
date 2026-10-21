@@ -1,3 +1,4 @@
+import { NgTemplateOutlet } from '@angular/common';
 import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
@@ -7,22 +8,48 @@ import { AuthService } from '../../core/auth/auth.service';
 import { CheckoutLauncherService } from '../../core/payments/checkout-launcher.service';
 import { BillingService } from '../../core/services/billing.service';
 import {
+  Currency,
   Gateway,
   GatewayKey,
   Plan,
-  durationLabel,
+  billingTypeLabel,
   formatMoney,
+  hoursLabel,
+  newRequestId,
 } from '../../core/models/billing.models';
 
+const CURRENCY_KEY = 'oi_currency';
+
+/** INR for visitors whose browser says India; otherwise USD when offered. */
+function defaultCurrency(available: string[]): string {
+  try {
+    const saved = localStorage.getItem(CURRENCY_KEY);
+    if (saved && available.includes(saved)) return saved;
+  } catch {
+    /* storage blocked — fall through */
+  }
+  let india = false;
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+    const langs = (typeof navigator !== 'undefined' && navigator.languages) || [];
+    india = tz === 'Asia/Kolkata' || tz === 'Asia/Calcutta' || langs.some((l) => /-IN$/i.test(l));
+  } catch {
+    india = true;
+  }
+  if (!india && available.includes('USD')) return 'USD';
+  return available.includes('INR') ? 'INR' : available[0] ?? 'INR';
+}
+
 /**
- * Public pricing page — every plan, price, duration and promotion comes from
- * the backend (`GET /api/plans`), so admin edits show up without a frontend
- * release. Purchases are one-time prepaid periods; there is NO auto-renewal.
+ * Public pricing page — every plan, price, duration, screenshot allowance and
+ * promotion comes from the backend (`GET /api/plans?currency=`), so admin
+ * edits show up without a frontend release. Purchases are prepaid; there is
+ * NO auto-renewal (Monthly/Quarterly are paid upfront for 30/90 days).
  */
 @Component({
   selector: 'app-pricing',
   standalone: true,
-  imports: [RouterLink, FormsModule],
+  imports: [RouterLink, FormsModule, NgTemplateOutlet],
   templateUrl: './pricing.component.html',
   styleUrl: './pricing.component.css',
 })
@@ -34,8 +61,19 @@ export class PricingComponent implements OnInit {
 
   readonly plans = signal<Plan[]>([]);
   readonly gateways = signal<Gateway[]>([]);
+  readonly currencies = signal<Currency[]>([]);
+  readonly currency = signal('INR');
   readonly loading = signal(true);
   readonly loadError = signal('');
+
+  readonly passes = computed(() => this.plans().filter((p) => p.billing_type !== 'recurring'));
+  readonly longPlans = computed(() => this.plans().filter((p) => p.billing_type === 'recurring'));
+  readonly noneAvailable = computed(() => this.plans().length > 0 && !this.plans().some((p) => p.available));
+  readonly currencyInfo = computed(() => this.currencies().find((c) => c.code === this.currency()) ?? null);
+  /** Gateways that can charge the selected currency. */
+  readonly currencyGateways = computed(() =>
+    this.gateways().filter((g) => !g.currencies?.length || g.currencies.includes(this.currency())),
+  );
 
   /** Plan the checkout panel is open for. */
   readonly selected = signal<Plan | null>(null);
@@ -47,17 +85,36 @@ export class PricingComponent implements OnInit {
 
   readonly needsPhone = computed(() => this.selectedGateway() === 'cashfree');
   private readonly selectedGateway = signal<GatewayKey | ''>('');
+  /** One idempotency key per checkout attempt (reset when the panel opens). */
+  private attemptKey = '';
 
   readonly money = formatMoney;
-  readonly duration = durationLabel;
+  readonly hours = hoursLabel;
+  readonly billingLabel = billingTypeLabel;
 
   ngOnInit(): void {
-    forkJoin({ plans: this.billing.plans(), gateways: this.billing.gateways() }).subscribe({
-      next: ({ plans, gateways }) => {
-        this.plans.set(plans);
+    forkJoin({ currencies: this.billing.currencies(), gateways: this.billing.gateways() }).subscribe({
+      next: ({ currencies, gateways }) => {
+        this.currencies.set(currencies);
         this.gateways.set(gateways);
-        this.gateway = gateways[0]?.key ?? '';
-        this.selectedGateway.set(this.gateway);
+        this.loadPlans(defaultCurrency(currencies.map((c) => c.code)));
+      },
+      error: () => {
+        // Older backends without /pricing/currencies: INR only.
+        this.billing.gateways().subscribe({ next: (g) => this.gateways.set(g), error: () => undefined });
+        this.loadPlans('INR');
+      },
+    });
+  }
+
+  loadPlans(code: string): void {
+    this.currency.set(code);
+    this.loading.set(true);
+    this.loadError.set('');
+    this.billing.plans(code).subscribe({
+      next: (plans) => {
+        this.plans.set(plans);
+        this.pickGateway();
         this.loading.set(false);
       },
       error: () => {
@@ -67,16 +124,32 @@ export class PricingComponent implements OnInit {
     });
   }
 
-  perDay(p: Plan): string {
-    return formatMoney(Math.round(p.price_minor / p.duration_days), p.currency);
+  setCurrency(code: string): void {
+    if (code === this.currency()) return;
+    try {
+      localStorage.setItem(CURRENCY_KEY, code);
+    } catch {
+      /* per-viewer convenience only */
+    }
+    this.cancel();
+    this.loadPlans(code);
+  }
+
+  private pickGateway(): void {
+    const gws = this.currencyGateways();
+    if (!gws.some((g) => g.key === this.gateway)) this.gateway = gws[0]?.key ?? '';
+    this.selectedGateway.set(this.gateway);
   }
 
   choose(p: Plan): void {
+    if (!p.available || !p.payable) return;
     if (!this.auth.isAuthenticated) {
       this.router.navigate(['/register'], { queryParams: { redirect: '/pricing' } });
       return;
     }
     this.message.set('');
+    this.attemptKey = newRequestId('chk');
+    this.pickGateway();
     this.selected.set(p);
   }
 
@@ -90,6 +163,12 @@ export class PricingComponent implements OnInit {
     this.message.set('');
   }
 
+  ctaLabel(p: Plan): string {
+    if (!p.available) return `Not yet available in ${p.currency}`;
+    if (!p.payable) return `${p.currency} payments coming soon`;
+    return `Get ${p.name}`;
+  }
+
   async pay(): Promise<void> {
     const plan = this.selected();
     if (!plan || !this.gateway || this.busy()) return;
@@ -100,7 +179,11 @@ export class PricingComponent implements OnInit {
     this.busy.set(true);
     this.show('Opening secure checkout…', 'info');
     try {
-      const order = await firstValueFrom(this.billing.checkout(plan.id, this.gateway, this.phone));
+      const order = await firstValueFrom(
+        this.billing.checkout(plan.id, this.gateway, this.phone, plan.currency, this.attemptKey),
+      );
+      // A new attempt after this one (e.g. after closing the popup) is a new order.
+      this.attemptKey = newRequestId('chk');
       const outcome = await this.launcher.open(order, this.auth.currentUser?.email ?? '');
       if (outcome.kind === 'dismissed') {
         this.show('Checkout closed. You have not been charged by us for this attempt.', 'info');

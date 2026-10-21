@@ -3,7 +3,7 @@
 Prepaid, **non-recurring** plans paid through **Razorpay** or **Cashfree**, with
 database-driven pricing, user and admin billing views, and a full audit trail.
 
-## Status (2026-10-19)
+## Status (2026-10-21)
 
 | Area | Status |
 |------|--------|
@@ -12,9 +12,82 @@ database-driven pricing, user and admin billing views, and a full audit trail.
 | Checkout → verify → activation (gateway-agnostic) | ✅ Done, end-to-end tested with the mock gateway |
 | Razorpay adapter (Orders API, checkout signature, API confirmation, webhooks) | ✅ Implemented and unit-tested against a mocked HTTP transport. ⏳ **Not yet run against Razorpay** (no credentials) |
 | Cashfree adapter (PG Orders API, JS SDK redirect, API confirmation, signed webhooks) | ✅ Implemented and unit-tested against a mocked HTTP transport. ⏳ **Not yet run against Cashfree** (no credentials) |
-| Auto-renewal / recurring mandates | ❌ Not implemented on purpose. All copy says "no auto-renewal" |
-| Refunds | Manual, in the gateway dashboard. Not automated |
-| Feature gating by subscription | ❌ Not enforced (product decision). Helper: `subscription_service.has_active_subscription()` |
+| Auto-renewal / recurring mandates | ❌ Not implemented. Monthly/Quarterly are sold **prepaid** for 30/90 days; all copy says "no auto-renewal" (see *Recurring billing*) |
+| Refunds | Issued in the gateway dashboard. Refund / chargeback **webhooks** now update the payment and end the access automatically |
+| Feature gating by subscription | ✅ Screenshot analysis only (credits, below). Live interview is not gated (product decision unchanged) |
+| 2026-10 catalogue: 5 plans, exact-hour durations, screenshot credits | ✅ Done, tested (SQLite + PostgreSQL 18), applied to the local dev DB |
+| INR + USD per-currency prices, admin-managed | ✅ Done. **USD prices are not set** — an admin enters them; USD checkout also needs `*_CURRENCIES` and the gateway's international payments |
+| `user_id` ⇒ `user_email` on every table | ✅ Done on the live schema (incl. legacy tables without models), with backfill and a regression test |
+
+## 2026-10 pricing, credits and currencies
+
+### Plans (initial values — all editable in Admin › Billing & pricing)
+
+| Code | Plan | INR | Exact duration | Screenshots | Billing type |
+|------|------|----:|----------------|------------:|--------------|
+| `1-day` | 1 Day Pass | ₹99 | 24 h | 8 | one_time |
+| `3-days` | 3 Days Pass | ₹199 | 72 h | 24 | one_time |
+| `7-days` | 7 Days Pass | ₹399 | 168 h | 56 | one_time |
+| `1-month` | Monthly Plan | ₹999 | 30 days (720 h) | 240 | recurring (sold prepaid) |
+| `3-months` | Quarterly Plan | ₹2,490 | 90 days (2160 h) | 720 | recurring (sold prepaid) |
+
+The four old plans were **updated in place** (same ids, so old payments keep their FK
+and their own amount/name snapshots); `1-day` was added. This ran once
+(`schema_migrations.name = '2026_10_pricing_v2'`) and never overrides later admin edits.
+
+### Policies
+
+* **Exact periods.** `expires_at = activation instant + duration_hours` (UTC). Never rounded to
+  midnight, a calendar month or quarter. Activation = when the payment is verified server-side.
+  The UI shows times in the viewer's time zone.
+* **Repurchase.** Each purchase is its own `user_subscriptions` row and **starts immediately**
+  with its own expiry and credits. Allowances are never merged or reset.
+* **Credits.** 1 credit = 1 screenshot image. A request is charged to ONE live subscription — the
+  soonest-expiring one that has enough credits. Reserve is a single conditional `UPDATE`
+  (`used + n <= allowance`), so concurrent requests can't overspend (CHECK constraint as backstop).
+* **Failures.** Rejections before processing (validation, no plan, not enough credits, server not
+  configured, rate limit) cost nothing. If the AI call fails after it started, the reservation is
+  released. Only completed analyses are charged.
+* **Idempotency.** `Idempotency-Key` header on `/api/screenshots/analyze`; `(user_id, request_id)` is
+  unique. A completed key is refused (409) and never charged twice; a failed key may be retried.
+  Checkout accepts `idempotency_key` (unique per user) so a double click opens one order.
+* **Refunds / chargebacks.** Full refund or lost dispute → payment `refunded`, subscription
+  `refunded` (access ends, usage history kept). Partial refund → recorded, access kept.
+  Dispute opened → payment `disputed`, access kept and flagged. A late "paid" event never re-grants.
+* **Manual changes** (grant, extend, cancel, revoke, credit correction) need a reason and write an
+  audit row with the admin. Manual grants are `source=manual`, amount 0, no payment: never revenue.
+* **Legacy subscriptions** (sold before credits existed) were given 8 credits per day of access,
+  the same ratio as the new plans.
+* **Email column.** Every table with `user_id` has `user_email`, a snapshot taken when the row is
+  created (`app/db/email_snapshot.py`). It is never rewritten when a user changes email; current
+  identity always comes from `user_id`. Rows whose user no longer exists keep `''`
+  (local DB: 19 `activity_log` + 10 `events` rows) — reported at startup, never invented or deleted.
+
+### Currencies
+
+* `billing_currencies`: `display_enabled` (shown in the pricing selector) and `payments_enabled`.
+* `plan_prices`: one row per plan × currency × period (`effective_from/to`); changing an amount
+  closes the old row and opens a new one. No exchange rate is stored or applied.
+* Checkout in a currency requires: a live price, `payments_enabled`, and a configured gateway whose
+  `RAZORPAY_CURRENCIES` / `CASHFREE_CURRENCIES` includes it. Otherwise it is refused — the
+  currency is never silently switched. The gateway's reported currency must match or nothing is
+  activated.
+* Admin revenue is reported **per currency**, never summed.
+
+### Recurring billing
+
+Not implemented. Razorpay Subscriptions can express exact intervals (`period=daily`,
+`interval` ≥ 7, so 30 and 90 are possible), but that needs plan objects, customer mandates, renewal
+webhooks and live-credential testing, none of which exist yet. Until then `auto_renew` is always
+false, the public API returns `auto_renew_available: false`, and the UI says "paid upfront · no
+auto-renewal". `plan_prices.provider_refs_json` (e.g. `razorpay_plan_id`) and
+`subscription_plans.billing_interval_days` are already stored for that work.
+
+### Desktop app
+
+The `.exe` sends screenshots through its main process, which this change did not touch (desktop
+changes need explicit approval). It shows the new credit errors as-is, but it does **not** send an
+`Idempotency-Key` yet, so each desktop request gets a server-generated id.
 
 ## Architecture
 
@@ -91,6 +164,22 @@ Rollback (drops billing data, so take a backup first):
 ```sql
 DROP TABLE subscription_audit_logs, payment_webhook_events, user_subscriptions, payments, subscription_plans;
 ```
+
+**2026-10 migration** (`init_db()` → `_ensure_billing_columns`, `_ensure_user_email_columns`,
+then `pricing_service.ensure_catalogue`; all additive and idempotent):
+
+| Change | Objects |
+|--------|---------|
+| New tables | `plan_prices`, `billing_currencies`, `screenshot_usage`, `schema_migrations` |
+| New columns | `subscription_plans`: duration_hours, duration_unit, screenshot_allowance, billing_type, billing_interval_days, is_public · `payments`: duration_hours, screenshot_allowance, idempotency_key, refunded_at, refund_reference · `user_subscriptions`: screenshot_allowance, screenshots_used, billing_type, auto_renew, cancelled_at |
+| `user_email` added + backfilled | `activity_log`, `password_reset_tokens`, `subscription_audit_logs`, and legacy tables found in the live DB (`click_events`, `events`, `page_times`, `visit_logs`) |
+| Constraints / indexes | `uq_payments_user_idempotency`, `ix_payments_currency_status`, `ix_<table>_user_email`, `ck_user_subscriptions_credits` (PostgreSQL; SQLite gets it on new tables) |
+| Data (once) | 5-plan catalogue, INR price rows, INR+USD currencies (USD display-only), credits for legacy subscriptions |
+
+Rollback of the 2026-10 step: restore the pre-deploy `pg_dump`. (Manual alternative: drop the four
+new tables and added columns; the old code ignores them, so leaving them in place is also safe.)
+Verified: the full suite passes on SQLite; the billing/pricing/screenshot suites pass on
+PostgreSQL 18; on the local dev DB every pre-existing table kept its row count.
 Verified on PostgreSQL 18.6: the full suite (294 tests) passes, and running startup
 migration and seeding twice on a populated database changes nothing.
 

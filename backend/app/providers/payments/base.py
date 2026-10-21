@@ -66,7 +66,9 @@ class VerifiedPayment:
     failure_reason: str = ""
 
 
-WebhookOutcome = Literal["paid", "failed", "ignored"]
+#: refunded = money returned (``amount_minor`` is the REFUND amount);
+#: disputed = chargeback opened; dispute_lost = chargeback decided against us.
+WebhookOutcome = Literal["paid", "failed", "refunded", "disputed", "dispute_lost", "ignored"]
 
 
 @dataclass(frozen=True)
@@ -82,6 +84,8 @@ class WebhookEvent:
     currency: str | None = None
     method: str = ""
     failure_reason: str = ""
+    #: Gateway refund / dispute id for refund and dispute events.
+    reference: str = ""
 
 
 class PaymentGateway(ABC):

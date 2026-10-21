@@ -5,6 +5,7 @@ import type {
   CapturedImage,
   ScreenshotError,
   ScreenshotModel,
+  ScreenshotUsage,
 } from './screenshot.models';
 
 type Fail = { ok: false; error: { code: string; message: string } };
@@ -22,6 +23,8 @@ export interface ScreenshotBridge {
        * true/false = server is / is not set up; null = server not reachable now.
        */
       serverReady: boolean | null;
+      /** Caller's screenshot credits; null/absent = unknown (older builds lack it). */
+      usage?: ScreenshotUsage | null;
     }>
   >;
   listSources(): Promise<BridgeResult<{ sources: CaptureSource[] }>>;
@@ -29,7 +32,7 @@ export interface ScreenshotBridge {
   analyze(
     modelKey: string,
     images: Omit<CapturedImage, 'sourceName'>[],
-  ): Promise<BridgeResult<{ result: AnalysisResult; model: string }>>;
+  ): Promise<BridgeResult<{ result: AnalysisResult; model: string; usage?: ScreenshotUsage | null }>>;
   /** Register / unregister the Ctrl+Shift+S capture hotkey (older builds lack it). */
   setHotkey?(enabled: boolean): Promise<BridgeResult<{ active: boolean }>>;
   /** Hotkey pressed: screen source under the cursor, or an error. Returns an unsubscribe fn. */

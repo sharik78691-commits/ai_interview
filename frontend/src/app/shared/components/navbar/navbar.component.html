@@ -1,6 +1,14 @@
-<nav class="nav" [class.desktop]="isDesktop">
+<nav class="nav" [class.desktop]="isDesktop" [class.guest]="!user">
   <div class="container nav-inner">
-    <a routerLink="/" class="brand"><span class="logo">◈</span> AI Interview Assistant
+    <a routerLink="/" class="brand" aria-label="OyeInterview home">
+      <svg class="logo-mark" viewBox="0 0 64 64" width="30" height="30" aria-hidden="true">
+        <rect width="64" height="64" rx="16" class="lm-tile"/>
+        <path d="M12 34a4 4 0 0 1 4-4h32a4 4 0 0 1 4 4v16a4 4 0 0 1-4 4H16a4 4 0 0 1-4-4z" class="lm-back"/>
+        <rect x="18" y="11" width="28" height="34" rx="3" class="lm-paper"/>
+        <path d="M24.5 23.5l4.5 4.5 9.5-9.5" fill="none" class="lm-check" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M12 33l20 13 20-13v17a4 4 0 0 1-4 4H16a4 4 0 0 1-4-4z" class="lm-env"/>
+      </svg>
+      <span class="wordmark">OYE<span>INTERVIEW</span></span>
       @if (mode === 'live') { <span class="live-badge">LIVE AI</span> }
       @else if (mode === 'demo') { <span class="demo-badge" title="Template answers — add an LLM key for live AI">DEMO</span> }
       @else if (mode === 'offline') { <span class="off-badge" title="Backend unreachable">OFFLINE</span> }
@@ -44,6 +52,7 @@
         <button class="logout-btn" (click)="logout()" [disabled]="signingOut">{{ signingOut ? 'Signing out…' : 'Sign out' }}</button>
       } @else {
         <a routerLink="/login" routerLinkActive="active" class="signin-link">Sign in</a>
+        <a routerLink="/register" class="btn-primary nav-cta">Get started</a>
       }
     </div>
   </div>

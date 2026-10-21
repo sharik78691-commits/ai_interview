@@ -2,14 +2,16 @@ import { Injectable, inject } from '@angular/core';
 import { validateImages } from './image-validation';
 import { ModelConfigService } from './model-config.service';
 import { getScreenshotBridge } from './screenshot-bridge';
-import { AnalysisResult, CapturedImage, ScreenshotError } from './screenshot.models';
+import { AnalysisResult, CapturedImage, ScreenshotError, ScreenshotUsage } from './screenshot.models';
 
 /** Sends validated screenshots to the configured model (via the main process). */
 @Injectable({ providedIn: 'root' })
 export class ScreenshotAnalysisService {
   private config = inject(ModelConfigService);
 
-  async analyze(images: CapturedImage[]): Promise<{ result: AnalysisResult; model: string }> {
+  async analyze(
+    images: CapturedImage[],
+  ): Promise<{ result: AnalysisResult; model: string; usage: ScreenshotUsage | null }> {
     const bridge = getScreenshotBridge();
     if (!bridge) {
       throw new ScreenshotError('NOT_DESKTOP', 'Screenshot analysis is only available in the desktop app.');
@@ -24,6 +26,6 @@ export class ScreenshotAnalysisService {
       images.map(({ mimeType, data, width, height }) => ({ mimeType, data, width, height })),
     );
     if (!res.ok) throw new ScreenshotError(res.error.code, res.error.message);
-    return { result: res.result, model: res.model };
+    return { result: res.result, model: res.model, usage: res.usage ?? null };
   }
 }

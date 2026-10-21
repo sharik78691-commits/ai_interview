@@ -217,6 +217,23 @@ class CashfreeGateway(PaymentGateway):
 
         event_type = str(body.get("type") or "")
         data = body.get("data") or {}
+        # Refund webhook: type REFUND_STATUS_WEBHOOK, data.refund {cf_refund_id,
+        # order_id, refund_amount, refund_currency, refund_status} — Cashfree docs.
+        refund = data.get("refund") or {}
+        if event_type == "REFUND_STATUS_WEBHOOK" and refund:
+            cf_refund_id = str(refund.get("cf_refund_id") or "")
+            event_id = header(headers, "x-idempotency-key") or (
+                f"refund:{cf_refund_id}" if cf_refund_id else hashlib.sha256(raw_body).hexdigest()
+            )
+            ok = str(refund.get("refund_status") or "").upper() == "SUCCESS"
+            return WebhookEvent(
+                event_id=event_id[:128], event_type=event_type[:60],
+                outcome="refunded" if ok else "ignored",
+                order_id=str(refund.get("order_id") or ""),
+                amount_minor=to_minor(refund["refund_amount"]) if "refund_amount" in refund else None,
+                currency=str(refund.get("refund_currency") or "") or None,
+                reference=cf_refund_id[:100],
+            )
         order = data.get("order") or {}
         payment = data.get("payment") or {}
         cf_payment_id = str(payment.get("cf_payment_id") or "")

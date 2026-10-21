@@ -42,6 +42,9 @@ class ActivityLog(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     kind: Mapped[str] = mapped_column(String(20), index=True, nullable=False)
     user_id: Mapped[int | None] = mapped_column(Integer, index=True, nullable=True)
+    # Email snapshot at event time ('' for anonymous rows); filled by
+    # app.db.email_snapshot, never rewritten when the user changes email.
+    user_email: Mapped[str] = mapped_column(String(320), index=True, default="", nullable=False)
     # --- LLM usage tracking (kind = "llm_usage") ---
     # provider key + model id actually used (never secrets).
     provider: Mapped[str | None] = mapped_column(String(40), nullable=True)
