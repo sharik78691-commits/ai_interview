@@ -1,136 +1,189 @@
-<!-- 2. Hero -->
+<!-- Hero -->
 <section class="hero">
   <div class="wrap hero-grid">
+    <div class="hero-badge"><span class="live-dot" aria-hidden="true"></span>Real-time AI interview copilot</div>
+
     <div class="hero-copy">
-      <div class="hero-badge">Real-time AI interview copilot</div>
       <h1>Your offer letter<br><span class="accent">is one interview away.</span></h1>
       <p class="sub">Walk in prepared. Get resume-aware answer points in seconds, for technical, behavioral and coding rounds.</p>
       <div class="cta">
-        <a routerLink="/register" class="btn-primary hero-btn">{{ ctaLabel() }} →</a>
-        <button type="button" class="btn-ghost hero-btn" (click)="tryDemo()">▶ Watch a 30-second demo</button>
+        <a routerLink="/register" class="btn-primary hero-btn">{{ ctaLabel() }} <span aria-hidden="true">→</span></a>
+        <button type="button" class="btn-ghost hero-btn" (click)="tryDemo()">
+          <span class="play" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z"/></svg></span>
+          Watch a 30-second demo
+        </button>
       </div>
-      <p class="micro">No auto-renewal · No card stored</p>
+      <ul class="assure">
+        <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>No auto-renewal</li>
+        <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>No card stored</li>
+        <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>Works in your browser</li>
+      </ul>
     </div>
 
     <div class="hero-art">
-      <svg viewBox="0 0 120 106" aria-hidden="true">
-        <circle cx="60" cy="56" r="50" fill="var(--tint)"/>
-        <rect class="c1" x="24" y="10" width="6" height="6" fill="#ffb703"/>
-        <rect class="c2" x="90" y="8" width="6" height="6" fill="#fb7185"/>
-        <circle class="c3 conf-blue" cx="74" cy="6" r="3.5"/>
-        <rect class="c4" x="40" y="4" width="5" height="5" fill="var(--accent)"/>
-        <circle class="c2" cx="100" cy="30" r="3" fill="#ffb703"/>
-        <rect class="c3 conf-blue" x="14" y="34" width="5" height="5"/>
+      <svg viewBox="0 0 200 180" aria-hidden="true">
+        <circle cx="100" cy="96" r="80" fill="var(--tint)"/>
+        <!-- confetti -->
+        <rect class="c1" x="42" y="24" width="8" height="8" rx="1.5" fill="#ffb703"/>
+        <rect class="c2" x="152" y="18" width="8" height="8" rx="1.5" fill="#fb7185"/>
+        <circle class="c3 conf-blue" cx="124" cy="12" r="4.5"/>
+        <rect class="c4" x="70" y="8" width="7" height="7" rx="1.5" fill="var(--accent)"/>
+        <circle class="c2" cx="172" cy="56" r="4" fill="#ffb703"/>
+        <rect class="c3 conf-blue" x="22" y="62" width="7" height="7" rx="1.5"/>
+        <circle class="c4" cx="30" cy="34" r="3.5" fill="#fb7185"/>
+        <!-- envelope back -->
+        <path d="M30 104a8 8 0 0 1 8-8h124a8 8 0 0 1 8 8v54a8 8 0 0 1-8 8H38a8 8 0 0 1-8-8z" fill="var(--accent2)"/>
+        <!-- letter -->
         <g class="rise">
-          <rect x="32" y="24" width="56" height="50" rx="4" fill="var(--paper)"/>
-          <text x="60" y="39" text-anchor="middle" font-size="8.5" font-weight="600" fill="#137547" textLength="46" lengthAdjust="spacingAndGlyphs">OFFER LETTER</text>
-          <rect x="40" y="45" width="40" height="3" fill="#c5e8d4"/>
-          <rect x="40" y="51" width="32" height="3" fill="#c5e8d4"/>
-          <path class="check" d="M53 62 L58 67 L68 57" fill="none" stroke="#137547" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+          <rect x="46" y="30" width="108" height="112" rx="7" fill="var(--paper)" class="paper"/>
+          <text x="100" y="54" text-anchor="middle" class="letter-title">OFFER LETTER</text>
+          <rect x="62" y="64" width="76" height="4" rx="2" fill="#c5e8d4"/>
+          <rect x="62" y="74" width="58" height="4" rx="2" fill="#c5e8d4"/>
+          <circle cx="100" cy="104" r="15" fill="#d3f0df"/>
+          <path class="check" d="M92.5 104.5l5 5 10-10" fill="none" stroke="#137547" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
         </g>
-        <path d="M22 58 L60 84 L98 58 L98 100 L22 100Z" fill="var(--accent)"/>
-        <path d="M22 100 L52 76 M98 100 L68 76" stroke="var(--accent2)" stroke-width="2"/>
+        <!-- envelope front -->
+        <path d="M30 100l70 44 70-44v58a8 8 0 0 1-8 8H38a8 8 0 0 1-8-8z" fill="var(--accent)"/>
+        <path d="M38 160l40-26M162 160l-40-26" stroke="var(--accent2)" stroke-width="2.5" stroke-linecap="round" opacity=".55"/>
       </svg>
     </div>
   </div>
 </section>
 
-<!-- 3. Live preview card (illustration of the interview screen) -->
-<section class="wrap preview-wrap">
-  <div class="preview" aria-label="Example of the live answer screen">
-    <div class="listening"><span class="rec-dot" aria-hidden="true"></span>Listening to interviewer</div>
-    <p class="pq">“Why should we hire you for this role?”</p>
-    <p class="plabel">Key points · from your resume + JD</p>
-    <div class="bars" aria-hidden="true">
-      <span style="--w: 92%; --d: 0s"></span>
-      <span style="--w: 78%; --d: .3s"></span>
-      <span style="--w: 85%; --d: .6s"></span>
-      <span style="--w: 60%; --d: .9s"></span>
+<!-- Live preview -->
+<section class="sec">
+  <div class="wrap split">
+    <div class="split-copy">
+      <p class="eyebrow">Live in your interview</p>
+      <h2>Answer points while the question is still being asked</h2>
+      <p class="muted">OyeInterview listens to the interviewer's audio you share, spots the question, and streams short points drawn from your own resume and the job description.</p>
+      <ul class="ticks">
+        <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>Points start streaming within seconds</li>
+        <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>Built from your experience, not generic advice</li>
+        <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>You stay in control — answer in your own words</li>
+      </ul>
+    </div>
+
+    <div class="preview" aria-label="Example of the live answer screen">
+      <div class="pv-top">
+        <span class="listening"><span class="rec-dot" aria-hidden="true"></span>Listening to interviewer</span>
+        <span class="pv-tag">Behavioral</span>
+      </div>
+      <p class="pq">“Why should we hire you for this role?”</p>
+      <p class="plabel">Key points · from your resume + JD</p>
+      <ol class="points">
+        <li style="--d: .2s"><b>Match</b> — your years with the exact stack the JD asks for</li>
+        <li style="--d: .9s"><b>Proof</b> — the project on your resume with a measurable result</li>
+        <li style="--d: 1.6s"><b>Fit</b> — what draws you to this team's problems</li>
+        <li style="--d: 2.3s"><b>Close</b> — one line on the impact you'd bring in 90 days</li>
+      </ol>
+      <p class="pv-foot">Example screen · your points come from your own resume</p>
     </div>
   </div>
 </section>
 
-<!-- 4. Pain points -->
-<section class="sec">
+<!-- Pain points -->
+<section class="sec alt">
   <div class="wrap">
-    <h2>What stands between you and the offer?</h2>
+    <div class="sec-intro">
+      <p class="eyebrow">Why it helps</p>
+      <h2>What stands between you and the offer?</h2>
+    </div>
     <div class="grid3">
       <div class="card pain">
-        <span class="ico" aria-hidden="true">
-          <svg viewBox="0 0 24 24"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5c.7.7 1 1.5 1 2.5h6c0-1 .3-1.8 1-2.5A6 6 0 0 0 12 3z"/></svg>
-        </span>
+        <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5c.7.7 1 1.5 1 2.5h6c0-1 .3-1.8 1-2.5A6 6 0 0 0 12 3z"/></svg></span>
         <h3>Mind goes blank</h3>
-        <p class="muted">Key points appear while you think.</p>
+        <p class="muted">Key points appear while you think, so you always know where your answer is going.</p>
       </div>
       <div class="card pain">
-        <span class="ico" aria-hidden="true">
-          <svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg>
-        </span>
+        <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg></span>
         <h3>Forgot your best example</h3>
-        <p class="muted">Answers use your own resume and the job description.</p>
+        <p class="muted">Answers use your own resume and the job description — your real projects, ready to mention.</p>
       </div>
       <div class="card pain">
-        <span class="ico" aria-hidden="true">
-          <svg viewBox="0 0 24 24"><path d="M8 8l-4 4 4 4M16 8l4 4-4 4M13 5l-2 14"/></svg>
-        </span>
+        <span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 8l-4 4 4 4M16 8l4 4-4 4M13 5l-2 14"/></svg></span>
         <h3>Stuck on a coding question</h3>
-        <p class="muted">Approach, code hints and complexity notes.</p>
+        <p class="muted">Approach first, then code hints and time/space complexity notes you can explain.</p>
       </div>
     </div>
   </div>
 </section>
 
-<!-- Kept for SEO -->
+<!-- What is OyeInterview (kept for SEO) -->
 <section class="sec">
-  <div class="wrap">
-    <h2>What is OyeInterview?</h2>
-    <p class="muted lead">
-      OyeInterview is a real-time <strong>AI interview assistant</strong>. It detects the
-      interviewer's questions from the meeting audio you share (or questions you type) and drafts
-      structured answer suggestions grounded in your resume and the job description. It helps
-      with <strong>technical</strong>, <strong>behavioral</strong> and <strong>coding</strong>
-      interviews — bullet answers, STAR outlines, complexity notes and likely follow-ups.
-    </p>
+  <div class="wrap split">
+    <div class="split-copy">
+      <p class="eyebrow">About</p>
+      <h2>What is OyeInterview?</h2>
+      <p class="muted lead">
+        OyeInterview is a real-time <strong>AI interview assistant</strong>. It detects the
+        interviewer's questions from the meeting audio you share (or questions you type) and drafts
+        structured answer suggestions grounded in your resume and the job description. It helps
+        with <strong>technical</strong>, <strong>behavioral</strong> and <strong>coding</strong>
+        interviews — bullet answers, STAR outlines, complexity notes and likely follow-ups.
+      </p>
+      <a routerLink="/features" class="sec-link">Explore all features →</a>
+    </div>
+    <div class="feat-tiles">
+      <div class="tile"><span class="ico sm" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 14v-2a9 9 0 0 1 18 0v2"/><path d="M21 15a2 2 0 0 1-2 2h-1v-5h3zM3 15a2 2 0 0 0 2 2h1v-5H3z"/></svg></span><b>Interviewer audio</b><span class="muted">Questions detected from the call</span></div>
+      <div class="tile"><span class="ico sm" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M13 3L5 14h6l-1 7 8-11h-6z"/></svg></span><b>Streaming answers</b><span class="muted">Points first, full answer next</span></div>
+      <div class="tile"><span class="ico sm" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3l2.6 5.6 6 .7-4.5 4.1 1.2 6L12 16.4 6.7 19.4l1.2-6L3.4 9.3l6-.7z"/></svg></span><b>STAR outlines</b><span class="muted">Behavioral stories, structured</span></div>
+      <div class="tile"><span class="ico sm" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h10M4 18h7"/></svg></span><b>Your length</b><span class="muted">Short, medium or long answers</span></div>
+    </div>
   </div>
 </section>
 
-<!-- 5. Journey -->
+<!-- Journey -->
 <section class="sec alt" id="how-it-works">
   <div class="wrap">
-    <div class="sec-head">
-      <h2>From resume to offer letter</h2>
+    <div class="sec-intro row">
+      <div>
+        <p class="eyebrow">How it works</p>
+        <h2>From resume to offer letter</h2>
+      </div>
       <a routerLink="/how-it-works" class="sec-link">Full walkthrough →</a>
     </div>
     <ol class="journey">
       <li>
+        <span class="step-no">1</span>
         <span class="jbadge" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M12 18v-6M9 15h6"/></svg></span>
-        <div><h3>Add your resume + role</h3><p class="muted">2 minutes, one time</p></div>
+        <h3>Add your resume + role</h3>
+        <p class="muted">2 minutes, one time</p>
       </li>
       <li>
+        <span class="step-no">2</span>
         <span class="jbadge" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 14v-2a9 9 0 0 1 18 0v2"/><path d="M21 15a2 2 0 0 1-2 2h-1v-5h3zM3 15a2 2 0 0 0 2 2h1v-5H3z"/></svg></span>
-        <div><h3>Share interviewer audio</h3><p class="muted">Or just type the question</p></div>
+        <h3>Share interviewer audio</h3>
+        <p class="muted">Or just type the question</p>
       </li>
       <li>
-        <span class="jbadge filled" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 8l9 6 9-6"/><rect x="3" y="5" width="18" height="14" rx="2"/></svg></span>
-        <div><h3>Answer in your own words</h3><p class="muted">And open that offer letter</p></div>
+        <span class="step-no">3</span>
+        <span class="jbadge filled" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 8l9 6 9-6"/></svg></span>
+        <h3>Answer in your own words</h3>
+        <p class="muted">And open that offer letter</p>
       </li>
     </ol>
   </div>
 </section>
 
-<!-- 6. Pricing (from the backend) -->
+<!-- Pricing (from the backend) -->
 <section class="sec" id="pricing">
   <div class="wrap">
-    <h2 class="center">Simple prepaid plans</h2>
-    <p class="muted center sec-sub">Pay once. No auto-renewal. Ever.</p>
+    <div class="sec-intro center">
+      <p class="eyebrow">Pricing</p>
+      <h2>Simple prepaid plans</h2>
+      <p class="muted">Pay once. No auto-renewal. Ever.</p>
+    </div>
     @if (plans().length) {
       <div class="plans">
         @for (p of plans(); track p.id) {
-          <article class="card plan" [class.hl]="p.is_highlighted">
-            @if (p.is_highlighted || p.badge) {
-              <span class="pill-badge">{{ p.badge || 'Most popular' }}</span>
-            }
-            <h3>{{ p.name }}</h3>
+          <article class="plan" [class.hl]="p.is_highlighted">
+            <div class="plan-head">
+              <h3>{{ p.name }}</h3>
+              @if (p.is_highlighted || p.badge) {
+                <span class="pill-badge">{{ p.badge || 'Most popular' }}</span>
+              }
+            </div>
             <div class="price">
               <strong>{{ money(p.price_minor, p.currency) }}</strong>
               <span class="muted">/ {{ duration(p.duration_days) }}</span>
@@ -138,14 +191,14 @@
             @if (p.is_promo) {
               <p class="small muted"><s>{{ money(p.regular_price_minor, p.currency) }}</s> {{ p.promo_label || 'Limited-time price' }}</p>
             }
-            @if (p.is_highlighted) {
-              <ul class="feats">
-                @for (f of p.features.slice(0, 3); track f) { <li>✓ {{ f }}</li> }
-              </ul>
-              <a routerLink="/pricing" class="btn-primary plan-btn">Get {{ p.name }}</a>
-            } @else {
-              <a routerLink="/pricing" class="btn-ghost plan-btn">Choose</a>
-            }
+            <p class="per-day">≈ {{ perDay(p) }} per day</p>
+            @if (p.description) { <p class="plan-desc muted">{{ p.description }}</p> }
+            <ul class="feats">
+              @for (f of p.features.slice(0, 3); track f) {
+                <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>{{ f }}</li>
+              }
+            </ul>
+            <a routerLink="/pricing" class="plan-btn" [class.btn-primary]="p.is_highlighted" [class.btn-ghost]="!p.is_highlighted">Get {{ p.name }}</a>
           </article>
         }
       </div>
@@ -154,42 +207,52 @@
     } @else {
       <p class="muted center">Loading plans…</p>
     }
-    <div class="trust-strip">
-      <span>🔒 Secure gateway</span><span>💳 No card stored</span><span>↺ No renewal</span>
+    <ul class="trust-strip">
+      <li><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>Secure gateway (Razorpay / Cashfree)</li>
+      <li><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M3 10h18"/></svg>No card stored</li>
+      <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3M18 3v4h-4M6 21v-4h4"/></svg>No renewal</li>
+    </ul>
+  </div>
+</section>
+
+<!-- FAQ -->
+<section class="sec alt">
+  <div class="wrap faq-grid">
+    <div class="sec-intro">
+      <p class="eyebrow">FAQ</p>
+      <h2>Questions, answered</h2>
+      <p class="muted">Still unsure? Read our <a routerLink="/trust" class="inline-link">data practices</a> or try the demo — no payment needed.</p>
+    </div>
+    <div class="faqs">
+      <details class="faq"><summary>Will I be charged again?</summary><p class="muted">No. Every plan is a one-time payment that simply ends. No auto-renewal and no stored cards.</p></details>
+      <details class="faq"><summary>Is my resume private?</summary><p class="muted">Saved resumes and target roles are stored in your account. During a session, questions with your resume and job description go to the selected AI provider, and interviewer audio clips go to a speech-to-text provider. Transcripts and answers are not stored. See the <a routerLink="/privacy-policy">Privacy Policy</a>.</p></details>
+      <details class="faq"><summary>Can I try before paying?</summary>
+        <p class="muted">
+          Yes — the demo shows the full interview screen with sample answers, no payment needed.
+          @if (hasTrial()) { Some plans also include a free trial you can start from Billing. }
+          See the <a routerLink="/refund-policy">Refund Policy</a> for payment questions.
+        </p>
+      </details>
+      <details class="faq"><summary>Do I need a microphone?</summary><p class="muted">No. Interviewer questions come from the meeting audio you share, and you can always type questions. Your own microphone is optional.</p></details>
+      <details class="faq"><summary>Which browsers work best?</summary><p class="muted">Chrome or Edge — they support sharing tab audio. Typed questions work in other modern browsers.</p></details>
+      <details class="faq"><summary>Can I use it in a real interview?</summary><p class="muted">Only where the interview's rules allow assistance tools. Check first — see our <a routerLink="/acceptable-use">Acceptable Use Policy</a>. AI suggestions can be wrong — always check them.</p></details>
     </div>
   </div>
 </section>
 
-<!-- 7. FAQ -->
-<section class="sec alt">
-  <div class="wrap narrow">
-    <h2>Frequently asked questions</h2>
-    <details class="card faq"><summary>Will I be charged again?</summary><p class="muted">No. Every plan is a one-time payment that simply ends. No auto-renewal and no stored cards.</p></details>
-    <details class="card faq"><summary>Is my resume private?</summary><p class="muted">Saved resumes and target roles are stored in your account. During a session, questions with your resume and job description go to the selected AI provider, and interviewer audio clips go to a speech-to-text provider. Transcripts and answers are not stored. See the <a routerLink="/privacy-policy">Privacy Policy</a> and <a routerLink="/trust">Trust</a> page.</p></details>
-    <details class="card faq"><summary>Can I try before paying?</summary>
-      <p class="muted">
-        Yes — the demo shows the full interview screen with sample answers, no payment needed.
-        @if (hasTrial()) { Some plans also include a free trial you can start from Billing. }
-        See the <a routerLink="/refund-policy">Refund Policy</a> for payment questions.
-      </p>
-    </details>
-    <details class="card faq"><summary>Do I need a microphone?</summary><p class="muted">No. Interviewer questions come from the meeting audio you share, and you can always type questions. Your own microphone is optional.</p></details>
-    <details class="card faq"><summary>Which browsers work best?</summary><p class="muted">Chrome or Edge — they support sharing tab audio. Typed questions work in other modern browsers.</p></details>
-    <details class="card faq"><summary>Can I use it in a real interview?</summary><p class="muted">Only where the interview's rules allow assistance tools. Check first — see our <a routerLink="/acceptable-use">Acceptable Use Policy</a>. AI suggestions can be wrong — always check them.</p></details>
+<!-- Final CTA band -->
+<section class="final-wrap">
+  <div class="wrap">
+    <div class="final">
+      <span class="final-env" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 8l9 6 9-6"/></svg></span>
+      <h2>Your next email could say “Congratulations!”</h2>
+      <p>Set up in under 5 minutes.</p>
+      <a routerLink="/register" class="final-btn">{{ ctaLabel() }} <span aria-hidden="true">→</span></a>
+    </div>
   </div>
 </section>
 
-<!-- 8. Final CTA band -->
-<section class="final">
-  <div class="wrap final-inner">
-    <svg class="final-env" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 8l9 6 9-6"/></svg>
-    <h2>Your next email could say “Congratulations!”</h2>
-    <p>Set up in under 5 minutes.</p>
-    <a routerLink="/register" class="final-btn">{{ ctaLabel() }} →</a>
-  </div>
-</section>
-
-<!-- 9. Sticky bottom bar (mobile only) -->
+<!-- Sticky bottom bar (mobile only) -->
 <div class="sticky-bar">
   <div class="sb-text">
     <strong>{{ hasTrial() ? 'Free trial available' : 'Try the demo free' }}</strong>

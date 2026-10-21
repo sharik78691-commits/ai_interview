@@ -22,6 +22,10 @@ export class LandingComponent implements OnInit {
   readonly ctaLabel = computed(() => (this.hasTrial() ? 'Start your free trial' : 'Get started'));
 
   readonly money = formatMoney;
+
+  perDay(p: Plan): string {
+    return formatMoney(Math.round(p.price_minor / Math.max(p.duration_days, 1)), p.currency);
+  }
   readonly duration = durationLabel;
 
   ngOnInit(): void {
