@@ -24,9 +24,9 @@ export const routes: Routes = [
     // Public marketing page — the primary SEO target.
     data: {
       seo: {
-        title: 'OyeInterview — AI Interview Assistant | Real-Time Interview Copilot',
+        title: 'OyeInterview — AI Interview Practice & Preparation Assistant',
         description:
-          'OyeInterview is a real-time AI interview assistant that gives resume-aware answers, STAR stories and code hints during technical, behavioral and coding interviews.',
+          'OyeInterview is an AI interview practice and preparation assistant: resume-aware answers, STAR stories and code hints for technical, behavioral and coding interviews.',
         path: '/',
       },
     },
@@ -40,7 +40,7 @@ export const routes: Routes = [
       seo: {
         title: 'Sign in — OyeInterview AI Interview Assistant',
         description:
-          'Sign in to OyeInterview to get real-time, resume-aware AI guidance for your next technical, behavioral or coding interview.',
+          'Sign in to OyeInterview for resume-aware AI guidance to prepare for your next technical, behavioral or coding interview.',
         path: '/login',
       },
     },
@@ -53,7 +53,7 @@ export const routes: Routes = [
       seo: {
         title: 'Create your free account — OyeInterview',
         description:
-          'Create a free OyeInterview account and start practising interviews with a real-time AI copilot that adapts to your resume and target role.',
+          'Create a free OyeInterview account and start practising interviews with an AI assistant that adapts to your resume and target role.',
         path: '/register',
       },
     },
@@ -283,6 +283,34 @@ export const routes: Routes = [
       },
     },
   },
+  {
+    path: 'shipping-policy',
+    loadComponent: () =>
+      import('./features/legal/shipping/shipping.component').then((m) => m.ShippingComponent),
+    data: {
+      seo: {
+        title: 'Shipping & Delivery Policy — OyeInterview',
+        description:
+          'OyeInterview is a digital service: no physical shipping, plans are activated instantly after payment.',
+        path: '/shipping-policy',
+      },
+    },
+  },
+  { path: 'delivery-policy', redirectTo: 'shipping-policy', pathMatch: 'full' },
+  {
+    path: 'about',
+    loadComponent: () =>
+      import('./features/info/about/about.component').then((m) => m.AboutComponent),
+    data: {
+      seo: {
+        title: 'About us — OyeInterview',
+        description:
+          'Who operates OyeInterview, an AI interview practice and preparation assistant, and how to reach us.',
+        path: '/about',
+      },
+    },
+  },
+  { path: 'about-us', redirectTo: 'about', pathMatch: 'full' },
   {
     path: 'pricing',
     loadComponent: () =>

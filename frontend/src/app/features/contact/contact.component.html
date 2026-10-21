@@ -36,9 +36,14 @@
   </div>
 
   <section class="biz muted small">
+    <h3>Business details</h3>
+    <p data-testid="contact-operator">
+      <strong>{{ biz.brand }}</strong> is operated by <strong>{{ biz.operatorName }}</strong>,
+      {{ biz.location }}.<br />
+      Email: <a [href]="'mailto:' + biz.email">{{ biz.email }}</a><br />
+      {{ biz.gstNote }}
+    </p>
     <p>
-      OyeInterview is an independently developed product operated from India.
-      <!-- CONFIRM: operator name/address for payment-gateway KYC and consumer law. -->
       Payments are processed by Razorpay and Cashfree; we never receive or store
       card, UPI or bank credentials.
     </p>

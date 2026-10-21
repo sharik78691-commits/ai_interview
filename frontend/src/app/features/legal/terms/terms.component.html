@@ -20,10 +20,14 @@
     <h2>1. About OyeInterview</h2>
     <p>
       OyeInterview ("we", "us", "the service") is an independently developed software
-      product that turns interview questions into structured, resume-aware answer
-      suggestions in real time. It is not affiliated with, endorsed by, or sponsored by
-      any employer, assessment platform or meeting tool.
-      <!-- CONFIRM: operator legal name, business type and address to identify the contracting party. -->
+      product for interview practice and preparation that turns interview questions into
+      structured, resume-aware answer guidance. It is not affiliated with, endorsed by, or
+      sponsored by any employer, assessment platform or meeting tool.
+    </p>
+    <p data-testid="terms-operator">
+      The service is operated by <strong>{{ biz.operatorName }}</strong>, {{ biz.location }}
+      (email: {{ biz.email }}). When
+      these terms say "we" or "us", they mean this operator.
     </p>
   </section>
 
@@ -50,7 +54,7 @@
       <li><strong>Buying again early:</strong> a new period starts when your current one ends, so no days are lost.</li>
       <li><strong>Price at checkout:</strong> the amount shown at checkout (including any promotion running at that moment) is what you pay. Later price changes do not affect a period you have already bought.</li>
       <li><strong>Activation:</strong> a plan starts once the payment gateway confirms the payment to our server. Payments are processed by Razorpay or Cashfree; we never receive your card, UPI or bank credentials.</li>
-      <li><strong>Taxes:</strong> <!-- CONFIRM: GST registration status and whether listed prices include GST; add GSTIN if registered. -->any applicable taxes are shown at checkout.</li>
+      <li><strong>Taxes:</strong> {{ biz.gstNote }} The amount shown at checkout is the full amount you pay.</li>
       <li><strong>Free trials:</strong> where a plan offers one, it is limited to one trial per person/account. We may decline or end trials that are abused.</li>
       <li><strong>Refunds:</strong> governed by the <a routerLink="/refund-policy">Refund &amp; Cancellation Policy</a>.</li>
     </ul>

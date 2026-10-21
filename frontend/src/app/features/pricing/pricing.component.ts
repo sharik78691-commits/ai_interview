@@ -5,6 +5,7 @@ import { Router, RouterLink } from '@angular/router';
 import { HttpErrorResponse } from '@angular/common/http';
 import { firstValueFrom, forkJoin } from 'rxjs';
 import { AuthService } from '../../core/auth/auth.service';
+import { BUSINESS } from '../../core/business-info';
 import { CheckoutLauncherService } from '../../core/payments/checkout-launcher.service';
 import { BillingService } from '../../core/services/billing.service';
 import {
@@ -54,6 +55,8 @@ function defaultCurrency(available: string[]): string {
   styleUrl: './pricing.component.css',
 })
 export class PricingComponent implements OnInit {
+  /** Shown in the taxes FAQ (operator is not GST-registered). */
+  readonly gstNote = BUSINESS.gstNote;
   private readonly billing = inject(BillingService);
   private readonly launcher = inject(CheckoutLauncherService);
   private readonly auth = inject(AuthService);

@@ -1,5 +1,6 @@
 import { Component } from '@angular/core';
 import { RouterLink } from '@angular/router';
+import { BUSINESS } from '../../../core/business-info';
 
 /**
  * Public Terms of Service (/terms; /terms-and-conditions redirects here).
@@ -11,4 +12,6 @@ import { RouterLink } from '@angular/router';
   imports: [RouterLink],
   templateUrl: './terms.component.html',
 })
-export class TermsComponent {}
+export class TermsComponent {
+  readonly biz = BUSINESS;
+}
