@@ -16,6 +16,9 @@ Policy (documented in docs/PAYMENTS.md)
   retries it (one row, ``attempts`` counts the retries).
 * A reservation left behind by a crashed worker is released after
   ``STALE_AFTER`` the next time that user analyzes.
+* Admins (``User.is_admin``) have unlimited analyses: no plan is needed and
+  no subscription is charged. Their requests are still recorded as usage rows
+  (``subscription_id`` NULL) for idempotency and the audit trail.
 
 Concurrency: the reservation is a single conditional UPDATE
 (``screenshots_used + n <= screenshot_allowance`` in the WHERE clause), so
@@ -57,7 +60,8 @@ class CreditError(Exception):
 @dataclass(frozen=True)
 class Reservation:
     usage_id: int
-    subscription_id: int
+    #: None for an admin request (unlimited, nothing to charge or give back).
+    subscription_id: int | None
     credits: int
 
 
@@ -137,29 +141,17 @@ def reserve(db: Session, user: User, request_id: str, credits: int, now: datetim
                 )
             if row.status == UsageStatus.RESERVED:
                 raise CreditError("IN_PROGRESS", "This analysis is already running.", 409)
-        live = subs.live_subscriptions(db, user.id, now)
-        if not live:
-            raise CreditError(
-                "SUBSCRIPTION_REQUIRED",
-                "Screenshot analysis needs an active plan. Buy a pass on the Pricing page.",
-                402,
-            )
-        chosen = next((s for s in live if subs.credits_remaining(s) >= credits and _take(db, s.id, credits, now)), None)
-        if chosen is None:
-            left = max(subs.credits_remaining(s) for s in live)
-            if left == 0:
-                message = "You have used all screenshot analyses in your plan. Buy another pass to continue."
-            else:
-                message = (f"This analysis needs {credits} screenshot credits but your plan has "
-                           f"{left} left. Remove some screenshots or buy another pass.")
-            raise CreditError("NO_CREDITS", message, 402)
+        if user.is_admin:
+            chosen = None  # unlimited: record the request, charge nothing
+        else:
+            chosen = _charge(db, user.id, credits, now)
         if row is None:
             row = ScreenshotUsage(user_id=user.id, user_email=user.email, request_id=request_id,
-                                  subscription_id=chosen.id, credits=credits,
+                                  subscription_id=chosen.id if chosen else None, credits=credits,
                                   status=UsageStatus.RESERVED)
             db.add(row)
         else:  # retry of a failed request: same row, new attempt
-            row.subscription_id = chosen.id
+            row.subscription_id = chosen.id if chosen else None
             row.credits = credits
             row.status = UsageStatus.RESERVED
             row.failure_code = ""
@@ -174,7 +166,28 @@ def reserve(db: Session, user: User, request_id: str, credits: int, now: datetim
         # A parallel request with the same id won the insert; nothing held.
         db.rollback()
         raise CreditError("IN_PROGRESS", "This analysis is already running.", 409) from None
-    return Reservation(row.id, chosen.id, credits)
+    return Reservation(row.id, chosen.id if chosen else None, credits)
+
+
+def _charge(db: Session, user_id: int, credits: int, now: datetime) -> UserSubscription:
+    """Take ``credits`` from one live subscription or raise :class:`CreditError`."""
+    live = subs.live_subscriptions(db, user_id, now)
+    if not live:
+        raise CreditError(
+            "SUBSCRIPTION_REQUIRED",
+            "Screenshot analysis needs an active plan. Buy a pass on the Pricing page.",
+            402,
+        )
+    chosen = next((s for s in live if subs.credits_remaining(s) >= credits and _take(db, s.id, credits, now)), None)
+    if chosen is None:
+        left = max(subs.credits_remaining(s) for s in live)
+        if left == 0:
+            message = "You have used all screenshot analyses in your plan. Buy another pass to continue."
+        else:
+            message = (f"This analysis needs {credits} screenshot credits but your plan has "
+                       f"{left} left. Remove some screenshots or buy another pass.")
+        raise CreditError("NO_CREDITS", message, 402)
+    return chosen
 
 
 def complete(db: Session, reservation: Reservation) -> None:
@@ -192,7 +205,8 @@ def release(db: Session, reservation: Reservation, failure_code: str) -> None:
     row = db.get(ScreenshotUsage, reservation.usage_id)
     if row is None or row.status != UsageStatus.RESERVED:
         return
-    _give_back(db, reservation.subscription_id, reservation.credits)
+    if reservation.subscription_id is not None:
+        _give_back(db, reservation.subscription_id, reservation.credits)
     row.status = UsageStatus.FAILED
     row.credits_consumed = 0
     row.failure_code = (failure_code or "ERROR")[:40]

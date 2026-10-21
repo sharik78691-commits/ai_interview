@@ -1,5 +1,6 @@
 import { Injectable } from '@angular/core';
 import { BehaviorSubject } from 'rxjs';
+import { environment } from '../../../environments/environment';
 import { AppSettings, ResponseLength } from '../models/interview.models';
 
 const KEY = 'aia_settings';
@@ -8,7 +9,7 @@ const DEFAULTS: AppSettings = {
   aiModel: 'auto',
   sttProvider: 'browser',
   responseLength: 'default',
-  theme: 'dark',
+  theme: 'light', // replaced by defaultTheme() in load()
   micId: '',
   guidanceFontSize: 15,
 };
@@ -39,11 +40,20 @@ const LENGTH_ALIASES: Record<string, ResponseLength> = {
 };
 
 /** Supported themes. 'darker' was a legacy settings option that never had a
-    dedicated stylesheet, so it maps to 'dark'. */
+    dedicated stylesheet, so it maps to 'dark'. Anything unset/unknown uses the
+    build's default (light on the web, dark in the desktop app). */
 export type ThemeName = 'dark' | 'light';
 
+/** Default theme: the desktop (.exe) app starts dark, the website starts light. */
+function defaultTheme(): ThemeName {
+  return environment.electron ? 'dark' : 'light';
+}
+
 function normalizeTheme(value: unknown): ThemeName {
-  return String(value ?? '').toLowerCase() === 'light' ? 'light' : 'dark';
+  const v = String(value ?? '').toLowerCase();
+  if (v === 'dark' || v === 'darker') return 'dark';
+  if (v === 'light') return 'light';
+  return defaultTheme();
 }
 
 /** Apply the theme to <html> so the CSS-variable layer switches instantly. */
@@ -57,7 +67,7 @@ export class SettingsService {
   settings$ = new BehaviorSubject<AppSettings>(this.load());
 
   constructor() {
-    // Apply the stored theme on startup (default dark, unchanged behaviour).
+    // Apply the stored theme on startup (default light on web, dark on desktop; a saved choice is kept).
     applyThemeToDom(normalizeTheme(this.settings$.value.theme));
   }
 
@@ -78,7 +88,7 @@ export class SettingsService {
     } catch {
       /* ignore */
     }
-    return { ...DEFAULTS };
+    return { ...DEFAULTS, theme: defaultTheme() };
   }
 
   get value(): AppSettings {
@@ -107,8 +117,9 @@ export class SettingsService {
   }
 
   reset(): void {
-    localStorage.setItem(KEY, JSON.stringify(DEFAULTS));
-    this.settings$.next({ ...DEFAULTS });
-    applyThemeToDom(normalizeTheme(DEFAULTS.theme));
+    const defaults: AppSettings = { ...DEFAULTS, theme: defaultTheme() };
+    localStorage.setItem(KEY, JSON.stringify(defaults));
+    this.settings$.next(defaults);
+    applyThemeToDom(defaults.theme as ThemeName);
   }
 }

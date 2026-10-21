@@ -106,6 +106,9 @@
         <li><span class="fact-icon" aria-hidden="true">⏱</span><span><strong>{{ hours(p.duration_hours, p.duration_unit) }}</strong> of access
           <span class="unlimited">(Unlimited Interview Sessions)</span></span></li>
         <li><span class="fact-icon" aria-hidden="true">🖼</span><span><strong>{{ p.screenshot_allowance }}</strong> screenshot analyses</span></li>
+        @if (p.available) {
+          <li><span class="fact-icon" aria-hidden="true">📅</span><span>Just <strong>{{ perDay(p) }}</strong> per day</span></li>
+        }
         <li><span class="fact-icon" aria-hidden="true">💳</span><span>{{ p.billing_type === 'recurring' ? 'Paid upfront · no auto-renewal' : 'One-time payment' }}</span></li>
       </ul>
       @if (p.description) { <p class="tagline muted small">{{ p.description }}</p> }

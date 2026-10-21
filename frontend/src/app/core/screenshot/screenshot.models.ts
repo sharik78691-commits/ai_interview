@@ -67,6 +67,8 @@ export interface ScreenshotUsage {
   remaining: number;
   totalRemaining: number;
   expiresAt: string | null;
+  /** Admin account: analyses are never charged (credit counts don't apply). */
+  unlimited?: boolean;
 }
 
 /** Error codes that mean "buy or renew a plan" (HTTP 402 from the backend). */

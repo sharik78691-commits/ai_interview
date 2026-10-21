@@ -208,6 +208,9 @@ test('credits: success returns the remaining usage; config reports it too', asyn
 test('credits: usage normalisation rejects junk', () => {
   assert.equal(normalizeUsage(null), null);
   assert.equal(normalizeUsage({}), null);
+  // Admin accounts: unlimited is passed through even without counts.
+  assert.equal(normalizeUsage({ unlimited: true }).unlimited, true);
+  assert.equal(normalizeUsage({ remaining: 3, totalRemaining: 3 }).unlimited, undefined);
   assert.equal(normalizeUsage({ remaining: 'lots' }), null);
   const u = normalizeUsage({ remaining: 0, allowance: 0, used: 0, totalRemaining: 0, expiresAt: null });
   assert.equal(u.remaining, 0);

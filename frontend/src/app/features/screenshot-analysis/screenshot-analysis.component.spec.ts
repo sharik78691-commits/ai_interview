@@ -71,29 +71,31 @@ describe('ScreenshotAnalysisComponent (desktop flow)', () => {
     expect(captures).toBe(0);
   });
 
-  it('supports multiple screenshots with reorder, replace and remove', async () => {
+  it('keeps only one screenshot: a new capture replaces the previous one', async () => {
     let n = 0;
-    await setup({ capture: async () => ({ ok: true, image: shot(100, { width: 800 + n++ }) }) });
+    const sent: number[] = [];
+    await setup({
+      capture: async () => ({ ok: true, image: shot(100, { width: 800 + n++ }) }),
+      analyze: async (_m: string, images: unknown[]) => {
+        sent.push(images.length);
+        return { ok: true, result: RESULT, model: 'Gemini 3.5 Flash Lite' };
+      },
+    } as Parameters<typeof installDesktopBridge>[0]);
     for (let i = 0; i < 3; i++) {
-      await cmp.openPicker({ kind: 'add' });
+      await cmp.openPicker();
       await cmp.takeCapture(cmp.sources()[0]);
     }
-    expect(cmp.shots().map((s) => s.image.width)).toEqual([800, 801, 802]);
-    cmp.move(2, -1);
-    expect(cmp.shots().map((s) => s.image.width)).toEqual([800, 802, 801]);
-    cmp.move(0, -1); // no-op at the edge
-    expect(cmp.shots().map((s) => s.image.width)).toEqual([800, 802, 801]);
-    await cmp.openPicker({ kind: 'replace', index: 0 });
-    await cmp.takeCapture(cmp.sources()[0]);
-    expect(cmp.shots().length).toBe(3);
-    expect(cmp.shots()[0].image.width).toBe(803);
-    cmp.remove(1);
-    expect(cmp.shots().length).toBe(2);
+    expect(cmp.shots().map((s) => s.image.width)).toEqual([802]);
+    expect(sent).toEqual([1, 1, 1]); // each analysis sends exactly one screenshot
+    await settle();
+    expect(el().querySelectorAll('.thumb').length).toBe(1);
+    cmp.remove();
+    expect(cmp.shots().length).toBe(0);
   });
 
   it('blocks analysis and explains why when validation fails', async () => {
     await setup({ capture: async () => ({ ok: true, image: shot(100, { mimeType: 'image/gif' }) }) });
-    await cmp.openPicker({ kind: 'add' });
+    await cmp.openPicker();
     await cmp.takeCapture(cmp.sources()[0]);
     await settle();
     expect(cmp.canAnalyze()).toBeFalse();
@@ -101,23 +103,21 @@ describe('ScreenshotAnalysisComponent (desktop flow)', () => {
     expect(q('[data-testid="validation-errors"]')!.textContent).toContain('unsupported image type');
   });
 
-  it('stops adding at the model image limit', async () => {
+  it('capture stays available after many captures (no multi-image limit)', async () => {
     await setup();
-    const max = cmp.config.activeModel().limits.maxImages;
-    for (let i = 0; i < max; i++) {
-      await cmp.openPicker({ kind: 'add' });
+    for (let i = 0; i < 12; i++) {
+      await cmp.openPicker();
       await cmp.takeCapture(cmp.sources()[0]);
     }
     await settle();
-    expect(cmp.atLimit()).toBeTrue();
-    expect((q('[data-testid="capture-btn"]') as HTMLButtonElement).disabled).toBeTrue();
+    expect(cmp.shots().length).toBe(1);
+    expect((q('[data-testid="capture-btn"]') as HTMLButtonElement).disabled).toBeFalse();
   });
 
   it('analyzes, renders the result, and saves it to local history only', async () => {
     await setup();
-    await cmp.openPicker({ kind: 'add' });
+    await cmp.openPicker();
     await cmp.takeCapture(cmp.sources()[0]);
-    await cmp.analyze();
     await settle();
     expect(cmp.result()).toEqual(RESULT);
     expect(el().textContent).toContain('Direct answer');
@@ -129,9 +129,8 @@ describe('ScreenshotAnalysisComponent (desktop flow)', () => {
 
   it('shows a clear error and recovers when analysis fails', async () => {
     await setup({ analyze: async () => ({ ok: false, error: { code: 'PROVIDER_ERROR', message: 'The AI provider is having trouble. Try again shortly.' } }) });
-    await cmp.openPicker({ kind: 'add' });
+    await cmp.openPicker();
     await cmp.takeCapture(cmp.sources()[0]);
-    await cmp.analyze();
     await settle();
     expect(cmp.error()).toBe('The AI provider is having trouble. Try again shortly.');
     expect(cmp.analyzing()).toBeFalse();
@@ -147,11 +146,19 @@ describe('ScreenshotAnalysisComponent (desktop flow)', () => {
       analyze: async () => ({ ok: true, result: RESULT, model: 'Gemini 3.5 Flash Lite', usage: { ...USAGE, used: 4, remaining: 36, totalRemaining: 36 } }),
     });
     expect(q('[data-testid="credits-remaining"]')!.textContent).toContain('37 screenshot credits left on Weekly');
-    await cmp.openPicker({ kind: 'add' });
+    await cmp.openPicker();
     await cmp.takeCapture(cmp.sources()[0]);
-    await cmp.analyze();
     await settle();
     expect(q('[data-testid="credits-remaining"]')!.textContent).toContain('36 screenshot credits left');
+  });
+
+  it('admin account: shows unlimited analyses instead of a credit count', async () => {
+    await setup({
+      getConfig: async () => ({ ok: true, models: cmp.config.models(), defaultModel: 'gemini-3.5-flash-lite', serverReady: true, usage: { ...USAGE, remaining: 0, totalRemaining: 0, unlimited: true } }),
+    });
+    const line = q('[data-testid="credits-remaining"]')!.textContent!;
+    expect(line).toContain('Unlimited');
+    expect(line).not.toContain('Buy more');
   });
 
   it('hides the credits line when the server does not report usage', async () => {
@@ -163,9 +170,8 @@ describe('ScreenshotAnalysisComponent (desktop flow)', () => {
     it(`${code}: shows the server message and a link to Pricing`, async () => {
       TestBed.configureTestingModule({ providers: [provideRouter([])] });
       await setup({ analyze: async () => ({ ok: false, error: { code, message: 'Buy a pass on the Pricing page.' } }) });
-      await cmp.openPicker({ kind: 'add' });
+      await cmp.openPicker();
       await cmp.takeCapture(cmp.sources()[0]);
-      await cmp.analyze();
       await settle();
       expect(cmp.error()).toBe('Buy a pass on the Pricing page.');
       const link = q('[data-testid="plan-cta"] a') as HTMLAnchorElement;
@@ -175,23 +181,22 @@ describe('ScreenshotAnalysisComponent (desktop flow)', () => {
 
   it('does not offer Pricing for other errors', async () => {
     await setup({ analyze: async () => ({ ok: false, error: { code: 'RATE_LIMITED', message: 'Slow down.' } }) });
-    await cmp.openPicker({ kind: 'add' });
+    await cmp.openPicker();
     await cmp.takeCapture(cmp.sources()[0]);
-    await cmp.analyze();
     await settle();
     expect(q('[data-testid="plan-cta"]')).toBeNull();
   });
 
   it('shows a clear error when capture or source listing fails', async () => {
     await setup({ listSources: async () => ({ ok: false, error: { code: 'X', message: 'Screen capture was blocked.' } }) });
-    await cmp.openPicker({ kind: 'add' });
+    await cmp.openPicker();
     expect(cmp.error()).toBe('Screen capture was blocked.');
-    expect(cmp.picker()).toBeNull();
+    expect(cmp.picker()).toBeFalse();
   });
 
   it('keeps the picker open and reports the error when a capture fails', async () => {
     await setup({ capture: async () => ({ ok: false, error: { code: 'EMPTY_CAPTURE', message: 'The capture came back empty.' } }) });
-    await cmp.openPicker({ kind: 'add' });
+    await cmp.openPicker();
     await cmp.takeCapture(cmp.sources()[0]);
     expect(cmp.error()).toBe('The capture came back empty.');
     expect(cmp.shots().length).toBe(0);
@@ -205,7 +210,7 @@ describe('ScreenshotAnalysisComponent (desktop flow)', () => {
     expect(q('[data-testid="model-settings"]')).toBeNull();
     expect(q('#model')).toBeNull();
     expect(q('[data-testid="server-status"]')).toBeNull();
-    await cmp.openPicker({ kind: 'add' });
+    await cmp.openPicker();
     await cmp.takeCapture(cmp.sources()[0]);
     await settle();
     expect(cmp.canAnalyze()).toBeTrue();
@@ -215,7 +220,7 @@ describe('ScreenshotAnalysisComponent (desktop flow)', () => {
     await setup({
       getConfig: async () => ({ ok: true, models: cmp.config.models(), defaultModel: 'gemini-3.5-flash-lite', serverReady: false }),
     });
-    await cmp.openPicker({ kind: 'add' });
+    await cmp.openPicker();
     await cmp.takeCapture(cmp.sources()[0]);
     await settle();
     expect(cmp.canAnalyze()).toBeFalse();
@@ -303,7 +308,7 @@ describe('ScreenshotAnalysisComponent (desktop flow)', () => {
     expect(press).toBeNull();
   });
 
-  it('clicking a source only captures (no automatic analysis), so several can be collected', async () => {
+  it('clicking a source captures it and starts the analysis automatically', async () => {
     let analyzeCalls = 0;
     await setup({
       analyze: async () => {
@@ -311,10 +316,32 @@ describe('ScreenshotAnalysisComponent (desktop flow)', () => {
         return { ok: true, result: RESULT, model: 'Gemini 3.5 Flash Lite' };
       },
     });
-    await cmp.openPicker({ kind: 'add' });
-    await cmp.takeCapture(cmp.sources()[0]);
+    q('[data-testid="capture-btn"]')!.click();
+    await settle();
+    (q('.source') as HTMLButtonElement).click();
+    await new Promise((r) => setTimeout(r, 20));
+    fixture.detectChanges();
     expect(cmp.shots().length).toBe(1);
-    expect(analyzeCalls).toBe(0);
+    expect(analyzeCalls).toBe(1);
+    expect(cmp.result()).toEqual(RESULT);
+    expect(q('[data-testid="source-picker"]')).toBeNull();
+  });
+
+  it('a hotkey press while an analysis is running does not open the picker', async () => {
+    let release!: () => void;
+    await setup({
+      analyze: () =>
+        new Promise((r) => (release = () => r({ ok: true, result: RESULT, model: 'Gemini 3.5 Flash Lite' }))),
+    } as Parameters<typeof installDesktopBridge>[0]);
+    await cmp.openPicker();
+    const pending = cmp.takeCapture(cmp.sources()[0]);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(cmp.analyzing()).toBeTrue();
+    await cmp.onHotkey('screen:1:0', null);
+    expect(cmp.picker()).toBeFalse();
+    expect(cmp.error()).toContain('Wait for the current analysis');
+    release();
+    await pending;
   });
 
   it('Enter does not analyze when the capture fails', async () => {
@@ -326,8 +353,8 @@ describe('ScreenshotAnalysisComponent (desktop flow)', () => {
         return { ok: true, result: RESULT, model: 'Gemini 3.5 Flash Lite' };
       },
     });
-    await cmp.openPicker({ kind: 'add' });
-    await cmp.takeCapture(cmp.sources()[0], { analyzeNow: true });
+    await cmp.openPicker();
+    await cmp.takeCapture(cmp.sources()[0]);
     expect(analyzeCalls).toBe(0);
     expect(cmp.error()).toBe('The capture came back empty.');
   });

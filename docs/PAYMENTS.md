@@ -45,6 +45,9 @@ and their own amount/name snapshots); `1-day` was added. This ran once
 * **Credits.** 1 credit = 1 screenshot image. A request is charged to ONE live subscription — the
   soonest-expiring one that has enough credits. Reserve is a single conditional `UPDATE`
   (`used + n <= allowance`), so concurrent requests can't overspend (CHECK constraint as backstop).
+* **Admins** (`users.is_admin`) have unlimited analyses: no plan needed, no subscription charged.
+  Their requests are still logged in `screenshot_usage` (`subscription_id` NULL), stay idempotent,
+  and keep the 6-per-minute rate limit. The usage block reports `unlimited: true`.
 * **Failures.** Rejections before processing (validation, no plan, not enough credits, server not
   configured, rate limit) cost nothing. If the AI call fails after it started, the reservation is
   released. Only completed analyses are charged.

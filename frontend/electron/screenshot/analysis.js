@@ -77,7 +77,8 @@ function normalizeUsage(raw) {
   if (!raw || typeof raw !== 'object') return null;
   const remaining = asCount(raw.remaining);
   const totalRemaining = asCount(raw.totalRemaining);
-  if (remaining === null && totalRemaining === null) return null;
+  const unlimited = raw.unlimited === true;
+  if (remaining === null && totalRemaining === null && !unlimited) return null;
   return {
     planName: asString(raw.planName) || null,
     allowance: asCount(raw.allowance) ?? 0,
@@ -85,6 +86,7 @@ function normalizeUsage(raw) {
     remaining: remaining ?? 0,
     totalRemaining: totalRemaining ?? remaining ?? 0,
     expiresAt: asString(raw.expiresAt) || null,
+    ...(unlimited ? { unlimited: true } : {}),
   };
 }
 

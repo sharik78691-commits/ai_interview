@@ -163,6 +163,12 @@ export class PricingComponent implements OnInit {
     this.message.set('');
   }
 
+  /** Effective price per day of access (access under a day counts as one day). */
+  perDay(p: Plan): string {
+    const days = Math.max(p.duration_hours / 24, 1);
+    return formatMoney(Math.round(p.price_minor / days), p.currency);
+  }
+
   ctaLabel(p: Plan): string {
     if (!p.available) return `Not yet available in ${p.currency}`;
     if (!p.payable) return `${p.currency} payments coming soon`;

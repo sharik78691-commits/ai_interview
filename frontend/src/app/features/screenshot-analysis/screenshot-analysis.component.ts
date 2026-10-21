@@ -22,11 +22,11 @@ export interface ShotItem {
   image: CapturedImage;
 }
 
-type PickerMode = { kind: 'add' } | { kind: 'replace'; index: number };
-
 /**
- * Desktop-only: capture one or more screenshots of interview questions and get
- * answer guidance. Reachable only through `desktopOnlyGuard`.
+ * Desktop-only: capture ONE screenshot of an interview question and get answer
+ * guidance. Picking a source (click or Enter) captures it and starts the
+ * analysis at once; a new capture replaces the previous screenshot.
+ * Reachable only through `desktopOnlyGuard`.
  */
 @Component({
   selector: 'app-screenshot-analysis',
@@ -47,7 +47,7 @@ export class ScreenshotAnalysisComponent implements OnInit, OnDestroy {
   private destroyed = false;
 
   readonly shots = signal<ShotItem[]>([]);
-  readonly picker = signal<PickerMode | null>(null);
+  readonly picker = signal(false);
   readonly sources = signal<CaptureSource[]>([]);
   /** Keyboard-highlighted source in the picker (arrow keys move it, Enter captures). */
   readonly selectedIndex = signal(0);
@@ -78,7 +78,6 @@ export class ScreenshotAnalysisComponent implements OnInit, OnDestroy {
       this.shots().length > 0 &&
       (this.validation()?.ok ?? false),
   );
-  readonly atLimit = computed(() => this.shots().length >= this.config.activeModel().limits.maxImages);
   readonly totalMb = computed(() => ((this.validation()?.totalBytes ?? 0) / (1024 * 1024)).toFixed(1));
 
   async ngOnInit(): Promise<void> {
@@ -113,9 +112,9 @@ export class ScreenshotAnalysisComponent implements OnInit, OnDestroy {
 
   // ---- capture (always user-initiated: open picker → user chooses a source) ----
 
-  async openPicker(mode: PickerMode, preselectId?: string): Promise<void> {
+  async openPicker(preselectId?: string): Promise<void> {
     this.error.set('');
-    this.picker.set(mode);
+    this.picker.set(true);
     this.selectedIndex.set(0);
     this.loadingSources.set(true);
     try {
@@ -124,7 +123,7 @@ export class ScreenshotAnalysisComponent implements OnInit, OnDestroy {
       const idx = preselectId ? list.findIndex((s) => s.id === preselectId) : -1;
       this.selectedIndex.set(Math.max(0, idx));
     } catch (e) {
-      this.picker.set(null);
+      this.picker.set(false);
       this.error.set(this.message(e));
     } finally {
       this.loadingSources.set(false);
@@ -152,7 +151,7 @@ export class ScreenshotAnalysisComponent implements OnInit, OnDestroy {
       case 'Enter': {
         const source = this.sources()[this.selectedIndex()];
         if (source && !this.capturing() && !this.loadingSources()) {
-          void this.takeCapture(source, { analyzeNow: true });
+          void this.takeCapture(source);
         }
         break;
       }
@@ -196,19 +195,17 @@ export class ScreenshotAnalysisComponent implements OnInit, OnDestroy {
   }
 
   closePicker(): void {
-    if (!this.capturing()) this.picker.set(null);
+    if (!this.capturing()) this.picker.set(false);
   }
 
   /**
-   * Capture the chosen source. With `analyzeNow` (the Enter key) the analysis
-   * starts right after a successful capture — no extra click on "Analyze".
-   * A mouse click only captures, so several screenshots can be collected first.
+   * Capture the chosen source (click or Enter) and start the analysis right
+   * away — no extra click on "Analyze". Only one screenshot is kept.
    */
-  async takeCapture(source: CaptureSource, opts: { analyzeNow?: boolean } = {}): Promise<void> {
-    const mode = this.picker();
-    if (!mode) return;
-    const captured = await this.captureInto(source.id, mode);
-    if (captured && opts.analyzeNow) await this.analyze();
+  async takeCapture(source: CaptureSource): Promise<void> {
+    if (!this.picker() || this.analyzing()) return;
+    const captured = await this.captureInto(source.id);
+    if (captured) await this.analyze();
   }
 
   /** Ctrl+Shift+S: open the picker with the screen under the cursor preselected. */
@@ -217,34 +214,25 @@ export class ScreenshotAnalysisComponent implements OnInit, OnDestroy {
       this.error.set(err ? this.message(err) : 'Could not find a screen to capture.');
       return;
     }
-    if (this.analyzing() || this.atLimit()) {
-      this.error.set(
-        this.atLimit()
-          ? 'Screenshot limit reached — remove one before capturing another.'
-          : 'Wait for the current analysis to finish before capturing.',
-      );
+    if (this.analyzing()) {
+      this.error.set('Wait for the current analysis to finish before capturing.');
       return;
     }
     if (this.picker()) return;
-    await this.openPicker({ kind: 'add' }, sourceId);
+    await this.openPicker(sourceId);
   }
 
-  /** True when a screenshot was captured and added. */
-  private async captureInto(sourceId: string, mode: PickerMode): Promise<boolean> {
+  /** True when a screenshot was captured (it replaces any previous one). */
+  private async captureInto(sourceId: string): Promise<boolean> {
     if (this.capturing()) return false;
     this.capturing.set(true);
     this.error.set('');
     try {
       const image = await this.capture.capture(sourceId);
-      this.shots.update((list) => {
-        if (mode.kind === 'replace' && list[mode.index]) {
-          return list.map((s, i) => (i === mode.index ? { id: s.id, image } : s));
-        }
-        return [...list, { id: this.nextId++, image }];
-      });
+      this.shots.set([{ id: this.nextId++, image }]);
       this.captureNotice.set(`Captured “${image.sourceName}” (${image.width}×${image.height})`);
       setTimeout(() => this.captureNotice.set(''), 3000);
-      this.picker.set(null);
+      this.picker.set(false);
       return true;
     } catch (e) {
       this.error.set(this.message(e));
@@ -254,23 +242,9 @@ export class ScreenshotAnalysisComponent implements OnInit, OnDestroy {
     }
   }
 
-  // ---- screenshot list controls ----
+  // ---- screenshot control ----
 
-  remove(index: number): void {
-    this.shots.update((list) => list.filter((_, i) => i !== index));
-  }
-
-  move(index: number, delta: -1 | 1): void {
-    const to = index + delta;
-    this.shots.update((list) => {
-      if (to < 0 || to >= list.length) return list;
-      const next = [...list];
-      [next[index], next[to]] = [next[to], next[index]];
-      return next;
-    });
-  }
-
-  clearAll(): void {
+  remove(): void {
     this.shots.set([]);
   }
 

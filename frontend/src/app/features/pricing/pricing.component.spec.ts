@@ -68,6 +68,12 @@ describe('PricingComponent (database-driven)', () => {
     expect(el.textContent).not.toMatch(/auto-renews/i);
   });
 
+  it('shows per-day cost and per-day screenshots for each plan', () => {
+    const text = (render().nativeElement as HTMLElement).textContent ?? '';
+    expect(text).toContain(formatMoney(3000, 'INR')); // 90000 paise / 30 days
+    expect(text).toContain('per day');
+  });
+
   it('separates one-time passes from longer plans', () => {
     const pass = { ...PLAN, id: 1, code: '1-day', name: '1 Day Pass', billing_type: 'one_time', duration_hours: 24, duration_unit: 'hours', badge: '', is_highlighted: false };
     const el: HTMLElement = render([pass, PLAN]).nativeElement;
