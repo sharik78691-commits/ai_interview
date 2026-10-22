@@ -225,6 +225,25 @@ describe('InterviewWsService keepalive', () => {
     svc.disconnect();
   });
 
+  it('sends speech_pause only when the backend answers from the live stream', async () => {
+    const svc = TestBed.runInInjectionContext(() => new InterviewWsService());
+    const ws = await connect(svc);
+    ws.onopen!();
+
+    svc.sendSpeechPause('short');
+    expect(ws.sent.length).toBe(0); // older backend: "unknown message type"
+
+    ws.onmessage!({ data: JSON.stringify({ type: 'status', status: 'listening', message: 'connected', liveStream: true, liveAnswers: true }) });
+    svc.sendSpeechPause('short');
+    expect(ws.sent).toEqual([JSON.stringify({ type: 'speech_pause', responseLength: 'short' })]);
+    // A pause is not a question in flight: the status pill is untouched.
+    expect(svc.status$.value).toBe('listening');
+
+    ws.onclose!({ code: 1006, reason: '', wasClean: false });
+    expect(svc.liveAnswers$.value).toBeFalse();
+    svc.disconnect();
+  });
+
   it('tells the server which trial pool to use (web build)', async () => {
     const svc = TestBed.runInInjectionContext(() => new InterviewWsService());
     const ws = await connect(svc);

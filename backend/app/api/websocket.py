@@ -12,8 +12,11 @@ Message types from the browser:
                                                         still being spoken (live
                                                         transcript, display only)
   <binary frame "LPCM" + 16 kHz PCM16>               -> live transcript stream
-                                                        (display only, see
-                                                        live_stream.py)
+                                                        (see live_stream.py)
+  {type: "speech_pause", responseLength?}            -> the interviewer just went
+                                                        quiet (~0.45 s); sent only
+                                                        when the handshake says
+                                                        liveAnswers
   {type: "interviewer_audio_start"|"interviewer_audio_stop"}
   {type: "reset"} | {type: "ping"}
 
@@ -27,8 +30,11 @@ Messages to the browser:
   of the same `seq` replaces it.
 
   {type: "stt_live", text, final} is the word-by-word streamed transcript of
-  the current utterance (cumulative per turn; `final` closes the turn). It is
-  display only and never answered.
+  the current utterance (cumulative per turn; `final` closes the turn). An
+  interim frame is never answered. With liveAnswers, the stream's text is
+  answered once the turn is over (a pause after a finished sentence, or the
+  turn close) — see LiveTurnTracker; the clip pipeline then only answers
+  speech the stream did not hear.
 """
 import asyncio
 import json
@@ -57,7 +63,7 @@ from app.services import free_trial_service as free_trial
 from app.services.activity import log_llm_usage
 from app.services.ai_service import AIService
 from app.services.interview_context import VALID_LENGTHS, context_store, normalize_length
-from app.services.question_service import QuestionBuffer
+from app.services.question_service import LiveTurnTracker, QuestionBuffer, same_utterance
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +93,18 @@ MAX_CONCURRENT_TRANSCRIPTIONS = 2
 # they never compete with the FINAL clip for the rate limit.
 PREVIEW_TIMEOUT_SECONDS = 6.0
 PREVIEW_COOLDOWN_SECONDS = 20.0
+# Live answering (LiveTurnTracker). A complete but unpunctuated prompt is
+# answered this long after the pause if no new word arrived meanwhile.
+LIVE_SETTLE_SECONDS = 0.6
+# A clip's own question detection waits until this long after its cut, so the
+# live stream's turn close (~0.45 s after the cut) has landed and it is known
+# whether the live lane already owns that speech.
+LIVE_GRACE_SECONDS = 1.2
+# A live answer this soon after a clip cut is about the speech in that clip.
+LIVE_FLUSH_WINDOW_SECONDS = 1.6
+# Cross-lane duplicate guard: the live and clip lanes transcribe the same
+# audio with different engines, so a repeat is matched by content words.
+AUDIO_COVER_WINDOW_SECONDS = 20.0
 # Longest question accepted by "Show follow-ups" (questions are short text).
 MAX_FOLLOWUP_QUESTION_CHARS = 2000
 # Longest question sent to the LLM (shared with the REST route): real
@@ -361,17 +379,36 @@ async def ws_interview(websocket: WebSocket) -> None:
     # PCM instead of sending snapshots, so the preview lane above stays idle.
     settings = get_settings()
     live_stream: LiveTranscriptStream | None = None
+    # Live answering: the streamed transcript also decides WHEN a question is
+    # finished, so the answer starts at a human-like pause instead of after the
+    # clip's silence cut + batch STT round-trip. Clips stay the fallback.
+    live_turns = LiveTurnTracker()
+    #: Clip seqs whose speech the live lane answered (their clip must not).
+    live_owned_seqs: set[int] = set()
+    live_settle_gen = -1
+    #: Depth / model from the latest audio control frame (the live lane has
+    #: no frame of its own to carry them).
+    live_length_raw: object = None
+    live_model_raw: object = None
+    last_flush_at = 0.0
     if live_preview and settings.gemini_api_key and settings.stt_live_model:
 
         async def _on_live_text(text: str, final: bool) -> None:
+            # Track the words BEFORE showing them: a pause the client reports
+            # after seeing this text must find it already in the tracker.
+            track = live_answers and interviewer_capturing
+            question = live_turns.update(text, final) if track else None
             try:
                 await websocket.send_json({"type": "stt_live", "text": text, "final": final})
             except Exception:
                 logger.debug("[ws user=%s] live text dropped: socket closing", user_id)
+            if track:
+                await _on_live_decision(question)
 
         live_stream = LiveTranscriptStream(
             settings.gemini_api_key, settings.stt_live_model, _on_live_text
         )
+    live_answers = live_stream is not None and settings.stt_live_answers
 
     def _apply_length(raw: object) -> None:
         """Client may override the answer depth for the next answer."""
@@ -577,6 +614,7 @@ async def ws_interview(websocket: WebSocket) -> None:
         length_raw: object,
         model_raw: object,
         seq: int | None = None,
+        flushed_at: float | None = None,
     ) -> None:
         """Transcribe one interviewer audio clip, then run question detection.
 
@@ -697,6 +735,20 @@ async def ws_interview(websocket: WebSocket) -> None:
             final_frame["seq"] = seq
         await websocket.send_json(final_frame)
 
+        # The live stream heard this speech and answers (or holds) it itself:
+        # judging the clip too would answer the same question twice.
+        if live_answers and seq is not None and await _live_owns_clip(seq, flushed_at):
+            logger.info("Clip %d left to the live transcript (%d chars)", seq, len(text))
+            if not answering:
+                await websocket.send_json(
+                    {
+                        "type": "status",
+                        "status": "listening",
+                        "message": "listening... (waiting for a complete question)",
+                    }
+                )
+            return
+
         # Question detection for interviewer audio: the clip already ends at a
         # pause, so treat this segment as a finished utterance — but only a
         # GENUINE, complete question is answered. Answering every substantial
@@ -706,7 +758,7 @@ async def ws_interview(websocket: WebSocket) -> None:
         question = buffer.push_complete(text)
         if question:
             logger.info("Interviewer prompt (%d chars): %s", len(question), question[:100])
-            await _enqueue_answer(question, length_raw, model_raw, announce=True)
+            await _enqueue_answer(question, length_raw, model_raw, announce=True, source="clip")
             return
 
         if buffer.holding_partial:
@@ -809,7 +861,7 @@ async def ws_interview(websocket: WebSocket) -> None:
                 len(held),
                 held[:100],
             )
-            await _enqueue_answer(held, length_raw, model_raw, announce=True)
+            await _enqueue_answer(held, length_raw, model_raw, announce=True, source="clip")
 
     # ------------------------------------------------------------------
     # Background pipeline (latency-critical).
@@ -857,8 +909,15 @@ async def ws_interview(websocket: WebSocket) -> None:
                 answering.pop(_norm_question(question), None)
                 answer_queue.task_done()
 
+    #: Questions answered from interviewer AUDIO: (lane, question, monotonic).
+    audio_answered: list[tuple[str, str, float]] = []
+
     async def _enqueue_answer(
-        question: str, length_raw: object, model_raw: object, announce: bool = False
+        question: str,
+        length_raw: object,
+        model_raw: object,
+        announce: bool = False,
+        source: str | None = None,
     ) -> bool:
         """Queue one question for the answer worker.
 
@@ -866,11 +925,37 @@ async def ws_interview(websocket: WebSocket) -> None:
         a repeat (mic fragment + debounced force detector, or WebSpeech
         delivering the same final twice) must never spend a second AI call, and
         the UI gets a status so its spinner does not hang.
+
+        ``source`` ("live" / "clip") marks interviewer-audio questions: the two
+        lanes hear the same speech, so one lane's question that the OTHER lane
+        already answered is a duplicate even though the wording differs.
         """
         nonlocal last_activity
         last_activity = time.monotonic()
         if len(question) > MAX_QUESTION_CHARS:
             question = question[-MAX_QUESTION_CHARS:]
+        if source is not None:
+            now = time.monotonic()
+            audio_answered[:] = [
+                e for e in audio_answered if now - e[2] < AUDIO_COVER_WINDOW_SECONDS
+            ]
+            if any(
+                lane != source and same_utterance(q, question) for lane, q, _ in audio_answered
+            ):
+                logger.info(
+                    "Duplicate question suppressed (%s lane, answered by the other lane, %d chars)",
+                    source,
+                    len(question),
+                )
+                if not answering:
+                    await websocket.send_json(
+                        {
+                            "type": "status",
+                            "status": "ready",
+                            "message": "Already answered — showing the previous guidance.",
+                        }
+                    )
+                return False
         key = _norm_question(question)
         requested = normalize_length(length_raw) if isinstance(length_raw, str) else None
         if key in answering and (requested is None or answering[key] == requested):
@@ -886,8 +971,75 @@ async def ws_interview(websocket: WebSocket) -> None:
             )
             return False
         answering[key] = requested
+        if source is not None:
+            audio_answered.append((source, question, time.monotonic()))
         answer_queue.put_nowait((question, length_raw, model_raw, announce))
         return True
+
+    # ---- Live lane: answer from the streamed transcript (LiveTurnTracker) ----
+
+    def _mark_live_owned(after_cut: bool) -> None:
+        """Record which clip holds the speech the live lane just answered."""
+        # A pause is heard before the cut, so that speech is still in the clip
+        # being recorded. A turn close / settle normally lands just AFTER the
+        # cut (speech in the clip just flushed) — but not always, and a missed
+        # mark would answer the question twice, so both are claimed then.
+        live_owned_seqs.add(clip_seq)
+        if after_cut and time.monotonic() - last_flush_at < LIVE_FLUSH_WINDOW_SECONDS:
+            live_owned_seqs.add(clip_seq - 1)
+        for old in [s for s in live_owned_seqs if s < clip_seq - 8]:
+            live_owned_seqs.discard(old)
+
+    async def _answer_live(question: str | None, after_cut: bool = True) -> None:
+        if not question:
+            return
+        _mark_live_owned(after_cut)
+        logger.info("Live prompt (%d chars): %s", len(question), question[:100])
+        await _enqueue_answer(
+            question, live_length_raw, live_model_raw, announce=True, source="live"
+        )
+
+    async def _after_live_decision(question: str | None, after_cut: bool = True) -> None:
+        """Answer, or schedule the re-check / carry flush the tracker asked for."""
+        nonlocal live_settle_gen
+        if question:
+            await _answer_live(question, after_cut)
+        elif live_turns.recheck and live_turns.gen != live_settle_gen:
+            live_settle_gen = live_turns.gen
+            _spawn(_live_settle(live_turns.gen))
+        elif live_turns.carrying:
+            _spawn(_live_flush_carry())
+
+    async def _on_live_decision(question: str | None) -> None:
+        # Runs inside the live stream's reader: a failure here must never
+        # take the word-by-word transcript down with it.
+        try:
+            await _after_live_decision(question)
+        except Exception:
+            logger.exception("[ws user=%s] live answering failed", user_id)
+
+    async def _live_pause(after_cut: bool) -> None:
+        await _after_live_decision(live_turns.pause(), after_cut)
+
+    async def _live_settle(gen: int) -> None:
+        await asyncio.sleep(LIVE_SETTLE_SECONDS)
+        await _answer_live(live_turns.settle(gen))
+
+    async def _live_flush_carry() -> None:
+        await asyncio.sleep(live_turns.CARRY_S)
+        await _answer_live(live_turns.flush_carry())
+
+    async def _live_owns_clip(seq: int, flushed_at: float | None) -> bool:
+        """Should the live lane, not this clip, decide about this speech?"""
+        if seq in live_owned_seqs:
+            return True
+        if live_stream is None or not live_stream.available:
+            return False  # the stream is not hearing anything: no reason to wait
+        if flushed_at is not None:
+            wait = flushed_at + LIVE_GRACE_SECONDS - time.monotonic()
+            if wait > 0:
+                await asyncio.sleep(wait)
+        return seq in live_owned_seqs or live_turns.deciding()
 
     _spawn(_answer_worker())
 
@@ -902,6 +1054,8 @@ async def ws_interview(websocket: WebSocket) -> None:
             # livePreview is set, and streams LPCM frames only when liveStream is.
             "livePreview": live_preview,
             "liveStream": live_stream is not None,
+            # The client sends speech_pause frames only when this is set.
+            "liveAnswers": live_answers,
             # Trial / plan state (additive field; later updates arrive as
             # {type:"access"} frames from the trial meter).
             "access": _access_frame(access, client_kind),
@@ -1008,6 +1162,7 @@ async def ws_interview(websocket: WebSocket) -> None:
 
             elif mtype == "reset":
                 buffer = QuestionBuffer()
+                live_turns.reset()
                 audio_buffer = bytearray()
                 clip_seq += 1  # in-flight previews belong to the old session
                 await websocket.send_json(
@@ -1018,6 +1173,8 @@ async def ws_interview(websocket: WebSocket) -> None:
             elif mtype == "interviewer_audio_start":
                 interviewer_capturing = True
                 audio_buffer = bytearray()
+                live_turns.reset()
+                last_flush_at = time.monotonic()
                 # The client may not know the final format yet (it depends on
                 # how MediaRecorder output is decoded). Each clip announces its
                 # own mimeType in audio_flush, which always wins.
@@ -1037,12 +1194,22 @@ async def ws_interview(websocket: WebSocket) -> None:
 
             elif mtype == "interviewer_audio_stop":
                 interviewer_capturing = False
+                stop_at = time.monotonic()
                 if audio_buffer:
                     # Snapshot synchronously, then transcribe in the background
                     # so the "stopped" status (and everything else) stays fast.
                     clip = bytes(audio_buffer)
                     audio_buffer = bytearray()
-                    _spawn(_transcribe_and_detect(clip, audio_mime, None, None, clip_seq))
+                    _spawn(
+                        _transcribe_and_detect(
+                            clip, audio_mime, None, None, clip_seq, stop_at
+                        )
+                    )
+                if live_answers:
+                    # No more audio reaches the stream, so its turn never
+                    # closes by itself: judge what it heard now.
+                    await _answer_live(live_turns.close(), after_cut=False)
+                    live_turns.reset()
                 clip_seq += 1
                 await websocket.send_json(
                     {
@@ -1067,11 +1234,31 @@ async def ws_interview(websocket: WebSocket) -> None:
                 audio_buffer = bytearray()
                 seq = clip_seq
                 clip_seq += 1  # previews of this clip are stale from now on
+                last_flush_at = time.monotonic()
                 _spawn(
                     _transcribe_and_detect(
-                        clip, audio_mime, msg.get("responseLength"), msg.get("model"), seq
+                        clip,
+                        audio_mime,
+                        msg.get("responseLength"),
+                        msg.get("model"),
+                        seq,
+                        last_flush_at,
                     )
                 )
+                if live_answers and interviewer_capturing:
+                    # The cut means ~0.85 s of quiet: also a pause for the
+                    # live lane (the only one an older client sends).
+                    live_length_raw = msg.get("responseLength")
+                    live_model_raw = msg.get("model")
+                    await _live_pause(after_cut=True)
+
+            elif mtype == "speech_pause":
+                # The interviewer went quiet for ~0.45 s: a finished sentence
+                # in the live transcript is answered now, before the clip cut.
+                if live_answers and interviewer_capturing:
+                    if isinstance(msg.get("responseLength"), str):
+                        live_length_raw = msg["responseLength"]
+                    await _live_pause(after_cut=False)
 
             elif mtype == "audio_preview":
                 # Live transcript: the binary frame just before this is a

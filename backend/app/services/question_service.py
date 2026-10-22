@@ -394,6 +394,70 @@ def classify(text: str) -> str:
     return ANSWER if len(words) >= 6 else NOISE
 
 
+#: Verbs that still need their object. An UNTERMINATED utterance ending on one
+#: ("can you explain", "tell me") is a question a pause away from its subject:
+#: the classifier already sees a prompt in it, but answering now answers a stub.
+#: Nouns that look like verbs ("design", "name", "list") are left out on
+#: purpose — "tell me about the design" is a finished question.
+OBJECT_VERBS = frozenset({
+    "explain", "describe", "define", "discuss", "compare", "contrast",
+    "tell", "show", "give", "walk", "mention",
+})
+
+
+def _wants_object(text: str) -> bool:
+    """Unterminated and ending on a verb that still needs its object."""
+    t = (text or "").strip()
+    words = t.split()
+    if not words or _sentence_terminated(t):
+        return False
+    last = _clean(words[-1])
+    prev = _clean(words[-2]) if len(words) > 1 else ""
+    return last in OBJECT_VERBS or (last in {"me", "us"} and prev in OBJECT_VERBS)
+
+
+def awaits_continuation(text: str) -> bool:
+    """True when an UNTERMINATED utterance cannot grammatically end here yet."""
+    t = (text or "").strip()
+    words = t.split()
+    if not words or _sentence_terminated(t):
+        return False
+    return _ends_dangling(t, words) or _wants_object(t)
+
+
+_TOKEN_RE = re.compile(r"[^\W_]+(?:'[^\W_]+)?")
+#: Words too common to tell two utterances apart ("what is java" vs "what is
+#: python" share 2 of 3 words but are different questions).
+_COMMON_WORDS = (
+    frozenset(QUESTION_WORDS)
+    | DANGLING_TAIL_WORDS
+    | frozenset({
+        "i", "me", "my", "you", "your", "we", "us", "our", "it", "its", "this",
+        "that", "these", "those", "there", "here", "what's", "how's", "let's",
+        "please", "okay", "ok", "um", "uh", "like", "just", "not", "no", "yes",
+        "kya", "hai", "ka", "ki", "ke", "ko", "mein", "aap", "hota", "hoti",
+    })
+)
+
+
+def _content_words(text: str) -> set[str]:
+    return {w for w in _TOKEN_RE.findall((text or "").lower()) if w not in _COMMON_WORDS}
+
+
+def same_utterance(answered: str, text: str, ratio: float = 0.6) -> bool:
+    """True when ``text`` is (part of) the utterance ``answered`` already covers.
+
+    Two speech-to-text engines hearing the same audio never agree word for
+    word, and a clip may hold only half of the question the other engine
+    answered — so this is containment of ``text``'s CONTENT words, not
+    equality. Text with no content words never matches (judge it normally).
+    """
+    words = _content_words(text)
+    if not words:
+        return False
+    return len(words & _content_words(answered)) / len(words) >= ratio
+
+
 class QuestionBuffer:
     """Accumulate fragments; emit a question once it looks complete."""
 
@@ -521,6 +585,151 @@ class QuestionBuffer:
     @property
     def pending(self) -> str:
         return self._buffer
+
+
+class LiveTurnTracker:
+    """Turn-taking over the streamed (word-by-word) interviewer transcript.
+
+    A human candidate knows the question is over when the interviewer stops
+    talking AND what they said sounds finished — not after a fixed timeout.
+    Phrase-internal pauses run ~200–500 ms, so a short quiet only ends a turn
+    whose sentence is closed ("…what is a deadlock?"); an unpunctuated prompt
+    gets one more beat; a sentence left hanging ("…the difference between")
+    waits for its second half however long the pause.
+
+    Signals, in the order they normally arrive after the last word:
+      * ``update(final=False)`` — words still coming. Provisional: never
+        answered.
+      * ``pause()`` (~0.45 s quiet, client-side) — answer a CLOSED sentence at
+        once; a complete but unpunctuated prompt sets ``recheck``.
+      * ``settle(gen)`` — that re-check: no new word since → answer.
+      * ``update(final=True)`` (~1.3 s quiet, provider VAD) — answer any
+        complete prompt; carry a dangling one into the next turn.
+
+    Every spoken word is answered at most once: ``_used`` counts the words of
+    the current turn already consumed, so the final transcript of a turn that
+    was answered at the pause never fires again.
+    """
+
+    #: How long a dangling turn waits for its continuation (cf. HOLD_MS).
+    CARRY_S = QuestionBuffer.HOLD_MS / 1000.0
+    #: An open turn with no update for this long belongs to a dead stream.
+    STALE_S = 3.0
+    #: New words after an answered question must be a question of their own
+    #: and at least this long — "…in Java?" is the same question, finished.
+    MIN_FOLLOW_ON_WORDS = 4
+
+    def __init__(self) -> None:
+        self.reset()
+
+    def reset(self) -> None:
+        #: Bumped on every transcript change; a settle check for an older gen
+        #: is stale (the interviewer kept talking).
+        self.gen = 0
+        #: Set by the last call when a settle re-check is worth scheduling.
+        self.recheck = False
+        self._turn = ""
+        self._open = False
+        self._used = 0
+        self._fired = ""
+        self._carry = ""
+        self._carry_at = 0.0
+        self._last_update = 0.0
+
+    @property
+    def carrying(self) -> bool:
+        return bool(self._carry)
+
+    def deciding(self, now: float | None = None) -> bool:
+        """True while this lane still owes a verdict on speech it has heard."""
+        now = time.monotonic() if now is None else now
+        if self._carry and now - self._carry_at < self.CARRY_S:
+            return True
+        fresh = len(self._turn.split()) > self._used
+        return self._open and fresh and now - self._last_update < self.STALE_S
+
+    def update(self, text: str, final: bool, now: float | None = None) -> str | None:
+        """One streamed transcript (cumulative per turn). Returns a question to
+        answer, only ever on a turn close."""
+        now = time.monotonic() if now is None else now
+        self.recheck = False
+        self._last_update = now
+        if not self._open:
+            self._open, self._turn, self._used, self._fired = True, "", 0, ""
+        text = (text or "").strip()
+        if text and text != self._turn:
+            self._turn = text
+            self.gen += 1
+        if not final:
+            return None
+        self._open = False
+        return self._evaluate(now, closed=True)
+
+    def pause(self, now: float | None = None) -> str | None:
+        """The interviewer went quiet mid-turn."""
+        self.recheck = False
+        if not self._open:
+            return None  # the closed turn was already judged
+        return self._evaluate(time.monotonic() if now is None else now, closed=False)
+
+    def settle(self, gen: int, now: float | None = None) -> str | None:
+        """The beat after a pause: still nothing new → the prompt is finished."""
+        self.recheck = False
+        if gen != self.gen or not self._open:
+            return None
+        return self._evaluate(time.monotonic() if now is None else now, closed=False, settled=True)
+
+    def close(self, now: float | None = None) -> str | None:
+        """Capture stopped mid-turn: judge what was heard as a closed turn."""
+        if not self._open:
+            return None
+        return self.update(self._turn, True, now)
+
+    def flush_carry(self, now: float | None = None) -> str | None:
+        """Answer a dangling question whose continuation never came."""
+        now = time.monotonic() if now is None else now
+        if not self._carry or self._open or now - self._carry_at < self.CARRY_S:
+            return None
+        carry, self._carry = self._carry, ""
+        return carry
+
+    def _evaluate(self, now: float, closed: bool, settled: bool = False) -> str | None:
+        words = self._turn.split()
+        fresh = " ".join(words[self._used:])
+        if not fresh:
+            return None
+        # After "can you explain" / "tell me", a wh-clause ("how a hash map
+        # works") is the missing object, not a new question.
+        new_question = _starts_new_question(fresh) and not _wants_object(
+            self._fired or self._carry
+        )
+        if self._fired:
+            # Still talking after an answered question: the new words must
+            # ask something on their own; then answer them WITH that context.
+            base = "" if new_question else self._fired
+            follow_on = len(fresh.split()) >= self.MIN_FOLLOW_ON_WORDS
+            verdict = classify(fresh) if follow_on else NOISE
+        else:
+            base = "" if new_question or not self._carry else self._carry
+            verdict = None
+        candidate = f"{base} {fresh}".strip()
+        if verdict is None:
+            verdict = classify(candidate)
+        complete = verdict == ANSWER and not awaits_continuation(candidate)
+
+        if complete and (closed or settled or _sentence_terminated(candidate)):
+            self._used, self._fired, self._carry = len(words), candidate, ""
+            return candidate
+        if complete:
+            self.recheck = True
+            return None
+        if closed:
+            if verdict in (ANSWER, PARTIAL):
+                self._carry, self._carry_at = candidate, now  # hangs: wait for the rest
+            else:
+                self._carry = ""
+            self._used = len(words)
+        return None
 
 
 class QuestionDetector:
