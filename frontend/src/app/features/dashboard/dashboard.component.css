@@ -206,6 +206,12 @@
 /* ---- plan & screenshot credits card ---- */
 .plan-card { display: grid; gap: 10px; margin-bottom: 18px; }
 .plan-main { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 14px; }
+.trial-box { display: grid; gap: 8px; padding: 12px 14px; border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.trial-box .opt-tag { justify-self: start; }
+.trial-list { display: grid; gap: 4px; font-size: 14px; }
+.trial-list li.used { opacity: .55; text-decoration: line-through; }
 .plan-main h3 { font-size: 1.05rem; font-weight: 800; margin: 4px 0 2px; }
 .plan-usage { display: grid; gap: 6px; min-width: min(320px, 100%); }
 .plan-meter { height: 8px; border-radius: 999px; background: var(--tint); overflow: hidden; }

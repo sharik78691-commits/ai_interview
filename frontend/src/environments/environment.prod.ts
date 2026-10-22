@@ -26,7 +26,7 @@ export const environment = {
    */
   desktopApp: {
     version: '1.0.0',
-    windowsUrl: '',
+    windowsUrl: 'https://github.com/sharik78691-commits/ai_interview/releases/download/v1.0.0/OyeInterview-Setup-1.0.0.exe',
     macUrl: '',
   },
 };

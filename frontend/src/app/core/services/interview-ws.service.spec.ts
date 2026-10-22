@@ -225,6 +225,42 @@ describe('InterviewWsService keepalive', () => {
     svc.disconnect();
   });
 
+  it('tells the server which trial pool to use (web build)', async () => {
+    const svc = TestBed.runInInjectionContext(() => new InterviewWsService());
+    const ws = await connect(svc);
+    expect(ws.url).toContain('client=web');
+    svc.disconnect();
+  });
+
+  it('tracks trial state from the handshake and access updates', async () => {
+    const svc = TestBed.runInInjectionContext(() => new InterviewWsService());
+    const ws = await connect(svc);
+    ws.onopen!();
+    ws.onmessage!({ data: JSON.stringify({ type: 'status', status: 'listening',
+      access: { type: 'access', mode: 'trial', client: 'web', remainingSeconds: 1200, limitSeconds: 1200 } }) });
+    expect(svc.access$.value?.mode).toBe('trial');
+    expect(svc.access$.value?.remainingSeconds).toBe(1200);
+    ws.onmessage!({ data: JSON.stringify({ type: 'access', mode: 'trial', client: 'web', remainingSeconds: 600, limitSeconds: 1200 }) });
+    expect(svc.access$.value?.remainingSeconds).toBe(600);
+    svc.disconnect();
+  });
+
+  it('close code 4402 (trial used up) marks access denied and does NOT reconnect', async () => {
+    const timeouts: number[] = [];
+    spyOn(window, 'setTimeout').and.callFake(((_cb: () => void, ms?: number) => {
+      timeouts.push(ms ?? 0);
+      return 0 as unknown as ReturnType<typeof setTimeout>;
+    }) as unknown as typeof setTimeout);
+    const svc = TestBed.runInInjectionContext(() => new InterviewWsService());
+    const ws = await connect(svc);
+    ws.onopen!();
+    ws.onclose!({ code: 4402, reason: 'trial_exhausted', wasClean: true });
+    expect(svc.access$.value?.mode).toBe('denied');
+    expect(timeouts.length).toBe(0); // no reconnect scheduled
+    ws.onclose!({ code: 1006, reason: '', wasClean: false }); // a stray later close: still no retry
+    expect(timeouts.length).toBe(0);
+  });
+
   it('stops keepalive on disconnect', async () => {
     const svc = TestBed.runInInjectionContext(() => new InterviewWsService());
     const ws = await connect(svc);

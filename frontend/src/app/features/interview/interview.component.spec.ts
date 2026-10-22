@@ -497,3 +497,26 @@ describe('Only the interviewer is heard (never the candidate mic)', () => {
     expect(c.micSupported).toBeTrue();
   });
 });
+
+describe('Interview free trial', () => {
+  const make = (): InterviewComponent => Object.create(InterviewComponent.prototype) as InterviewComponent;
+
+  it('rounds the minutes left up so the last seconds still show 1 min', () => {
+    const c = make();
+    c.liveAccess = { mode: 'trial', client: 'web', remainingSeconds: 61, limitSeconds: 1200 };
+    expect(c.trialMinutesLeft).toBe(2);
+    c.liveAccess = { mode: 'trial', client: 'web', remainingSeconds: 1, limitSeconds: 1200 };
+    expect(c.trialMinutesLeft).toBe(1);
+  });
+
+  it('does not start meeting audio once the trial is used up', async () => {
+    const c = make();
+    let started = false;
+    (c as unknown as { interviewerAudio: { start: () => Promise<void> } }).interviewerAudio = {
+      start: async () => void (started = true),
+    };
+    c.liveAccess = { mode: 'denied', client: 'web', remainingSeconds: 0, limitSeconds: 1200 };
+    await c.startInterviewerAudio();
+    expect(started).toBeFalse();
+  });
+});

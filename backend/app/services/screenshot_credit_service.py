@@ -19,6 +19,10 @@ Policy (documented in docs/PAYMENTS.md)
 * Admins (``User.is_admin``) have unlimited analyses: no plan is needed and
   no subscription is charged. Their requests are still recorded as usage rows
   (``subscription_id`` NULL) for idempotency and the audit trail.
+* Free trial: when no plan can pay, the account's one-time free credits
+  (``free_trial_service``, 2 by default) are used instead. Those rows also
+  have ``subscription_id`` NULL; for a non-admin that means "free credits",
+  which is how a stale or failed reservation gives them back.
 
 Concurrency: the reservation is a single conditional UPDATE
 (``screenshots_used + n <= screenshot_allowance`` in the WHERE clause), so
@@ -39,6 +43,7 @@ from sqlalchemy.orm import Session
 
 from app.models.billing import ScreenshotUsage, SubscriptionStatus, UsageStatus, UserSubscription
 from app.models.user import User
+from app.services import free_trial_service as free_trial
 from app.services import subscription_service as subs
 
 logger = logging.getLogger(__name__)
@@ -60,9 +65,11 @@ class CreditError(Exception):
 @dataclass(frozen=True)
 class Reservation:
     usage_id: int
-    #: None for an admin request (unlimited, nothing to charge or give back).
+    #: None for an admin request (unlimited) or free-trial credits.
     subscription_id: int | None
     credits: int
+    #: Paid from the free trial (given back to it on failure).
+    free: bool = False
 
 
 def normalize_request_id(raw: str | None) -> str:
@@ -101,7 +108,7 @@ def _give_back(db: Session, sub_id: int, n: int) -> None:
     )
 
 
-def _release_stale(db: Session, user_id: int, now: datetime) -> None:
+def _release_stale(db: Session, user_id: int, now: datetime, is_admin: bool = False) -> None:
     stale = db.scalars(
         select(ScreenshotUsage).where(
             ScreenshotUsage.user_id == user_id,
@@ -112,6 +119,8 @@ def _release_stale(db: Session, user_id: int, now: datetime) -> None:
     for row in stale:
         if row.subscription_id:
             _give_back(db, row.subscription_id, row.credits)
+        elif not is_admin:
+            free_trial.give_back_screenshots(db, user_id, row.credits)
         row.status = UsageStatus.FAILED
         row.failure_code = "STALE_RESERVATION"
         row.credits_consumed = 0
@@ -127,8 +136,10 @@ def reserve(db: Session, user: User, request_id: str, credits: int, now: datetim
     if credits <= 0:
         raise CreditError("VALIDATION", "Add at least one screenshot.", 422)
     now = now or subs.utcnow()
+    if not user.is_admin:
+        free_trial.get_or_create(db, user)  # commits on first use; before the transaction below
     try:
-        _release_stale(db, user.id, now)
+        _release_stale(db, user.id, now, user.is_admin)
         row = db.scalar(select(ScreenshotUsage).where(
             ScreenshotUsage.user_id == user.id, ScreenshotUsage.request_id == request_id
         ))
@@ -141,10 +152,17 @@ def reserve(db: Session, user: User, request_id: str, credits: int, now: datetim
                 )
             if row.status == UsageStatus.RESERVED:
                 raise CreditError("IN_PROGRESS", "This analysis is already running.", 409)
+        free = False
         if user.is_admin:
             chosen = None  # unlimited: record the request, charge nothing
         else:
-            chosen = _charge(db, user.id, credits, now)
+            try:
+                chosen = _charge(db, user.id, credits, now)
+            except CreditError:
+                # No plan can pay: fall back to the one-time free credits.
+                if not free_trial.take_screenshots(db, user, credits):
+                    raise
+                chosen, free = None, True
         if row is None:
             row = ScreenshotUsage(user_id=user.id, user_email=user.email, request_id=request_id,
                                   subscription_id=chosen.id if chosen else None, credits=credits,
@@ -166,7 +184,7 @@ def reserve(db: Session, user: User, request_id: str, credits: int, now: datetim
         # A parallel request with the same id won the insert; nothing held.
         db.rollback()
         raise CreditError("IN_PROGRESS", "This analysis is already running.", 409) from None
-    return Reservation(row.id, chosen.id if chosen else None, credits)
+    return Reservation(row.id, chosen.id if chosen else None, credits, free)
 
 
 def _charge(db: Session, user_id: int, credits: int, now: datetime) -> UserSubscription:
@@ -207,6 +225,8 @@ def release(db: Session, reservation: Reservation, failure_code: str) -> None:
         return
     if reservation.subscription_id is not None:
         _give_back(db, reservation.subscription_id, reservation.credits)
+    elif reservation.free:
+        free_trial.give_back_screenshots(db, row.user_id, reservation.credits)
     row.status = UsageStatus.FAILED
     row.credits_consumed = 0
     row.failure_code = (failure_code or "ERROR")[:40]

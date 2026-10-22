@@ -143,6 +143,14 @@ class Settings:
         # text (display only, never question detection). Costs ~1 extra STT call
         # per second of speech; set false to show text only after each pause.
         self.stt_live_preview: bool = _as_bool(os.getenv("STT_LIVE_PREVIEW"), default=True)
+        # One-time free trial for every account (see free_trial_service): live
+        # interview minutes on the website, separate minutes in the desktop
+        # app, and screenshot analyses. After it, live interview needs a plan.
+        # FREE_TRIAL_ENFORCED=false turns the live-interview gate off.
+        self.free_trial_enforced: bool = _as_bool(os.getenv("FREE_TRIAL_ENFORCED"), default=True)
+        self.free_web_minutes: int = max(0, int(os.getenv("FREE_WEB_MINUTES", "20")))
+        self.free_desktop_minutes: int = max(0, int(os.getenv("FREE_DESKTOP_MINUTES", "15")))
+        self.free_screenshots: int = max(0, int(os.getenv("FREE_SCREENSHOTS", "2")))
         # Word-by-word live transcript: with GEMINI_API_KEY set, interviewer
         # audio is also STREAMED into one Gemini Live session (display only;
         # answers still come from the clip pipeline). Without the key, the

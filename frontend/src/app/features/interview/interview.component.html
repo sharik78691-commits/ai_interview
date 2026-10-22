@@ -15,6 +15,12 @@
         </span>
       }
       <span class="timer" title="Session time">⏱ {{ elapsed | timeFormat }}</span>
+      @if (liveAccess?.mode === 'trial') {
+        <span class="pill trial-pill" data-testid="trial-pill"
+              title="Free trial minutes count only while a session is active">
+          🎁 Free trial · {{ trialMinutesLeft }} min left
+        </span>
+      }
     </div>
     <div class="actions">
       @if (isDesktop) {
@@ -30,6 +36,15 @@
 
   <!-- ================================ NOTICES ================================= -->
   <app-error-banner [message]="error" (dismiss)="error = ''"></app-error-banner>
+  @if (liveAccess?.mode === 'denied') {
+    <div class="banner trial-over" role="alert" data-testid="trial-over">
+      <div>
+        <strong>Your free live-interview minutes are used up.</strong>
+        Choose a plan to keep practising with live AI guidance — prepaid, no auto-renewal.
+      </div>
+      <a routerLink="/pricing" class="btn-primary btn-sm">See plans</a>
+    </div>
+  }
   @if (notice) {
     <div class="banner warn" (click)="notice = ''">
       @if (noticeScope === 'stt') {

@@ -12,6 +12,7 @@ import {
   Subscription,
   Usage,
   VerifyResponse,
+  FreeTrial,
 } from '../models/billing.models';
 
 /**
@@ -33,6 +34,11 @@ export class BillingService {
 
   currencies(): Observable<Currency[]> {
     return this.http.get<Currency[]>(`${this.base}/api/pricing/currencies`);
+  }
+
+  /** One-time free trial: live minutes (web / desktop) and screenshot credits left. */
+  freeTrial(): Observable<FreeTrial> {
+    return this.http.get<FreeTrial>(`${this.base}/api/billing/me/free-trial`);
   }
 
   myUsage(): Observable<Usage> {

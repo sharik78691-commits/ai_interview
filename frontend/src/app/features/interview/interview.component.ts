@@ -1,6 +1,6 @@
 import { Component, OnDestroy, OnInit, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { ActivatedRoute } from '@angular/router';
+import { ActivatedRoute, RouterLink } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import {
@@ -16,7 +16,7 @@ import {
 import { FONT_SIZE_OPTIONS, MAX_FONT_SIZE, MIN_FONT_SIZE } from '../../core/services/settings.service';
 import { DemoService } from '../../core/services/demo.service';
 import { InterviewerAudioService } from '../../core/services/interviewer-audio.service';
-import { InterviewWsService } from '../../core/services/interview-ws.service';
+import { InterviewWsService, LiveAccess } from '../../core/services/interview-ws.service';
 import { QuestionDetectorService } from '../../core/services/question-detector.service';
 import { ResumeService } from '../../core/services/resume.service';
 import { SettingsService } from '../../core/services/settings.service';
@@ -103,7 +103,7 @@ export const MAX_SESSION_SECONDS = 75 * 60;
 @Component({
   selector: 'app-interview',
   standalone: true,
-  imports: [FormsModule, ErrorBannerComponent, TimeFormatPipe, RichTextPipe],
+  imports: [FormsModule, RouterLink, ErrorBannerComponent, TimeFormatPipe, RichTextPipe],
   templateUrl: './interview.component.html',
   styleUrl: './interview.component.css',
 })
@@ -282,6 +282,13 @@ export class InterviewComponent implements OnInit, OnDestroy {
   }
   private timer: ReturnType<typeof setInterval> | null = null;
   private subs: Subscription[] = [];
+  /** Free-trial / plan state of the live session (null until the handshake). */
+  liveAccess: LiveAccess | null = null;
+
+  /** Whole minutes left in the free trial (rounded up, so 1s left shows 1). */
+  get trialMinutesLeft(): number {
+    return Math.ceil((this.liveAccess?.remainingSeconds ?? 0) / 60);
+  }
 
   ngOnInit(): void {
     if (this.route.snapshot.queryParamMap.get('auto') === '1') {
@@ -322,6 +329,11 @@ export class InterviewComponent implements OnInit, OnDestroy {
       }),
       this.ws.followUps$.subscribe((r) => this.applyFollowUps(r)),
       this.ws.status$.subscribe((s) => (this.status = s)),
+      this.ws.access$.subscribe((a) => {
+        this.liveAccess = a;
+        // Trial used up mid-session: stop sending audio the server will not take.
+        if (a?.mode === 'denied' && this.capturingInterviewer) void this.stopInterviewerAudio();
+      }),
       this.ws.history$.subscribe((h) => (this.history = h)),
       this.ws.notice$.subscribe(({ message, scope }) => {
         this.notice = message;
@@ -575,6 +587,7 @@ export class InterviewComponent implements OnInit, OnDestroy {
    */
   async startInterviewerAudio(): Promise<void> {
     this.error = '';
+    if (this.liveAccess?.mode === 'denied') return; // the upgrade banner explains why
     try {
       await this.interviewerAudio.start();
       this.ws.sendInterviewerAudioStart('audio/wav');

@@ -37,10 +37,26 @@ interface WsMsg {
   [k: string]: unknown;
 }
 
+/** Live-session allowance reported by the server (see backend free_trial_service). */
+export interface LiveAccess {
+  mode: 'unlimited' | 'trial' | 'denied';
+  client: 'web' | 'desktop';
+  remainingSeconds: number;
+  limitSeconds: number;
+  code?: string;
+  message?: string;
+}
+
 @Injectable({ providedIn: 'root' })
 export class InterviewWsService {
   private readonly ticketPath = `${inject(API_BASE_URL)}/api/auth/ws-ticket`;
   messages$ = new Subject<WsMsg>();
+  /**
+   * Free-trial / plan state for live sessions (handshake `access` field, then
+   * `{type:'access'}` updates from the server's trial meter). `denied` means
+   * the trial minutes for this client are used up and a plan is needed.
+   */
+  access$ = new BehaviorSubject<LiveAccess | null>(null);
   status$ = new BehaviorSubject<InterviewStatus>('idle');
   guidance$ = new BehaviorSubject<AIInterviewResponse | null>(null);
   history$ = new BehaviorSubject<HistoryItem[]>([]);
@@ -81,6 +97,8 @@ export class InterviewWsService {
    * socket early instead of on the next question.
    */
   private static readonly PING_INTERVAL_MS = 30_000;
+  /** Server close code: the free live-interview minutes are used up. */
+  static readonly TRIAL_EXHAUSTED_CODE = 4402;
 
   /**
    * WebSocket URL for the live-interview socket.
@@ -153,6 +171,7 @@ export class InterviewWsService {
   connect(url?: string): void {
     this.url = url ?? this.defaultUrl();
     this.wantOpen = true;
+    this.access$.next(null); // re-learned from the handshake (a plan may have been bought)
     void this.open();
   }
 
@@ -188,9 +207,12 @@ export class InterviewWsService {
    */
   private async buildSocketUrl(): Promise<string> {
     const ticket = await this.fetchTicket();
-    if (!ticket) return this.url;
+    // Which free-trial pool to use: the desktop app and the website each have
+    // their own minutes (see backend free_trial_service).
+    const client = `client=${environment.electron ? 'desktop' : 'web'}`;
     const sep = this.url.includes('?') ? '&' : '?';
-    return `${this.url}${sep}ticket=${encodeURIComponent(ticket)}`;
+    if (!ticket) return `${this.url}${sep}${client}`;
+    return `${this.url}${sep}ticket=${encodeURIComponent(ticket)}&${client}`;
   }
 
   private attachHandlers(): void {
@@ -236,6 +258,9 @@ export class InterviewWsService {
           // omit it and would reject audio_preview as an unknown type).
           if (typeof msg['livePreview'] === 'boolean') this.livePreview$.next(msg['livePreview']);
           if (typeof msg['liveStream'] === 'boolean') this.liveStream$.next(msg['liveStream']);
+          if (msg['access'] && typeof msg['access'] === 'object') {
+            this.access$.next(msg['access'] as unknown as LiveAccess);
+          }
           const s = msg['status'] as string | undefined;
           if (s === 'idle' || s === 'listening' || s === 'processing' || s === 'thinking' || s === 'ready' || s === 'paused' || s === 'error') {
             this.status$.next(s);
@@ -246,6 +271,8 @@ export class InterviewWsService {
             if (/question detected|thinking/i.test(m)) this.status$.next('processing');
             else if (/listening|connected|reset/i.test(m)) this.status$.next('listening');
           }
+        } else if (msg.type === 'access') {
+          this.access$.next(msg as unknown as LiveAccess);
         } else if (msg.type === 'ai_followups') {
           const items = Array.isArray(msg['followUps']) ? (msg['followUps'] as FollowUpItem[]) : [];
           this.followUps$.next({
@@ -287,6 +314,18 @@ export class InterviewWsService {
       }
     };
     this.ws.onclose = (ev: CloseEvent) => {
+      if (ev.code === InterviewWsService.TRIAL_EXHAUSTED_CODE) {
+        // Free minutes used up: reconnecting would only be refused again.
+        console.warn('[ws] closed: free trial used up; not reconnecting');
+        this.stopPing();
+        this.wantOpen = false;
+        const a = this.access$.value;
+        if (a?.mode !== 'denied') {
+          this.access$.next({ mode: 'denied', client: a?.client ?? 'web', remainingSeconds: 0, limitSeconds: a?.limitSeconds ?? 0, code: 'TRIAL_EXHAUSTED' });
+        }
+        this.status$.next('idle');
+        return;
+      }
       // Close codes explain WHY the socket died (1008 = auth, 1000 = normal).
       console.warn(
         `[ws] closed code=${ev.code} reason=${ev.reason || '-'} clean=${ev.wasClean}; retrying`,

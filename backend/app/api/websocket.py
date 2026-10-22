@@ -53,6 +53,7 @@ from app.providers.stt.provider import (
     prewarm_stt,
 )
 from app.providers.stt.live_stream import LIVE_PCM_TAG, LiveTranscriptStream
+from app.services import free_trial_service as free_trial
 from app.services.activity import log_llm_usage
 from app.services.ai_service import AIService
 from app.services.interview_context import VALID_LENGTHS, context_store, normalize_length
@@ -61,6 +62,15 @@ from app.services.question_service import QuestionBuffer
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# Free-trial metering (see free_trial_service). Every TRIAL_TICK_SECONDS the
+# session is charged one tick IF it is active: interviewer audio is being
+# captured, or an answer was requested within TRIAL_IDLE_GRACE_SECONDS. An
+# open but idle page costs nothing. Close code 4402 = trial used up (the
+# client shows the upgrade prompt and does not reconnect).
+TRIAL_TICK_SECONDS = 15
+TRIAL_IDLE_GRACE_SECONDS = 90
+TRIAL_EXHAUSTED_CLOSE_CODE = 4402
 
 # Guard rails so a long meeting cannot exhaust memory.
 MAX_CLIP_BYTES = 12 * 1024 * 1024
@@ -219,6 +229,45 @@ def _ws_user_is_active(user_id: int) -> int | None:
         db.close()
 
 
+def _trial_access(user_id: int, client: str) -> free_trial.LiveAccess:
+    db = SessionLocal()
+    try:
+        user = get_user_by_id(db, user_id)
+        return free_trial.live_access(db, user, client)
+    finally:
+        db.close()
+
+
+def _trial_tick(user_id: int, client: str, seconds: int) -> free_trial.LiveAccess:
+    """Charge one active tick (unless a plan was bought meanwhile)."""
+    db = SessionLocal()
+    try:
+        user = get_user_by_id(db, user_id)
+        access = free_trial.live_access(db, user, client)
+        if access.mode != "trial":
+            return access
+        left = free_trial.consume_seconds(db, user, client, seconds)
+        return free_trial.LiveAccess("trial" if left > 0 else "denied", left, access.limit_seconds)
+    finally:
+        db.close()
+
+
+def _access_frame(access: free_trial.LiveAccess, client: str) -> dict:
+    frame = {
+        "type": "access",
+        "mode": access.mode,
+        "client": client,
+        "remainingSeconds": access.remaining_seconds,
+        "limitSeconds": access.limit_seconds,
+    }
+    if access.mode == "denied":
+        frame["code"] = "TRIAL_EXHAUSTED"
+        frame["message"] = (
+            "Your free live-interview minutes are used up. Choose a plan to keep practising."
+        )
+    return frame
+
+
 def _ws_user_is_admin(user_id: int) -> bool:
     """Only admins may pick the answering model; everyone else gets the default."""
     db = SessionLocal()
@@ -263,6 +312,18 @@ async def ws_interview(websocket: WebSocket) -> None:
     logger.info(f"WebSocket authenticated successfully for user_id={user_id}")
 
     await websocket.accept()
+
+    # Free trial gate: no plan and no trial minutes left for this client →
+    # tell the client why, then close (it shows the upgrade prompt).
+    client_kind = free_trial.normalize_client(websocket.query_params.get("client"))
+    access = await asyncio.to_thread(_trial_access, user_id, client_kind)
+    if access.mode == "denied":
+        logger.info("[ws user=%s] live trial used up (%s); closing", user_id, client_kind)
+        await websocket.send_json(_access_frame(access, client_kind))
+        await websocket.close(code=TRIAL_EXHAUSTED_CLOSE_CODE, reason="trial_exhausted")
+        return
+    #: Last time an answer was requested (monotonic); drives trial metering.
+    last_activity = 0.0
 
     # Per-user interview context (never another user's resume/JD).
     context = context_store.get(user_id)
@@ -806,6 +867,8 @@ async def ws_interview(websocket: WebSocket) -> None:
         delivering the same final twice) must never spend a second AI call, and
         the UI gets a status so its spinner does not hang.
         """
+        nonlocal last_activity
+        last_activity = time.monotonic()
         if len(question) > MAX_QUESTION_CHARS:
             question = question[-MAX_QUESTION_CHARS:]
         key = _norm_question(question)
@@ -839,8 +902,35 @@ async def ws_interview(websocket: WebSocket) -> None:
             # livePreview is set, and streams LPCM frames only when liveStream is.
             "livePreview": live_preview,
             "liveStream": live_stream is not None,
+            # Trial / plan state (additive field; later updates arrive as
+            # {type:"access"} frames from the trial meter).
+            "access": _access_frame(access, client_kind),
         }
     )
+
+    async def _trial_meter() -> None:
+        while True:
+            await asyncio.sleep(TRIAL_TICK_SECONDS)
+            active = interviewer_capturing or (
+                last_activity and time.monotonic() - last_activity < TRIAL_IDLE_GRACE_SECONDS
+            )
+            if not active:
+                continue
+            state = await asyncio.to_thread(
+                _trial_tick, user_id, client_kind, max(1, round(TRIAL_TICK_SECONDS))
+            )
+            try:
+                await websocket.send_json(_access_frame(state, client_kind))
+                if state.mode == "denied":
+                    logger.info("[ws user=%s] live trial ran out (%s); closing", user_id, client_kind)
+                    await websocket.close(code=TRIAL_EXHAUSTED_CLOSE_CODE, reason="trial_exhausted")
+            except Exception:
+                return  # client already gone
+            if state.mode != "trial":
+                return
+
+    if access.mode == "trial":
+        _spawn(_trial_meter())
 
     try:
         while True:
