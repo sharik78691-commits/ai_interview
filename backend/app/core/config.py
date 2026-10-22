@@ -156,6 +156,11 @@ class Settings:
         # answers still come from the clip pipeline). Without the key, the
         # snapshot previews above are used instead.
         self.stt_live_model: str = os.getenv("STT_LIVE_MODEL", "") or self.stt_model_4
+        # Answer from that live stream: once its text holds a finished question
+        # and the interviewer pauses, the answer starts without waiting for the
+        # clip's silence cut + batch STT (~1-2s sooner). The clip pipeline stays
+        # as the fallback for speech the stream missed. false = clips only.
+        self.stt_live_answers: bool = _as_bool(os.getenv("STT_LIVE_ANSWERS"), default=True)
         # Demo mode defaults to True when no LLM key is configured.
         explicit_demo = os.getenv("DEMO_MODE")
         if explicit_demo is None or not explicit_demo.strip():

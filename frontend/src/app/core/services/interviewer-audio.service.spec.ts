@@ -3,6 +3,7 @@ import {
   InterviewerAudioService,
   LIVE_TAIL_MS,
   MIN_VOICED_MS,
+  PAUSE_SIGNAL_MS,
   PREVIEW_INTERVAL_MS,
 } from './interviewer-audio.service';
 
@@ -264,6 +265,30 @@ describe('InterviewerAudioService: live transcript stream', () => {
     svc.liveStream = false;
     feed(0.3, 1_000);
     expect(sent.length).toBe(0);
+  });
+
+  it('signals one short pause per gap after real speech, before the clip cut', () => {
+    let pauses = 0;
+    svc.pause$.subscribe(() => pauses++);
+    svc.liveAnswers = true;
+    feed(0, 1_000); // no speech yet: silence is not a pause
+    expect(pauses).toBe(0);
+    feed(0.3, 1_200);
+    feed(0, PAUSE_SIGNAL_MS - FRAME_MS);
+    expect(pauses).toBe(0); // a breath mid-question
+    feed(0, FRAME_MS);
+    expect(pauses).toBe(1);
+    feed(0, 300); // still the same pause
+    expect(pauses).toBe(1);
+    svc.liveAnswers = false;
+  });
+
+  it('sends no pause signal unless the backend answers from the stream', () => {
+    let pauses = 0;
+    svc.pause$.subscribe(() => pauses++);
+    feed(0.3, 1_200);
+    feed(0, 600);
+    expect(pauses).toBe(0);
   });
 });
 

@@ -9,12 +9,14 @@ Pinned:
    final text is relayed in order;
 2. the session closes when nobody talks and reopens on the next frame;
 3. a provider failure backs off silently instead of reconnecting per frame;
-4. in the WebSocket, LPCM frames never leak into the answer clip and live text
-   never triggers an answer;
+4. in the WebSocket, LPCM frames never leak into the answer clip and INTERIM
+   live text never triggers an answer (finished turns: test_live_answers.py);
 5. the handshake only advertises liveStream when a Gemini key exists.
 """
 import asyncio
 import base64
+import concurrent.futures
+import contextlib
 import json
 from unittest.mock import AsyncMock, patch
 
@@ -158,6 +160,26 @@ class TestLiveTranscriptStream:
             await stream.close()
 
 
+@contextlib.contextmanager
+def ws_session(client):
+    """``websocket_connect``, minus a TestClient teardown race.
+
+    On exit Starlette cancels the handler's scope right after the close frame.
+    If the handler is still awaiting its background tasks at that moment, the
+    cancellation surfaces as ``concurrent.futures.CancelledError``. Only that
+    error, and only after the test body finished, is tolerated — a failing
+    body still fails.
+    """
+    body_done = False
+    try:
+        with client.websocket_connect("/ws/interview") as ws:
+            yield ws
+            body_done = True
+    except concurrent.futures.CancelledError:
+        if not body_done:
+            raise
+
+
 def _auth(client) -> None:
     client.post(
         "/api/auth/register",
@@ -209,7 +231,7 @@ class TestWebSocketLiveStream:
         ):
             with patch("app.main.app"), TestClient(app) as client:
                 _auth(client)
-                with client.websocket_connect("/ws/interview") as ws:
+                with ws_session(client) as ws:
                     hello = ws.receive_json()
                     assert hello.get("liveStream") is True
                     ws.send_json({"type": "interviewer_audio_start", "mimeType": "audio/wav"})

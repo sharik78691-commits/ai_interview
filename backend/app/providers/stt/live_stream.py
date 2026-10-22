@@ -7,10 +7,11 @@ it arrives; the Live API answers with `interimInputTranscription` every ~0.5s
 (measured 2026-10-20: first word ~0.5s after onset, ~0.5s behind speech) and a
 `inputTranscription` when its own VAD closes the turn.
 
-DISPLAY ONLY. The text is relayed to the browser as `stt_live` frames and never
-reaches question detection or the answer queue — answers still come from the
-clip pipeline, so a provisional word can never trigger (or duplicate) an
-answer.
+The text is relayed to the browser as `stt_live` frames. This module never
+answers anything itself: the WebSocket's LiveTurnTracker decides when a turn
+holds a finished question (never on an interim word while the interviewer is
+still talking), and the clip pipeline stays the fallback for speech this
+stream did not hear.
 
 Design constraints:
 - `feed()` never blocks the WebSocket receive loop: frames go into a bounded
@@ -72,6 +73,11 @@ class LiveTranscriptStream:
         self._pump: asyncio.Task | None = None
         self._closed = False
         self._paused_until = 0.0
+
+    @property
+    def available(self) -> bool:
+        """False while closed or backing off after a failure (hears nothing)."""
+        return not self._closed and time.monotonic() >= self._paused_until
 
     def feed(self, pcm: bytes) -> None:
         """Queue one PCM frame; never awaits (safe inside the receive loop)."""

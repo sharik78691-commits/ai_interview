@@ -80,6 +80,14 @@ export class InterviewerAudioService {
   private liveTailMs = 0;
   private livePreroll: Float32Array[] = [];
   /**
+   * Fires once per pause of PAUSE_SIGNAL_MS after real speech. The backend
+   * answers a FINISHED sentence of the live transcript on it — the way a
+   * person replies after a short beat — instead of waiting for the clip cut.
+   */
+  readonly pause$ = new Subject<void>();
+  /** Set by the page when the backend answers from the live stream. */
+  liveAnswers = false;
+  /**
    * Paused: capture stays open, but every sample is dropped before it reaches
    * clips, previews or the live stream — nothing goes to STT or the AI.
    */
@@ -668,7 +676,17 @@ export class InterviewerAudioService {
       this.voicedMs += durationMs;
       this.silentMs = 0;
     } else {
+      const wasSilentMs = this.silentMs;
       this.silentMs += durationMs;
+      if (
+        this.liveAnswers &&
+        this.clipHasSpeech &&
+        this.voicedMs >= MIN_VOICED_MS &&
+        wasSilentMs < PAUSE_SIGNAL_MS &&
+        this.silentMs >= PAUSE_SIGNAL_MS
+      ) {
+        this.pause$.next();
+      }
       // Only quiet frames teach us the noise floor: it falls fast, rises slowly.
       this.noiseFloor += (rms - this.noiseFloor) * (rms < this.noiseFloor ? 0.5 : 0.03);
       // A fixed threshold fails both ways: a hot loopback hum never reads as
@@ -848,6 +866,13 @@ const MAX_CLIP_MS = 15_000;
  * the backend QuestionBuffer hold window.
  */
 const SILENCE_MS_TO_CUT = 850;
+/**
+ * Quiet that counts as "the interviewer paused" for live answering. Human
+ * turn gaps are ~200–500 ms; the backend only answers on it when the live
+ * sentence is already closed ("…a deadlock?"), so a mid-question breath of
+ * this length cannot answer a fragment.
+ */
+export const PAUSE_SIGNAL_MS = 450;
 /** Adaptive silence threshold: starting point, bounds, and margin over the floor. */
 const DEFAULT_SILENCE_THRESHOLD = 0.012;
 const MIN_SILENCE_THRESHOLD = 0.006;

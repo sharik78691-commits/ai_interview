@@ -258,6 +258,7 @@ export class InterviewWsService {
           // omit it and would reject audio_preview as an unknown type).
           if (typeof msg['livePreview'] === 'boolean') this.livePreview$.next(msg['livePreview']);
           if (typeof msg['liveStream'] === 'boolean') this.liveStream$.next(msg['liveStream']);
+          if (typeof msg['liveAnswers'] === 'boolean') this.liveAnswers$.next(msg['liveAnswers']);
           if (msg['access'] && typeof msg['access'] === 'object') {
             this.access$.next(msg['access'] as unknown as LiveAccess);
           }
@@ -333,6 +334,7 @@ export class InterviewWsService {
       this.stopPing();
       this.livePreview$.next(false); // re-learned from the next handshake
       this.liveStream$.next(false);
+      this.liveAnswers$.next(false);
       this.scheduleReconnect();
     };
     this.ws.onerror = (ev: Event) => {
@@ -380,6 +382,8 @@ export class InterviewWsService {
   livePreview$ = new BehaviorSubject<boolean>(false);
   /** True when the backend accepts streamed PCM (word-by-word transcript). */
   liveStream$ = new BehaviorSubject<boolean>(false);
+  /** True when the backend answers from the live stream (accepts speech_pause). */
+  liveAnswers$ = new BehaviorSubject<boolean>(false);
   /** Streamed transcript of the current utterance; `final` closes the turn. */
   liveText$ = new Subject<{ text: string; final: boolean }>();
 
@@ -421,6 +425,16 @@ export class InterviewWsService {
   sendLivePcm(frame: ArrayBuffer): void {
     if (this.ws?.readyState !== WebSocket.OPEN || !this.liveStream$.value) return;
     this.ws.send(frame);
+  }
+
+  /**
+   * The interviewer just paused (~0.45 s). Lets the backend answer a finished
+   * sentence from the live transcript without waiting for the clip cut.
+   * Older backends reject unknown types, so it is gated on liveAnswers.
+   */
+  sendSpeechPause(responseLength = 'default'): void {
+    if (this.ws?.readyState !== WebSocket.OPEN || !this.liveAnswers$.value) return;
+    this.ws.send(JSON.stringify({ type: 'speech_pause', responseLength }));
   }
 
   /** Manual interviewer question -> existing AI flow. */

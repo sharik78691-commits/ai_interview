@@ -372,8 +372,11 @@ export class InterviewComponent implements OnInit, OnDestroy {
       // Word-by-word stream when the backend has it; snapshots otherwise.
       this.ws.livePreview$.subscribe(() => this.syncLiveFlags()),
       this.ws.liveStream$.subscribe(() => this.syncLiveFlags()),
+      this.ws.liveAnswers$.subscribe(() => this.syncLiveFlags()),
       this.interviewerAudio.preview$.subscribe((p) => this.ws.sendAudioPreview(p.data, p.mimeType)),
       this.interviewerAudio.livePcm$.subscribe((frame) => this.ws.sendLivePcm(frame)),
+      // A short pause lets the backend answer a finished live sentence now.
+      this.interviewerAudio.pause$.subscribe(() => this.ws.sendSpeechPause(this.responseLength)),
       this.ws.liveText$.subscribe((t) => this.onLiveText(t)),
       // When Auto Select needs a system-audio device, surface the setup helper
       // (with the list of devices the browser currently sees).
@@ -437,7 +440,10 @@ export class InterviewComponent implements OnInit, OnDestroy {
     const clip = this.clipQueue.shift()!;
     this.audioBusy = true;
     // Transcription first, AI second — do not claim "Question detected" yet.
-    this.audioStatus = 'Transcribing interviewer audio…';
+    // The live transcript may already have started the answer for this very
+    // speech; keep saying so instead of stepping back to "Transcribing".
+    const answering = this.thinking && this.audioStatus === 'Generating answer…';
+    if (!answering) this.audioStatus = 'Transcribing interviewer audio…';
     this.thinking = true;
     this.ws.sendAudioClip(clip.data, clip.mimeType, this.responseLength);
     // Safety valve: never stall the queue if the backend stays silent.
@@ -514,6 +520,7 @@ export class InterviewComponent implements OnInit, OnDestroy {
   private syncLiveFlags(): void {
     const stream = this.ws.liveStream$.value;
     this.interviewerAudio.liveStream = stream;
+    this.interviewerAudio.liveAnswers = stream && this.ws.liveAnswers$.value;
     // The stream supersedes snapshots: never pay for both.
     this.interviewerAudio.livePreview = this.ws.livePreview$.value && !stream;
   }
