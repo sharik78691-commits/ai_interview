@@ -51,6 +51,7 @@ from app.schemas.billing import (
 )
 from app.services import payment_service, pricing_service as pricing, subscription_service as subs
 from app.services import screenshot_credit_service as credits
+from app.services import free_trial_service as free_trial
 from app.services.billing_views import payment_out, plan_public, subscription_out, usage_out
 
 logger = logging.getLogger(__name__)
@@ -155,6 +156,12 @@ def my_billing(user: User = Depends(require_user), db: Session = Depends(get_db)
 def my_usage(user: User = Depends(require_user), db: Session = Depends(get_db)) -> UsageOut:
     """Screenshot credits of the applicable subscription (server-computed)."""
     return usage_out(credits.summary(db, user.id))
+
+
+@router.get("/billing/me/free-trial")
+def my_free_trial(user: User = Depends(require_user), db: Session = Depends(get_db)) -> dict:
+    """The one-time free trial: live minutes (web / desktop) and screenshot credits."""
+    return free_trial.summary(db, user)
 
 
 @router.post("/billing/trial", response_model=SubscriptionOut, status_code=201)

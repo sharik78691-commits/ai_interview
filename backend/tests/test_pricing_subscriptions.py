@@ -43,6 +43,9 @@ JPEG = base64.b64encode(b"\xff\xd8\xff\xe0" + b"0" * 200).decode()
 @pytest.fixture(autouse=True)
 def _catalogue(monkeypatch):
     monkeypatch.setattr(get_settings(), "payments_mock_enabled", True)
+    # These tests are about PLAN credits; the one-time free screenshots have
+    # their own tests (test_free_trial.py).
+    monkeypatch.setattr(get_settings(), "free_screenshots", 0)
     db = SessionLocal()
     try:
         subs.seed_default_plans(db)

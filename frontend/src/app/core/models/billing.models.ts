@@ -339,3 +339,13 @@ export function newRequestId(prefix = 'req'): string {
       : `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`;
   return `${prefix}-${rand}`.slice(0, 64);
 }
+
+/** One-time free trial (GET /api/billing/me/free-trial). Seconds / counts left. */
+export interface FreeTrial {
+  enforced: boolean;
+  hasPlan: boolean;
+  unlimited: boolean;
+  web: { limitSeconds: number; remainingSeconds: number };
+  desktop: { limitSeconds: number; remainingSeconds: number };
+  screenshots: { limit: number; remaining: number };
+}

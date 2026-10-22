@@ -423,6 +423,34 @@ class SchemaMigration(Base):
     applied_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
 
+class FreeTrialUsage(Base):
+    """Free trial allowance used by one user (one row per user, created lazily).
+
+    Every account gets the same one-time free allowance (limits come from
+    settings, so they can change without a migration): live-interview seconds
+    on the website, separate live-interview seconds in the desktop app, and
+    screenshot-analysis credits. Counters only ever grow; CHECK constraints
+    keep them non-negative. Used only while the user has no live plan.
+    """
+
+    __tablename__ = "free_trial_usage"
+    __table_args__ = (
+        CheckConstraint("web_seconds_used >= 0", name="ck_free_trial_web_nonneg"),
+        CheckConstraint("desktop_seconds_used >= 0", name="ck_free_trial_desktop_nonneg"),
+        CheckConstraint("screenshots_used >= 0", name="ck_free_trial_screens_nonneg"),
+    )
+
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    user_email: Mapped[str] = mapped_column(String(320), index=True, default="", nullable=False)
+    web_seconds_used: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    desktop_seconds_used: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    screenshots_used: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+
 __all__ = [
     "BillingCurrency",
     "BillingType",
@@ -439,4 +467,5 @@ __all__ = [
     "SubscriptionStatus",
     "UsageStatus",
     "UserSubscription",
+    "FreeTrialUsage",
 ]

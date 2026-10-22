@@ -26,6 +26,7 @@ from app.db.session import get_db
 from app.models.user import User
 from app.services import screenshot_credit_service as credits
 from app.services import screenshot_service as svc
+from app.services import free_trial_service as free_trial
 
 logger = logging.getLogger(__name__)
 
@@ -55,10 +56,18 @@ def _error(err: svc.ScreenshotAnalysisError | credits.CreditError) -> JSONRespon
 
 def _usage(db: Session, user: User) -> dict:
     s = credits.summary(db, user.id)
+    free = 0 if user.is_admin else free_trial.screenshots_remaining(free_trial.get_or_create(db, user))
+    on_trial = s.subscription_id is None and free > 0
     return {
-        "subscriptionId": s.subscription_id, "planName": s.plan_name, "status": s.status,
-        "allowance": s.allowance, "used": s.used, "remaining": s.remaining,
-        "totalRemaining": s.total_remaining,
+        "subscriptionId": s.subscription_id,
+        # No plan yet: the free trial credits are what the next screenshot uses.
+        "planName": "Free trial" if on_trial else s.plan_name,
+        "status": "trial" if on_trial else s.status,
+        "allowance": free_trial.screenshot_limit() if on_trial else s.allowance,
+        "used": free_trial.screenshot_limit() - free if on_trial else s.used,
+        "remaining": free if on_trial else s.remaining,
+        "totalRemaining": s.total_remaining + free,
+        "freeRemaining": free,
         "expiresAt": s.expires_at.isoformat() if s.expires_at else None,
         # Admins are never charged (see screenshot_credit_service).
         "unlimited": bool(user.is_admin),

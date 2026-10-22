@@ -14,7 +14,7 @@ database-driven pricing, user and admin billing views, and a full audit trail.
 | Cashfree adapter (PG Orders API, JS SDK redirect, API confirmation, signed webhooks) | ✅ Implemented and unit-tested against a mocked HTTP transport. ⏳ **Not yet run against Cashfree** (no credentials) |
 | Auto-renewal / recurring mandates | ❌ Not implemented. Monthly/Quarterly are sold **prepaid** for 30/90 days; all copy says "no auto-renewal" (see *Recurring billing*) |
 | Refunds | Issued in the gateway dashboard. Refund / chargeback **webhooks** now update the payment and end the access automatically |
-| Feature gating by subscription | ✅ Screenshot analysis only (credits, below). Live interview is not gated (product decision unchanged) |
+| Feature gating by subscription | ✅ Screenshot analysis (credits, below) and, since 2026-10-22, **live interview** after the one-time free trial (see *Free trial*) |
 | 2026-10 catalogue: 5 plans, exact-hour durations, screenshot credits | ✅ Done, tested (SQLite + PostgreSQL 18), applied to the local dev DB |
 | INR + USD per-currency prices, admin-managed | ✅ Done. **USD prices are not set** — an admin enters them; USD checkout also needs `*_CURRENCIES` and the gateway's international payments |
 | `user_id` ⇒ `user_email` on every table | ✅ Done on the live schema (incl. legacy tables without models), with backfill and a regression test |
@@ -45,6 +45,15 @@ and their own amount/name snapshots); `1-day` was added. This ran once
 * **Credits.** 1 credit = 1 screenshot image. A request is charged to ONE live subscription — the
   soonest-expiring one that has enough credits. Reserve is a single conditional `UPDATE`
   (`used + n <= allowance`), so concurrent requests can't overspend (CHECK constraint as backstop).
+* **Free trial** (2026-10-22, `free_trial_service`, table `free_trial_usage`): every account gets ONCE
+  20 min of live interview on the website, a separate 15 min in the desktop app (`?client=desktop` on
+  the socket), and 2 screenshot analyses. Live minutes count only while a session is active (interviewer
+  audio captured or an answer requested in the last 90 s), metered in 15 s ticks. When the client's pool
+  is used up the socket closes with code **4402** and the app shows "See plans". A live plan or admin =
+  unlimited, no trial used. Plan credits are spent before free screenshot credits. Limits:
+  `FREE_WEB_MINUTES`, `FREE_DESKTOP_MINUTES`, `FREE_SCREENSHOTS`; `FREE_TRIAL_ENFORCED=false` turns
+  the live gate off. The `client` value is not authenticated, so the worst case is both pools (35 min)
+  used on one client.
 * **Admins** (`users.is_admin`) have unlimited analyses: no plan needed, no subscription charged.
   Their requests are still logged in `screenshot_usage` (`subscription_id` NULL), stay idempotent,
   and keep the 6-per-minute rate limit. The usage block reports `unlimited: true`.

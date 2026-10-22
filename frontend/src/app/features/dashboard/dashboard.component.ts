@@ -2,7 +2,7 @@ import { DatePipe } from '@angular/common';
 import { Component, OnInit, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
-import { MyBilling } from '../../core/models/billing.models';
+import { FreeTrial, MyBilling } from '../../core/models/billing.models';
 import { BillingService } from '../../core/services/billing.service';
 import { ResumeData } from '../../core/models/interview.models';
 import { ResumeService, StoredResume } from '../../core/services/resume.service';
@@ -24,6 +24,8 @@ export class DashboardComponent implements OnInit {
   private billingService = inject(BillingService);
   /** Plan + screenshot credits (server-computed); null until loaded / on error. */
   readonly billing = signal<MyBilling | null>(null);
+  /** One-time free trial state (shown while the user has no plan). */
+  readonly freeTrial = signal<FreeTrial | null>(null);
   /** Desktop installer links + version for the download card (empty URL = coming soon). */
   readonly desktopApp = environment.desktopApp;
   /** Packaged desktop build: download card becomes an (updater) placeholder. */
@@ -88,6 +90,7 @@ export class DashboardComponent implements OnInit {
   ngOnInit(): void {
     // Plan card is informational: a billing outage never blocks the dashboard.
     this.billingService.myBilling().subscribe({ next: (b) => this.billing.set(b), error: () => undefined });
+    this.billingService.freeTrial().subscribe({ next: (t) => this.freeTrial.set(t), error: () => undefined });
     // Fresh browser / new device: pull the account's active resume + role in.
     this.resumeService.adoptActiveResume().subscribe((detail) => {
       if (detail) {
@@ -105,6 +108,11 @@ export class DashboardComponent implements OnInit {
         this.restoreEditingLink();
       });
     });
+  }
+
+  /** Whole minutes (rounded up) for the free-trial line. */
+  minutes(seconds: number): number {
+    return Math.ceil(seconds / 60);
   }
 
   /** Remember which stored row the editor is linked to (persists reloads). */
