@@ -41,7 +41,7 @@
         <button class="btn-primary wide" (click)="openPicker()" [disabled]="analyzing()" data-testid="capture-btn">
           📸 Capture Screen
         </button>
-        @if (config.usage()?.unlimited) {
+        @if (unlimitedCredits()) {
           <p class="small credits" data-testid="credits-remaining">
             <strong>Unlimited</strong> screenshot analyses <span class="muted">· admin account</span>
           </p>

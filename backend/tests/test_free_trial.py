@@ -98,6 +98,19 @@ def test_two_free_screenshots_without_a_plan_then_plan_required(client, gemini):
     assert _row("shots@example.com").screenshots_used == 2
 
 
+def test_non_admin_config_never_reports_unlimited_and_shows_the_trial_count(client, gemini):
+    # Regression: the desktop Screenshots page showed "Unlimited" to normal users.
+    register(client, "notadmin@example.com")
+    usage = client.get("/api/screenshots/config").json()["usage"]
+    assert usage["unlimited"] is False
+    assert (usage["allowance"], usage["remaining"], usage["freeRemaining"]) == (2, 2, 2)
+    assert _analyze(client).status_code == 200 and _analyze(client).status_code == 200
+    usage = client.get("/api/screenshots/config").json()["usage"]
+    assert usage["unlimited"] is False
+    assert (usage["remaining"], usage["totalRemaining"]) == (0, 0)
+    assert _analyze(client).status_code == 402
+
+
 def test_request_bigger_than_free_credits_is_refused_without_charge(client, gemini):
     register(client, "big3@example.com")
     assert _analyze(client, 3).status_code == 402

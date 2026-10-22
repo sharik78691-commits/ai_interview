@@ -63,6 +63,10 @@ export class ModelConfigService {
   }
 
   async load(): Promise<void> {
+    // This service outlives sign-out/sign-in (the desktop window never
+    // reloads): drop the previous account's credits so e.g. an admin's
+    // "unlimited" is never shown to the next user while (or if) this fails.
+    this.usage.set(null);
     const bridge = getScreenshotBridge();
     if (!bridge) return;
     const res = await bridge.getConfig();

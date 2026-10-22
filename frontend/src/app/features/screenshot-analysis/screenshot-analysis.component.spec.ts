@@ -6,6 +6,8 @@ import {
   installDesktopBridge,
   shot,
 } from '../../core/screenshot/screenshot.spec';
+import { AuthService } from '../../core/auth/auth.service';
+import { ModelConfigService } from '../../core/screenshot/model-config.service';
 import { ScreenCaptureService } from '../../core/screenshot/screen-capture.service';
 import { ScreenshotAnalysisComponent } from './screenshot-analysis.component';
 
@@ -28,7 +30,11 @@ describe('ScreenshotAnalysisComponent (desktop flow)', () => {
     await settle();
   }
 
+  const auth = { isAdmin: false };
+
   beforeEach(() => {
+    auth.isAdmin = false;
+    TestBed.configureTestingModule({ providers: [{ provide: AuthService, useValue: auth }] });
     localStorage.removeItem('aia_screenshot_history');
     localStorage.removeItem('aia_screenshot_model');
   });
@@ -153,12 +159,42 @@ describe('ScreenshotAnalysisComponent (desktop flow)', () => {
   });
 
   it('admin account: shows unlimited analyses instead of a credit count', async () => {
+    auth.isAdmin = true;
     await setup({
       getConfig: async () => ({ ok: true, models: cmp.config.models(), defaultModel: 'gemini-3.5-flash-lite', serverReady: true, usage: { ...USAGE, remaining: 0, totalRemaining: 0, unlimited: true } }),
     });
     const line = q('[data-testid="credits-remaining"]')!.textContent!;
     expect(line).toContain('Unlimited');
     expect(line).not.toContain('Buy more');
+  });
+
+  // Regression: the desktop app showed "Unlimited" to normal (non-admin) users.
+  const TRIAL = { planName: 'Free trial', allowance: 2, used: 0, remaining: 2, totalRemaining: 2, expiresAt: null };
+
+  it('non-admin: never shows unlimited, even if the usage says so; shows the real count', async () => {
+    await setup({
+      getConfig: async () => ({ ok: true, models: cmp.config.models(), defaultModel: 'gemini-3.5-flash-lite', serverReady: true, usage: { ...TRIAL, unlimited: true } }),
+    });
+    const line = q('[data-testid="credits-remaining"]')!.textContent!;
+    expect(line).not.toContain('Unlimited');
+    expect(line).toContain('2 screenshot credits left on Free trial');
+  });
+
+  it("non-admin after an admin signed out: the admin's unlimited credits are not carried over", async () => {
+    // The config service is a root singleton that survives sign-out in the desktop window.
+    TestBed.inject(ModelConfigService).usage.set({ ...USAGE, unlimited: true });
+    await setup({
+      getConfig: async () => ({ ok: true, models: cmp.config.models(), defaultModel: 'gemini-3.5-flash-lite', serverReady: true, usage: TRIAL }),
+    });
+    expect(cmp.config.usage()?.unlimited).toBeUndefined();
+    expect(q('[data-testid="credits-remaining"]')!.textContent).toContain('2 screenshot credits left on Free trial');
+  });
+
+  it("a failed config load clears the previous account's credits", async () => {
+    TestBed.inject(ModelConfigService).usage.set({ ...USAGE, unlimited: true });
+    await setup({ getConfig: async () => ({ ok: false, error: { code: 'X', message: 'offline' } }) });
+    expect(cmp.config.usage()).toBeNull();
+    expect(q('[data-testid="credits-remaining"]')).toBeNull();
   });
 
   it('hides the credits line when the server does not report usage', async () => {
@@ -378,6 +414,7 @@ describe('ScreenshotAnalysisComponent (desktop flow)', () => {
 });
 
 describe('ScreenshotAnalysisComponent (Ctrl+Shift+S from another page)', () => {
+  beforeEach(() => TestBed.configureTestingModule({ providers: [{ provide: AuthService, useValue: { isAdmin: false } }] }));
   afterEach(() => TestBed.resetTestingModule());
 
   it('one press opens the picker on the cursor screen; Enter captures and analyzes', async () => {
