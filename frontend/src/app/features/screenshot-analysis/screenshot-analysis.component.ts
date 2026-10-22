@@ -1,6 +1,7 @@
 import { DatePipe } from '@angular/common';
 import { Component, ElementRef, OnDestroy, OnInit, computed, inject, signal, viewChild } from '@angular/core';
 import { RouterLink } from '@angular/router';
+import { AuthService } from '../../core/auth/auth.service';
 import { AnalysisHistoryService } from '../../core/screenshot/analysis-history.service';
 import { validateImages } from '../../core/screenshot/image-validation';
 import { ModelConfigService } from '../../core/screenshot/model-config.service';
@@ -40,6 +41,7 @@ export class ScreenshotAnalysisComponent implements OnInit, OnDestroy {
   private analysis = inject(ScreenshotAnalysisService);
   readonly config = inject(ModelConfigService);
   readonly history = inject(AnalysisHistoryService);
+  private auth = inject(AuthService);
 
   private nextId = 1;
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -97,6 +99,11 @@ export class ScreenshotAnalysisComponent implements OnInit, OnDestroy {
     } catch (e) {
       this.error.set(this.message(e));
     }
+  }
+
+  /** "Unlimited" only when the server says so AND the signed-in user is an admin. */
+  unlimitedCredits(): boolean {
+    return this.config.usage()?.unlimited === true && this.auth.isAdmin;
   }
 
   ngOnDestroy(): void {
