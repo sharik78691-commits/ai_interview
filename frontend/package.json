@@ -11,7 +11,7 @@
     "build:electron": "ng build --configuration electron",
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
-    "test:electron": "node --test electron/screenshot/__tests__/screenshot.test.js electron/__tests__/reload-recovery.test.js electron/__tests__/system-audio.test.js electron/__tests__/session-fetch.test.js",
+    "test:electron": "node --test electron/screenshot/__tests__/screenshot.test.js electron/__tests__/reload-recovery.test.js electron/__tests__/system-audio.test.js electron/__tests__/session-fetch.test.js electron/__tests__/legacy-key-cleanup.test.js",
     "electron": "electron electron/main.js",
     "electron:dev": "electron electron/main.js",
     "dist": "ng build --configuration electron && electron-builder",

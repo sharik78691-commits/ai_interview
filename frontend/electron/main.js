@@ -9,6 +9,7 @@ const path = require('path');
 const fs = require('fs');
 const { createCapture } = require('./screenshot/capture');
 const { registerScreenshotIpc } = require('./screenshot/ipc');
+const { purgeLegacyKeys } = require('./legacy-key-cleanup');
 const { recoverableFolderHash } = require('./reload-recovery');
 const { createLoopbackAudioHandler } = require('./system-audio');
 const { createSessionFetch } = require('./session-fetch');
@@ -433,6 +434,12 @@ app.on('before-quit', () => {
 });
 
 app.whenReady().then(async () => {
+  // Older builds kept an AI key on this PC; it now lives only on the server.
+  try {
+    purgeLegacyKeys({ fs, userDataDir: app.getPath('userData') });
+  } catch {
+    // Best effort; never block startup.
+  }
   // A rebuilt .exe ships a new hashed bundle (main-*.js), but Chromium happily
   // serves the PREVIOUS bundle out of disk cache. That is why a fresh install
   // still showed the old UI — "Select meeting audio" instead of the new
