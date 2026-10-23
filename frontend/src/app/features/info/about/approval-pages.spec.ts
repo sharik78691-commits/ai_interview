@@ -4,6 +4,7 @@ import { routes } from '../../../app.routes';
 import { BUSINESS } from '../../../core/business-info';
 import { SiteFooterComponent } from '../../../shared/components/site-footer/site-footer.component';
 import { ContactComponent } from '../../contact/contact.component';
+import { AcceptableUseComponent } from '../../legal/acceptable-use/acceptable-use.component';
 import { PrivacyComponent } from '../../legal/privacy/privacy.component';
 import { RefundComponent } from '../../legal/refund/refund.component';
 import { ShippingComponent } from '../../legal/shipping/shipping.component';
@@ -64,6 +65,31 @@ describe('Payment-gateway approval pages', () => {
     expect(terms).toContain(BUSINESS.operatorName);
     expect(terms).toContain('not registered under GST');
     expect(text(PrivacyComponent)).toContain(BUSINESS.operatorName);
+  });
+
+  // Regression: the policy still described the old flow (user-supplied key,
+  // screenshots sent straight to Gemini) after analysis moved to the backend.
+  it('Privacy describes server-side screenshot analysis with no user API key', () => {
+    const f = TestBed.createComponent(PrivacyComponent);
+    f.detectChanges();
+    const desktop = (f.nativeElement as HTMLElement)
+      .querySelector('[data-testid="privacy-desktop"]')!.textContent!.replace(/\s+/g, ' ');
+    expect(desktop).toContain('sent securely from your computer to our server');
+    expect(desktop).toContain('You do not need to supply any API key');
+    expect(desktop).toContain('not stored on our servers');
+    expect(desktop).not.toContain('API key that you supply');
+    expect(desktop).not.toContain('secure storage');
+  });
+
+  it('Terms and Acceptable Use state use is only allowed where permitted', () => {
+    const permitted =
+      'Use the product only where permitted by the interviewer, employer, assessment platform, and applicable law.';
+    const norm = (s: string) => s.replace(/\s+/g, ' ');
+    const terms = norm(text(TermsComponent));
+    expect(terms).toContain(permitted);
+    expect(terms).toContain('Indemnity');
+    expect(terms).toContain('Grievance officer');
+    expect(norm(text(AcceptableUseComponent))).toContain(permitted);
   });
 
   it('footer links About and Shipping and shows operator details', () => {
