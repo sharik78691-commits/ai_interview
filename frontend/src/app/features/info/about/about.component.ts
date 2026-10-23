@@ -58,7 +58,7 @@ import { BUSINESS } from '../../../core/business-info';
         <h2>Our principles</h2>
         <ul>
           <li>Use the service responsibly and follow the rules of every interview or assessment you take part in (see the <a routerLink="/acceptable-use">Acceptable Use Policy</a>).</li>
-          <li>Your data is handled as described in our <a routerLink="/privacy-policy">Privacy Policy</a>; payments are processed by Razorpay or Cashfree and we never see card, UPI or bank details.</li>
+          <li>Your data is handled as described in our <a routerLink="/privacy-policy">Privacy Policy</a>; payments are processed by Cashfree and we never see card, UPI or bank details.</li>
           <li>Questions or problems? <a routerLink="/contact">Contact us</a> — we reply to every message.</li>
         </ul>
       </section>

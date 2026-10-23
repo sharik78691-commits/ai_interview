@@ -265,7 +265,7 @@ export const routes: Routes = [
       seo: {
         title: 'Privacy Policy — OyeInterview',
         description:
-          'How OyeInterview collects, uses, and protects your data — including payment processing by Razorpay and Cashfree.',
+          'How OyeInterview collects, uses, and protects your data — including payment processing by Cashfree.',
         path: '/privacy-policy',
       },
     },

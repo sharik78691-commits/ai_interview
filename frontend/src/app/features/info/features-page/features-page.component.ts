@@ -79,7 +79,7 @@ export class FeaturesPageComponent {
       title: 'Account & billing',
       items: [
         { icon: '🔐', title: 'Secure sign-in', text: 'Email and password or Google sign-in, with HttpOnly session cookies and password reset by email.' },
-        { icon: '💳', title: 'Prepaid plans', text: 'One-time payments for a fixed number of days through Razorpay or Cashfree — no auto-renewal and no stored cards.' },
+        { icon: '💳', title: 'Prepaid plans', text: 'One-time payments for a fixed number of days through Cashfree — no auto-renewal and no stored cards.' },
         { icon: '🧾', title: 'Billing history', text: 'See your current plan, expiry date and every payment on your Billing page.' },
         { icon: '🌓', title: 'Comfortable to read', text: 'Light and dark themes and adjustable answer text size.' },
       ],
