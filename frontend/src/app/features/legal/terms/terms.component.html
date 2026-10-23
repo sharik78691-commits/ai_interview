@@ -6,13 +6,18 @@
 <div class="container legal">
   <header class="legal-head">
     <h1>Terms of Service</h1>
-    <p class="muted">Last updated: October 19, 2026</p>
+    <p class="muted">Last updated: October 23, 2026</p>
     <p class="lead">
       These terms cover your account, paid plans, acceptable use, AI-generated
       content, availability and liability for OyeInterview. Please read them with our
       <a routerLink="/privacy-policy">Privacy Policy</a>,
       <a routerLink="/refund-policy">Refund &amp; Cancellation Policy</a> and
       <a routerLink="/acceptable-use">Acceptable Use Policy</a>.
+    </p>
+    <p class="lead" data-testid="terms-permitted-use">
+      <strong>Use the product only where permitted by the interviewer, employer, assessment
+      platform, and applicable law.</strong> You alone decide where and how you use
+      OyeInterview, and you alone are responsible for that decision.
     </p>
   </header>
 
@@ -29,11 +34,21 @@
       (email: {{ biz.email }}). When
       these terms say "we" or "us", they mean this operator.
     </p>
+    <p>
+      Names of companies, platforms and meeting tools mentioned on our website or in the
+      service are trademarks of their respective owners and are used only to describe
+      compatibility. Their use does not imply any partnership, approval or endorsement.
+    </p>
   </section>
 
   <section class="legal-section">
     <h2>2. Accepting these terms</h2>
     <p>By creating an account or using OyeInterview you agree to these terms. If you do not agree, do not use the service.</p>
+    <p>
+      These terms are an electronic record under the Information Technology Act, 2000 and the
+      rules made under it, and do not require a physical or digital signature. Clicking to
+      sign up, signing in, purchasing a plan or using the service is your acceptance.
+    </p>
   </section>
 
   <section class="legal-section">
@@ -72,17 +87,52 @@
   </section>
 
   <section class="legal-section">
-    <h2>6. Acceptable use</h2>
+    <h2>6. Permitted use and your responsibility</h2>
+    <ul>
+      <li>
+        <strong>Use the product only where permitted by the interviewer, employer, assessment
+        platform, and applicable law.</strong> If an interview, test, exam or hiring process
+        prohibits assistance tools, AI help, screen sharing software or outside help, do not
+        use OyeInterview in it.
+      </li>
+      <li>
+        It is your responsibility to read and follow the rules, policies, candidate
+        agreements and honour codes of every interviewer, employer, recruiter, school,
+        exam body and assessment platform you deal with. We do not know those rules and
+        cannot check them for you.
+      </li>
+      <li>
+        OyeInterview is a preparation and communication aid. It is not designed or offered
+        to help anyone cheat, impersonate another person, misrepresent their identity,
+        qualifications or experience, or get around proctoring, monitoring or security
+        measures, and you must not use it for any of these.
+      </li>
+      <li>
+        You are solely responsible for any consequence of using the service in breach of
+        such rules, including disqualification, rejection, withdrawal of an offer,
+        termination of employment, academic or disciplinary action, or any legal claim.
+        We are not responsible for any such consequence.
+      </li>
+      <li>
+        You must also follow our <a routerLink="/acceptable-use">Acceptable Use Policy</a>.
+      </li>
+    </ul>
+  </section>
+
+  <section class="legal-section">
+    <h2>7. Audio, screen capture and consent</h2>
     <p>
-      You must follow our <a routerLink="/acceptable-use">Acceptable Use Policy</a>, including
-      the rules of any interviewer, employer, school or assessment platform you deal with and
-      applicable law. If an interview process prohibits assistance tools, do not use
-      OyeInterview in it.
+      Some features capture audio or screen content from your own device. You must capture,
+      transcribe or process audio and screens only where you are permitted to, and you are
+      responsible for informing other participants and obtaining any consent required by the
+      law that applies to you and to them, and by the rules of the meeting or platform. Do
+      not capture confidential information that you are not allowed to share with third-party
+      services.
     </p>
   </section>
 
   <section class="legal-section">
-    <h2>7. Your content</h2>
+    <h2>8. Your content</h2>
     <p>
       You keep ownership of the resumes, job descriptions and other content you provide.
       You allow us to store and process it, and to send it to the service providers listed in
@@ -92,8 +142,8 @@
   </section>
 
   <section class="legal-section">
-    <h2>8. Licence and restrictions</h2>
-    <p>We grant you a personal, limited, revocable, non-exclusive, non-transferable licence to use the service. You may not:</p>
+    <h2>9. Licence and restrictions</h2>
+    <p>We grant you a personal, limited, revocable, non-exclusive, non-transferable licence to use the service lawfully and in line with these terms. You may not:</p>
     <ul>
       <li>scrape, bulk-extract, reverse engineer or decompile the service except where law permits;</li>
       <li>bypass security, rate limits, payment or access controls;</li>
@@ -102,7 +152,18 @@
   </section>
 
   <section class="legal-section">
-    <h2>9. Availability and changes</h2>
+    <h2>10. Third-party services</h2>
+    <p>
+      The service relies on third parties such as AI model providers, speech-to-text
+      providers, sign-in providers, hosting providers and payment gateways, and you may use it
+      alongside third-party meeting or assessment tools. We do not control these third
+      parties and are not responsible for their availability, accuracy, policies or actions.
+      Your use of them is also governed by their own terms.
+    </p>
+  </section>
+
+  <section class="legal-section">
+    <h2>11. Availability and changes</h2>
     <p>
       We aim to keep the service available but do not guarantee uninterrupted access. AI
       models, providers and features may change or be withdrawn. If a paid feature you rely on
@@ -111,45 +172,94 @@
   </section>
 
   <section class="legal-section">
-    <h2>10. Suspension and termination</h2>
+    <h2>12. Suspension and termination</h2>
     <p>
       We may suspend or terminate access if you breach these terms or the Acceptable Use
-      Policy, or where required by law. You may stop using the service at any time and ask us
-      to delete your account.
+      Policy, if we receive a credible complaint of misuse, or where required by law. Access
+      ended for a breach is not eligible for a refund, except where the Refund Policy or the
+      law says otherwise. You may stop using the service at any time and ask us to delete
+      your account.
     </p>
   </section>
 
   <section class="legal-section">
-    <h2>11. Intellectual property</h2>
+    <h2>13. Intellectual property</h2>
     <p>The service's software, design and branding belong to us or our licensors. These terms do not grant you rights to them beyond the licence above.</p>
   </section>
 
   <section class="legal-section">
-    <h2>12. Disclaimers and limitation of liability</h2>
+    <h2>14. Disclaimers and limitation of liability</h2>
     <p>
       The service is provided "as is" and "as available". To the fullest extent permitted by
       law, we disclaim implied warranties and are not liable for indirect, incidental, special
       or consequential losses, or loss of profits, data, opportunities or goodwill.
-      <!-- CONFIRM: whether to cap liability (e.g. to fees paid in the last N months) — needs legal review. -->
-      Nothing in these terms limits rights you have under consumer-protection law that cannot be waived.
     </p>
-  </section>
-
-  <section class="legal-section">
-    <h2>13. Governing law and disputes</h2>
     <p>
-      These terms are governed by the laws of India. <!-- CONFIRM: governing law and the city for jurisdiction of courts. -->
-      Please contact us first so we can try to resolve any concern informally.
+      We are not liable for any loss arising from your use of the service in breach of these
+      terms or of the rules of any interviewer, employer, assessment platform or applicable
+      law, or from decisions made by any employer, recruiter or institution.
+    </p>
+    <p>
+      <!-- CONFIRM: liability cap amount/period — needs legal review. -->
+      To the fullest extent permitted by law, our total liability for all claims relating to
+      the service is limited to the amount you paid us for the service in the three (3)
+      months before the event giving rise to the claim.
+    </p>
+    <p>Nothing in these terms limits rights you have under consumer-protection law that cannot be waived.</p>
+  </section>
+
+  <section class="legal-section">
+    <h2>15. Indemnity</h2>
+    <p>
+      To the extent permitted by law, you agree to indemnify and hold harmless us and our
+      service providers from any claim, demand, loss, penalty or expense (including
+      reasonable legal fees) made by a third party, including an employer, interviewer,
+      assessment platform or authority, arising from your breach of these terms or the
+      Acceptable Use Policy, your violation of any law or third-party rule, or content you
+      provide.
     </p>
   </section>
 
   <section class="legal-section">
-    <h2>14. Changes to these terms</h2>
+    <h2>16. Governing law and disputes</h2>
+    <p>
+      These terms are governed by the laws of India. <!-- Decided (Oct 23, 2026): courts in India, no specific city. -->
+      Please contact us first so we can try to resolve any concern informally; we will
+      investigate in good faith. If a dispute cannot be resolved this way, it will be subject
+      to the jurisdiction of the competent courts in India, without affecting any right you
+      have to approach a consumer commission under the Consumer Protection Act, 2019.
+    </p>
+  </section>
+
+  <section class="legal-section">
+    <h2>17. Grievance officer</h2>
+    <p data-testid="terms-grievance">
+      In line with the Information Technology Act, 2000 and the rules made under it, our
+      grievance officer is <strong>{{ biz.operatorName }}</strong>, reachable at
+      <a href="mailto:support@oyeinterview.com">support&#64;oyeinterview.com</a>. We aim to
+      reply to complaints within 24–48 hours and resolve them within 15 days of receipt.
+      <!-- CONFIRM: these timelines can be met. -->
+    </p>
+  </section>
+
+  <section class="legal-section">
+    <h2>18. General</h2>
+    <ul>
+      <li><strong>Entire agreement:</strong> these terms, together with the policies linked above, are the whole agreement between you and us about the service.</li>
+      <li><strong>Severability:</strong> if any part of these terms is found unenforceable, the rest remains in effect.</li>
+      <li><strong>No waiver:</strong> if we do not enforce a right immediately, we have not given it up.</li>
+      <li><strong>Assignment:</strong> you may not transfer your rights under these terms. We may transfer ours in connection with a sale or reorganisation of the service, with notice to you.</li>
+      <li><strong>Events beyond our control:</strong> we are not responsible for delays or failures caused by events beyond our reasonable control, such as outages of providers, networks or payment gateways.</li>
+    </ul>
+  </section>
+
+  <section class="legal-section">
+    <h2>19. Changes to these terms</h2>
     <p>We may update these terms. The "Last updated" date shows the latest version. Continued use after an update means you accept it; periods already purchased keep the price and duration you paid for.</p>
   </section>
 
   <section class="legal-section">
-    <h2>15. Contact</h2>
+    <h2>20. Contact</h2>
     <p>Questions: <a href="mailto:support@oyeinterview.com">support&#64;oyeinterview.com</a>. <!-- CONFIRM: mailbox exists and is monitored. --></p>
   </section>
 </div>

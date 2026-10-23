@@ -26,7 +26,7 @@ next to the affected text. Angular strips these comments from the built site.
 
 - [ ] GST registration status, whether prices include GST, GSTIN if registered — Terms §4, Pricing FAQ.
 - [ ] Liability cap (e.g. fees paid in the last N months) — Terms §12.
-- [ ] Governing law and court jurisdiction (city) — Terms §13.
+- [x] Governing law and court jurisdiction — Terms §16. Decided: laws of India, competent courts in India (no specific city).
 - [ ] Refund review timeline you can commit to — Refund §5.
 - [ ] Wording for "service unavailable" refunds — Refund §3.
 

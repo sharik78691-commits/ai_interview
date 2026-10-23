@@ -26,7 +26,7 @@ export class NavbarComponent implements OnInit, OnDestroy {
   theme: ThemeName = 'light';
   /** Current authenticated user (null when signed out). */
   user: AuthUser | null = null;
-  /** Desktop build only: shows the auto-invisible notice next to the brand. */
+  /** Desktop build only: shows the hotkey hint, transparency slider and Screenshots link. */
   readonly isDesktop = environment.electron;
   readonly maxTransparency = MAX_TRANSPARENCY;
   signingOut = false;

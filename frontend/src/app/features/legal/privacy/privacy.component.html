@@ -7,7 +7,7 @@
 <div class="container legal">
   <header class="legal-head">
     <h1>Privacy Policy</h1>
-    <p class="muted">Last updated: October 19, 2026</p>
+    <p class="muted">Last updated: October 23, 2026</p>
     <p class="lead">
       This policy explains what OyeInterview collects, why, where it goes, how long
       we keep it, and the choices you have. OyeInterview is an independently
@@ -52,7 +52,7 @@
     <table class="legal-table">
       <thead><tr><th>Service</th><th>What it receives</th></tr></thead>
       <tbody>
-        <tr><td>AI model providers — depending on the model in use: Groq, Google (Gemini), OpenRouter (e.g. Qwen, Llama), OpenAI, DeepSeek</td><td>The question text, your resume and job description, a few recent questions for follow-up context, and your chosen answer length.</td></tr>
+        <tr><td>AI model providers — depending on the model in use: Groq, Google (Gemini), OpenRouter (e.g. Qwen, Llama), OpenAI, DeepSeek</td><td>The question text, your resume and job description, a few recent questions for follow-up context, and your chosen answer length. In the desktop app, also the screenshots you choose to analyse (currently sent to Google Gemini).</td></tr>
         <tr><td>Speech-to-text provider (Whisper-compatible service such as Groq or OpenAI)</td><td>Interviewer audio clips.</td></tr>
         <tr><td>Google (only if you use "Sign in with Google")</td><td>Standard sign-in flow; we receive your name, email and verified-email status.</td></tr>
         <tr><td>Payment gateways — Razorpay and/or Cashfree</td><td>The order amount and your email; for Cashfree also the mobile number you enter at checkout (we pass it on and do not store it). Card, UPI and bank details are entered on the gateway's page and never reach us.</td></tr>
@@ -65,11 +65,18 @@
 
   <section class="legal-section">
     <h2>4. Desktop app</h2>
+    <p data-testid="privacy-desktop">
+      If you use the OyeInterview desktop app's screenshot analysis, only the screenshots you
+      select are sent securely from your computer to our server, which forwards them to our
+      AI provider (currently Google Gemini) to generate the analysis. You do not need to
+      supply any API key. Screenshots are processed in memory and are not stored on our
+      servers; we keep only a usage record (a request ID, the number of screenshots, the
+      result status and the time) to count your plan's screenshot credits. The analysis
+      history (text only, no images) is kept only on your device.
+    </p>
     <p>
-      If you use the OyeInterview desktop app's screenshot analysis, the screenshots you
-      select are sent directly from your computer to the AI provider (currently Google
-      Gemini) using an API key that you supply. The key is encrypted with your operating
-      system's secure storage on your device. Screenshot history is kept only on your device.
+      Do not select screenshots that show confidential information you are not allowed to
+      share, or other people's personal data.
     </p>
   </section>
 
