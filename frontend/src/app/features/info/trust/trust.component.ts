@@ -33,7 +33,7 @@ import { RouterLink } from '@angular/router';
           </div>
           <div class="card">
             <h3>↗ Shared to provide the service</h3>
-            <p class="muted">Questions with your resume and job description go to the AI provider of the model you use; interviewer audio clips go to a speech-to-text provider; payments are handled by Razorpay or Cashfree.</p>
+            <p class="muted">Questions with your resume and job description go to the AI provider of the model you use; interviewer audio clips go to a speech-to-text provider; payments are handled by Cashfree.</p>
           </div>
         </div>
         <p class="muted small">Full details, including every third party, are in the <a routerLink="/privacy-policy">Privacy Policy</a>.</p>

@@ -1,6 +1,6 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
-import { Observable } from 'rxjs';
+import { Observable, map } from 'rxjs';
 import { API_BASE_URL } from '../api/api-config';
 import {
   CheckoutResponse,
@@ -22,6 +22,13 @@ import {
  * grant access: the backend activates a plan only after it has verified the
  * payment with the gateway itself.
  */
+/**
+ * Gateways the site offers at checkout. The backend still supports Razorpay;
+ * only Cashfree is shown for now (single gateway during merchant approval).
+ * Add 'razorpay' back here to offer it again. 'mock' only exists in dev.
+ */
+export const CHECKOUT_GATEWAYS: readonly GatewayKey[] = ['cashfree', 'mock'];
+
 @Injectable({ providedIn: 'root' })
 export class BillingService {
   private readonly http = inject(HttpClient);
@@ -46,7 +53,9 @@ export class BillingService {
   }
 
   gateways(): Observable<Gateway[]> {
-    return this.http.get<Gateway[]>(`${this.base}/api/payments/gateways`);
+    return this.http
+      .get<Gateway[]>(`${this.base}/api/payments/gateways`)
+      .pipe(map((gws) => gws.filter((g) => CHECKOUT_GATEWAYS.includes(g.key))));
   }
 
   myBilling(): Observable<MyBilling> {
