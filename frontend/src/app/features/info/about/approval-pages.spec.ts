@@ -5,6 +5,7 @@ import { BUSINESS } from '../../../core/business-info';
 import { SiteFooterComponent } from '../../../shared/components/site-footer/site-footer.component';
 import { ContactComponent } from '../../contact/contact.component';
 import { PrivacyComponent } from '../../legal/privacy/privacy.component';
+import { RefundComponent } from '../../legal/refund/refund.component';
 import { ShippingComponent } from '../../legal/shipping/shipping.component';
 import { TermsComponent } from '../../legal/terms/terms.component';
 import { AboutComponent } from './about.component';
@@ -49,6 +50,13 @@ describe('Payment-gateway approval pages', () => {
     expect(t).toContain(BUSINESS.email);
     expect(t).not.toMatch(/Phone|Address:/);
     expect(t).toContain('not registered under GST');
+    expect(t).toContain('24–48 hours');
+  });
+
+  it('Refund policy states the review and payout timelines', () => {
+    const t = text(RefundComponent);
+    expect(t).toContain('5 business days');
+    expect(t).toContain('5–7 business days');
   });
 
   it('Terms and Privacy identify the operator; Terms carries the GST note', () => {
