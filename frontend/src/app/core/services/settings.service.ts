@@ -12,6 +12,8 @@ const DEFAULTS: AppSettings = {
   theme: 'light', // replaced by defaultTheme() in load()
   micId: '',
   guidanceFontSize: 15,
+  background: 'sunshine', // yellow call-to-action by default; 'default' = original green
+  bgVersion: 2,
 };
 
 /** Allowed AI Guidance text sizes (px). */
@@ -56,6 +58,37 @@ function normalizeTheme(value: unknown): ThemeName {
   return defaultTheme();
 }
 
+/** Site background presets. Each works in both themes: the CSS in styles.css
+    maps `<html data-bg="…">` to a dark and a light palette. `swatch` is the
+    preview color shown in Settings for each theme; `accent` is its button color. */
+export const BACKGROUND_OPTIONS = [
+  { key: 'sunshine', label: 'Sunshine yellow', swatch: { dark: '#14120a', light: '#fffbea' }, accent: '#ffc61a' },
+  { key: 'calm', label: 'Calm white + orange', swatch: { dark: '#121212', light: '#ffffff' }, accent: '#f26a1b' },
+  { key: 'default', label: 'Green (default)', swatch: { dark: '#07150e', light: '#ecf8f1' }, accent: '#137547' },
+  { key: 'white', label: 'Black & white', swatch: { dark: '#000000', light: '#ffffff' }, accent: '#000000' },
+  { key: 'slate', label: 'Slate gray', swatch: { dark: '#1e293b', light: '#dfe5ed' }, accent: '#137547' },
+  { key: 'blue', label: 'Ocean blue', swatch: { dark: '#0b2447', light: '#cfe3fb' }, accent: '#137547' },
+  { key: 'purple', label: 'Lavender', swatch: { dark: '#24124a', light: '#e2d6fa' }, accent: '#137547' },
+  { key: 'rose', label: 'Rose', swatch: { dark: '#3d0f24', light: '#fad3e0' }, accent: '#137547' },
+  { key: 'cream', label: 'Warm cream', swatch: { dark: '#33240f', light: '#f6e7c4' }, accent: '#137547' },
+  { key: 'teal', label: 'Teal', swatch: { dark: '#063c40', light: '#c6ecec' }, accent: '#137547' },
+] as const;
+
+export type BackgroundName = (typeof BACKGROUND_OPTIONS)[number]['key'];
+
+function normalizeBackground(value: unknown): BackgroundName {
+  const v = String(value ?? '').toLowerCase();
+  return BACKGROUND_OPTIONS.some((o) => o.key === v) ? (v as BackgroundName) : (DEFAULTS.background as BackgroundName);
+}
+
+/** Apply the background preset to <html>; 'default' keeps the theme's own colors. */
+export function applyBackgroundToDom(background: unknown): void {
+  if (typeof document === 'undefined') return;
+  const bg = normalizeBackground(background);
+  if (bg === 'default') delete document.documentElement.dataset['bg'];
+  else document.documentElement.dataset['bg'] = bg;
+}
+
 /** Apply the theme to <html> so the CSS-variable layer switches instantly. */
 function applyThemeToDom(theme: ThemeName): void {
   if (typeof document === 'undefined') return;
@@ -69,6 +102,7 @@ export class SettingsService {
   constructor() {
     // Apply the stored theme on startup (default light on web, dark on desktop; a saved choice is kept).
     applyThemeToDom(normalizeTheme(this.settings$.value.theme));
+    applyBackgroundToDom(this.settings$.value.background);
   }
 
   private load(): AppSettings {
@@ -83,6 +117,13 @@ export class SettingsService {
             LENGTH_ALIASES[(parsed.responseLength ?? '').toLowerCase()] ?? DEFAULTS.responseLength,
           guidanceFontSize: clampFontSize(parsed.guidanceFontSize),
           theme: normalizeTheme(parsed.theme),
+          // A background saved before the yellow default (no/old bgVersion)
+          // moves to the current default once; later picks are kept.
+          background:
+            parsed.bgVersion === DEFAULTS.bgVersion
+              ? normalizeBackground(parsed.background)
+              : (DEFAULTS.background as BackgroundName),
+          bgVersion: DEFAULTS.bgVersion,
         };
       }
     } catch {
@@ -114,6 +155,7 @@ export class SettingsService {
     // Keep the page in sync whether the change came from Settings or the
     // navbar toggle button.
     applyThemeToDom(normalizeTheme(next.theme));
+    applyBackgroundToDom(next.background);
   }
 
   reset(): void {
@@ -121,5 +163,6 @@ export class SettingsService {
     localStorage.setItem(KEY, JSON.stringify(defaults));
     this.settings$.next(defaults);
     applyThemeToDom(defaults.theme as ThemeName);
+    applyBackgroundToDom(defaults.background);
   }
 }
