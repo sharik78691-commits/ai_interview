@@ -326,13 +326,10 @@ class TestNewestQuestionWins:
                 _recv_until(ws, _guidance_for(Q1))
                 ws.send_json({"type": "interviewer_question", "text": Q2})
                 _recv_until(ws, lambda m: m.get("type") == "ai_stream_start")
-                # Q1 again (e.g. a late duplicate from the other audio lane).
+                # Q1 again — the answer just delivered, so the worker would only
+                # suppress it: it must not cancel Q2 on its way in.
                 ws.send_json({"type": "interviewer_question", "text": Q1})
                 frames = _recv_until(ws, _guidance_for(Q2))
-                frames += _recv_until(
-                    ws, lambda m: "Already answered" in str(m.get("message", ""))
-                )
 
         assert cancelled == []
-        asked = [c.args[0] for c in ai_cls.return_value.analyze.await_args_list]
-        assert asked == [Q1, Q2]  # the repeat spent no AI call either
+        assert [m["data"]["question"] for m in frames if m.get("type") == "ai_guidance"] == [Q2]

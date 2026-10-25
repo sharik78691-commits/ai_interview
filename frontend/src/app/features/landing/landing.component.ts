@@ -1,7 +1,7 @@
 import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
 import { BillingService } from '../../core/services/billing.service';
-import { Plan, durationLabel, formatMoney, hoursLabel } from '../../core/models/billing.models';
+import { Plan, durationLabel, formatMoney, hoursLabel, withoutHiddenFeatures, withoutScreenshotCopy } from '../../core/models/billing.models';
 
 @Component({
   selector: 'app-landing',
@@ -28,6 +28,8 @@ export class LandingComponent implements OnInit {
   }
   readonly duration = durationLabel;
   readonly hours = hoursLabel;
+  readonly planDescription = withoutScreenshotCopy;
+  readonly visibleFeatures = withoutHiddenFeatures;
 
   ngOnInit(): void {
     this.billing.plans().subscribe({

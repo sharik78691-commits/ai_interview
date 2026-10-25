@@ -3,12 +3,12 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { TestBed } from '@angular/core/testing';
 import { Router, provideRouter } from '@angular/router';
 import { AuthService } from '../../core/auth/auth.service';
-import { Plan, durationLabel, formatMoney } from '../../core/models/billing.models';
+import { Plan, durationLabel, formatMoney, withoutScreenshotCopy } from '../../core/models/billing.models';
 import { CheckoutLauncherService } from '../../core/payments/checkout-launcher.service';
 import { PricingComponent } from './pricing.component';
 
 const PLAN: Plan = {
-  id: 3, code: '1-month', name: '1 Month', description: 'Coverage', currency: 'INR',
+  id: 3, code: '1-month', name: '1 Month', description: '30-day access with 240 screenshot analyses. Suitable for regular Call preparation.', currency: 'INR',
   duration_days: 30, duration_hours: 720, duration_unit: 'days', screenshot_allowance: 240,
   billing_type: 'recurring', billing_interval_days: 30, auto_renew_available: false, available: true, payable: true,
   trial_days: 0, price_minor: 90000, regular_price_minor: 90000,
@@ -60,21 +60,22 @@ describe('PricingComponent (database-driven)', () => {
     return fixture;
   }
 
-  it('renders plans, prices, duration and screenshots from the API, with no auto-renewal claim', () => {
+  it('renders plans, prices, duration from the API, with no auto-renewal claim', () => {
     const el: HTMLElement = render().nativeElement;
     expect(el.textContent).toContain('1 Month');
     expect(el.textContent).toContain('₹900');
     expect(el.textContent).toContain('Most popular');
     expect(el.textContent).toContain('30 days');
-    expect(el.textContent).toContain('240');
     expect(el.textContent).toContain('no auto-renewal');
     expect(el.textContent).not.toMatch(/auto-renews/i);
   });
 
-  it('shows per-day cost and per-day screenshots for each plan', () => {
-    const text = (render().nativeElement as HTMLElement).textContent ?? '';
+  it('shows per-day cost for each plan and no screenshot text on the pricing page', () => {
+    const el: HTMLElement = render().nativeElement;
+    const text = el.textContent ?? '';
     expect(text).toContain(formatMoney(3000, 'INR')); // 90000 paise / 30 days
     expect(text).toContain('per day');
+    expect(text).not.toMatch(/screenshot/i);
   });
 
   it('separates one-time passes from longer plans', () => {
@@ -255,6 +256,12 @@ describe('PricingComponent (admin payment switch)', () => {
 });
 
 describe('billing formatters', () => {
+  it('drops screenshot wording from plan descriptions only for display', () => {
+    expect(withoutScreenshotCopy('24-hour access with 8 screenshot analyses. Suitable for a single Call.'))
+      .toBe('24-hour access. Suitable for a single Call.');
+    expect(withoutScreenshotCopy('Coverage')).toBe('Coverage');
+  });
+
   it('formats minor units as rupees', () => {
     expect(formatMoney(15000)).toBe('₹150');
     expect(formatMoney(200000)).toBe('₹2,000');

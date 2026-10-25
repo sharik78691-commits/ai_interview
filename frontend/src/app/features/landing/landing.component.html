@@ -210,9 +210,9 @@
             }
             <p class="per-day">≈ {{ perDay(p) }} per day</p>
             <p class="unlimited" data-testid="plan-unlimited">(Unlimited Call Sessions)</p>
-            @if (p.description) { <p class="plan-desc muted">{{ p.description }}</p> }
+            @if (p.description) { <p class="plan-desc muted">{{ planDescription(p.description) }}</p> }
             <ul class="feats">
-              @for (f of p.features.slice(0, 3); track f) {
+              @for (f of visibleFeatures(p.features).slice(0, 3); track f) {
                 <li><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>{{ f }}</li>
               }
             </ul>

@@ -244,6 +244,21 @@ describe('InterviewWsService keepalive', () => {
     svc.disconnect();
   });
 
+  it('announces each new connection once its handshake arrives', async () => {
+    const svc = TestBed.runInInjectionContext(() => new InterviewWsService());
+    let handshakes = 0;
+    const sub = svc.handshake$.subscribe(() => handshakes++);
+    const ws = await connect(svc);
+    ws.onopen!();
+    ws.onmessage!({ data: JSON.stringify({ type: 'status', status: 'listening', message: 'connected', liveStream: true, liveAnswers: true }) });
+    // Ordinary status frames are not a new connection.
+    ws.onmessage!({ data: JSON.stringify({ type: 'status', status: 'listening', message: 'listening...' }) });
+    expect(handshakes).toBe(1);
+    expect(svc.liveStream$.value).toBeTrue(); // flags are set before it fires
+    sub.unsubscribe();
+    svc.disconnect();
+  });
+
   it('tells the server which trial pool to use (web build)', async () => {
     const svc = TestBed.runInInjectionContext(() => new InterviewWsService());
     const ws = await connect(svc);
