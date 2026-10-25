@@ -658,6 +658,11 @@ class LiveTurnTracker:
         answered.
       * ``pause()`` (~0.45 s quiet, client-side) — answer a CLOSED sentence at
         once; a complete but unpunctuated prompt sets ``recheck``.
+      * ``update(final=False)`` within LATE_WORDS_S of that pause — the
+        stream trails speech by ~0.3-0.7 s (measured 2026-10-26), so the
+        question's last words ("…a process and a thread?") usually land just
+        AFTER the pause. They were spoken before it, so they are judged
+        exactly like the pause itself instead of waiting for the clip cut.
       * ``settle(gen)`` — that re-check: no new word since → answer.
       * ``update(final=True)`` (~1.3 s quiet, provider VAD) — answer any
         complete prompt; carry a dangling one into the next turn.
@@ -678,6 +683,10 @@ class LiveTurnTracker:
     #: New words after an answered question must be a question of their own
     #: and at least this long — "…in Java?" is the same question, finished.
     MIN_FOLLOW_ON_WORDS = 4
+    #: Interim words arriving this soon after a pause are the transcription
+    #: lag catching up, not new speech (measured lag: last word +0.3-0.7 s
+    #: after speech end, the pause itself fires at +0.45 s).
+    LATE_WORDS_S = 0.8
 
     def __init__(self) -> None:
         self.reset()
@@ -696,6 +705,8 @@ class LiveTurnTracker:
         self._carry_at = 0.0
         self._carry_context = False
         self._last_update = 0.0
+        #: When the client last reported a pause in the open turn (0 = none).
+        self._paused_at = 0.0
 
     @property
     def carrying(self) -> bool:
@@ -719,19 +730,24 @@ class LiveTurnTracker:
 
     def update(self, text: str, final: bool, now: float | None = None) -> str | None:
         """One streamed transcript (cumulative per turn). Returns a question to
-        answer, only ever on a turn close."""
+        answer on a turn close, or for late words of a turn already paused."""
         now = time.monotonic() if now is None else now
         self.recheck = False
         self._last_update = now
         if not self._open:
             self._open, self._turn, self._used, self._fired = True, "", 0, ""
+            self._paused_at = 0.0
         text = (text or "").strip()
-        if text and text != self._turn:
+        changed = bool(text) and text != self._turn
+        if changed:
             self._turn = text
             self.gen += 1
         if not final:
+            if changed and self._paused_at and now - self._paused_at <= self.LATE_WORDS_S:
+                return self._evaluate(now, closed=False)
             return None
         self._open = False
+        self._paused_at = 0.0
         return self._evaluate(now, closed=True)
 
     def pause(self, now: float | None = None) -> str | None:
@@ -739,7 +755,9 @@ class LiveTurnTracker:
         self.recheck = False
         if not self._open:
             return None  # the closed turn was already judged
-        return self._evaluate(time.monotonic() if now is None else now, closed=False)
+        now = time.monotonic() if now is None else now
+        self._paused_at = now
+        return self._evaluate(now, closed=False)
 
     def settle(self, gen: int, now: float | None = None) -> str | None:
         """The beat after a pause: still nothing new → the prompt is finished."""

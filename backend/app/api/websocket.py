@@ -455,6 +455,39 @@ async def ws_interview(websocket: WebSocket) -> None:
     def _norm_question(q: str) -> str:
         return re.sub(r"\s+", " ", (q or "").strip().lower())
 
+    def _repeat_of_last(question: str, length: str) -> bool:
+        """Same question at the same depth answered moments ago (see below)."""
+        return (
+            last_answered is not None
+            and length == last_answered_length
+            and _norm_question(question) == _norm_question(last_answered)
+            and (time.monotonic() - last_answered_at) < DEDUP_WINDOW_S
+        )
+
+    #: The answer currently being generated (cancellable by a newer question).
+    generating: dict[str, asyncio.Task | None] = {"task": None}
+
+    async def _generate(question: str, on_delta) -> object | None:
+        """service.analyze as a task a NEWER question may cancel.
+
+        Answers run one at a time, so a new question used to wait for the
+        previous answer to stream to its end (seconds, or a whole retry +
+        fallback cycle) before it even started. Returns None when superseded.
+        """
+        task = asyncio.ensure_future(
+            service.analyze(question, model_key=model_key, on_delta=on_delta)
+        )
+        generating["task"] = task
+        try:
+            return await task
+        except asyncio.CancelledError:
+            current = asyncio.current_task()
+            if current is not None and current.cancelling():
+                raise  # the socket is closing, not a newer question
+            return None
+        finally:
+            generating["task"] = None
+
     async def _send_guidance(question: str) -> None:
         """Reuse the existing AI answer feature — same service, same UI payload."""
         # Duplicate guard: mic fragments (sendTranscript) and the debounced
@@ -465,14 +498,7 @@ async def ws_interview(websocket: WebSocket) -> None:
         # never suppressed (the user asked for a longer/shorter answer).
         # Recorded ONLY on success, so Retry-after-failure always goes through.
         nonlocal last_answered, last_answered_at, last_answered_length
-        now = time.monotonic()
-        same_depth = service.response_length == last_answered_length
-        if (
-            last_answered is not None
-            and same_depth
-            and _norm_question(question) == _norm_question(last_answered)
-            and (now - last_answered_at) < DEDUP_WINDOW_S
-        ):
+        if _repeat_of_last(question, service.response_length):
             logger.info("Duplicate question suppressed (%d chars)", len(question))
             await websocket.send_json(
                 {
@@ -501,9 +527,12 @@ async def ws_interview(websocket: WebSocket) -> None:
             await websocket.send_json({"type": "ai_stream_delta", "point": point})
 
         try:
-            guidance = await service.analyze(
-                question, model_key=model_key, on_delta=_on_delta
-            )
+            guidance = await _generate(question, _on_delta)
+            if guidance is None:
+                # A newer question took over; its ai_stream_start (sent next by
+                # the worker) clears these provisional bullets.
+                logger.info("Answer superseded by a newer question (%d chars)", len(question))
+                return
             if service.last_warning:
                 await websocket.send_json(
                     {"type": "notice", "message": str(service.last_warning)}
@@ -1022,6 +1051,18 @@ async def ws_interview(websocket: WebSocket) -> None:
         answering[key] = requested
         if source is not None:
             audio_answered.append((source, question, time.monotonic()))
+        # The newest question wins: the candidate needs THIS answer now, not
+        # the end of the previous one. Never for a repeat the worker would
+        # only suppress — that would cancel an answer and replace it with
+        # nothing. An answer already delivered is past this point (no task).
+        running = generating["task"]
+        if (
+            running is not None
+            and not running.done()
+            and not _repeat_of_last(question, requested or service.response_length)
+        ):
+            logger.info("New question supersedes the answer in progress (%d chars)", len(question))
+            running.cancel()
         answer_queue.put_nowait((question, length_raw, model_raw, announce))
         return True
 
