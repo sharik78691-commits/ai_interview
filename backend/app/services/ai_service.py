@@ -4,13 +4,16 @@ Business logic only: provider choice goes through an injectable factory
 (default: the model registry), so the core flow never names a concrete LLM
 vendor and tests/alternative providers plug in without patching modules.
 """
+import logging
 import re
 from collections.abc import Awaitable, Callable
 
 from app.models.ai_response import AIInterviewResponse, FollowUp
 from app.providers.llm.base import LLMProvider
-from app.providers.llm.provider import LLMQuotaError, MockLLMProvider
+from app.providers.llm.provider import LLMQuotaError, MockLLMProvider, is_rate_limited
 from app.providers.llm.registry import fallback_model_key, get_llm_provider
+
+logger = logging.getLogger(__name__)
 
 #: Resolves a model key (None = default model) to a provider instance.
 ProviderFactory = Callable[[str | None], LLMProvider]
@@ -71,6 +74,23 @@ class AIService:
     ) -> AIInterviewResponse:
         factory = self._provider_factory or get_llm_provider
         provider = factory(model_key)
+        fallback = self._usable_fallback(model_key)
+        if (
+            fallback is not None
+            and is_rate_limited(getattr(provider, "name", ""))
+            and not is_rate_limited(getattr(fallback, "name", ""))
+        ):
+            # Still inside its per-minute window: a request would only earn
+            # another 429. The fallback answers straight away, streamed.
+            logger.info(
+                "Answering with %s while %s is rate-limited",
+                getattr(fallback, "name", "?"), getattr(provider, "name", "?"),
+            )
+            provider, fallback = fallback, None
+        elif fallback is not None:
+            # Another model can answer: a 429 must not be retried into the
+            # same window first.
+            provider.fail_fast_rate_limit = True
         level = response_length or self.response_length
         self.response_length = level
         self.last_warning = None
@@ -92,9 +112,8 @@ class AIService:
         except LLMQuotaError as exc:
             result = None
             failure = exc
-            if on_delta is not None and getattr(
-                provider, "stream_had_deltas", False
-            ):
+            streamed = on_delta is not None and getattr(provider, "stream_had_deltas", False)
+            if streamed:
                 # Provisional bullets are already on screen: make ONE
                 # single-shot attempt at the real answer before templates.
                 try:
@@ -107,8 +126,12 @@ class AIService:
                 # The model is rate-limited / out of quota / unreachable. A
                 # per-minute limit does not clear within the short retries, so
                 # ask another configured model once before falling back to
-                # template guidance.
-                result = await self._answer_with_fallback(provider, model_key, question, level, extra)
+                # template guidance. Nothing is on screen yet (no deltas), so
+                # its answer streams too instead of arriving all at once.
+                result = await self._answer_with_fallback(
+                    provider, fallback, question, level, extra,
+                    on_delta=None if streamed else on_delta,
+                )
             if result is None:
                 # Live AI is unusable right now — keep the interview flowing with
                 # template guidance, but tell the user why.
@@ -134,21 +157,29 @@ class AIService:
         self._remember(question, result)
         return result
 
-    async def _answer_with_fallback(
-        self,
-        failed: LLMProvider,
-        model_key: str | None,
-        question: str,
-        level: str,
-        extra: dict,
-    ) -> AIInterviewResponse | None:
-        """One single-shot answer from another model; None when there is none
-        or it fails too. Usage of BOTH models is kept for telemetry."""
+    def _usable_fallback(self, model_key: str | None) -> LLMProvider | None:
+        """Another real model that can answer if this one is rate-limited."""
         try:
             fallback = self._fallback_factory(model_key)
         except Exception:
-            fallback = None
+            return None
         if fallback is None or isinstance(fallback, MockLLMProvider):
+            return None
+        return fallback
+
+    async def _answer_with_fallback(
+        self,
+        failed: LLMProvider,
+        fallback: LLMProvider | None,
+        question: str,
+        level: str,
+        extra: dict,
+        on_delta: Callable[[str], Awaitable[None]] | None = None,
+    ) -> AIInterviewResponse | None:
+        """One answer from another model (streamed when ``on_delta`` is given);
+        None when there is none or it fails too. Usage of BOTH models is kept
+        for telemetry."""
+        if fallback is None:
             return None
         failed_usage = {
             "latency_ms": getattr(failed, "last_latency_ms", None),
@@ -157,9 +188,14 @@ class AIService:
             "error_category": getattr(failed, "last_error_category", None),
         }
         try:
-            result = await fallback.analyze_question(
-                self.resume_text, self.job_description, question, level, **extra
-            )
+            if on_delta is not None:
+                result = await fallback.analyze_question_stream(
+                    self.resume_text, self.job_description, question, level, on_delta, **extra
+                )
+            else:
+                result = await fallback.analyze_question(
+                    self.resume_text, self.job_description, question, level, **extra
+                )
         except LLMQuotaError:
             return None
         self.last_fallback = {
@@ -171,7 +207,7 @@ class AIService:
         self.last_model = getattr(fallback, "model", "") or ""
         self.last_usage = {
             "latency_ms": getattr(fallback, "last_latency_ms", None),
-            "first_delta_ms": None,
+            "first_delta_ms": getattr(fallback, "first_delta_ms", None) if on_delta else None,
             "input_tokens": getattr(fallback, "last_input_tokens", None),
             "output_tokens": getattr(fallback, "last_output_tokens", None),
             "error_category": getattr(fallback, "last_error_category", None),

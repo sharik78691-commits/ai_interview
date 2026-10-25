@@ -72,23 +72,37 @@ _FEATURE_REMOVALS = {
     "Instant AI answer guidance for interview practice",
 }
 
+#: One-time copy fix for plan descriptions seeded before the "Call" wording.
+#: Only these exact old descriptions are replaced, so admin-written text stays.
+DESCRIPTION_COPY_MIGRATION = "2026_10_description_copy_v1"
+_DESCRIPTION_COPY_FIXES = {
+    "24-hour access with 8 screenshot analyses. Suitable for a single interview.":
+        "24-hour access with 8 screenshot analyses. Suitable for a single Call.",
+    "72-hour access with 24 screenshot analyses. Suitable for short interview preparation.":
+        "72-hour access with 24 screenshot analyses. Suitable for short Call preparation.",
+    "7-day access with 56 screenshot analyses. Interview preparation throughout the week.":
+        "7-day access with 56 screenshot analyses. Call preparation throughout the week.",
+    "30-day access with 240 screenshot analyses. Suitable for regular interview preparation.":
+        "30-day access with 240 screenshot analyses. Suitable for regular Call preparation.",
+}
+
 #: Initial catalogue (2026-10). Amounts are INR paise; durations exact hours.
 #: Codes 3-days / 7-days / 1-month / 3-months are the rows that already
 #: existed, so historical payments keep pointing at the same plan rows.
 DEFAULT_PLANS = [
     dict(code="1-day", name="1 Day Pass", price_minor=9_900, duration_hours=24, duration_unit="hours",
          screenshot_allowance=8, billing_type=BillingType.ONE_TIME, sort_order=10,
-         description="24-hour access with 8 screenshot analyses. Suitable for a single interview."),
+         description="24-hour access with 8 screenshot analyses. Suitable for a single Call."),
     dict(code="3-days", name="3 Days Pass", price_minor=19_900, duration_hours=72, duration_unit="hours",
          screenshot_allowance=24, billing_type=BillingType.ONE_TIME, sort_order=20,
-         description="72-hour access with 24 screenshot analyses. Suitable for short interview preparation."),
+         description="72-hour access with 24 screenshot analyses. Suitable for short Call preparation."),
     dict(code="7-days", name="7 Days Pass", price_minor=39_900, duration_hours=168, duration_unit="days",
          screenshot_allowance=56, billing_type=BillingType.ONE_TIME, sort_order=30,
-         description="7-day access with 56 screenshot analyses. Interview preparation throughout the week."),
+         description="7-day access with 56 screenshot analyses. Call preparation throughout the week."),
     dict(code="1-month", name="Monthly Plan", price_minor=99_900, duration_hours=720, duration_unit="days",
          screenshot_allowance=240, billing_type=BillingType.RECURRING, billing_interval_days=30,
          sort_order=40,
-         description="30-day access with 240 screenshot analyses. Suitable for regular interview preparation."),
+         description="30-day access with 240 screenshot analyses. Suitable for regular Call preparation."),
     dict(code="3-months", name="Quarterly Plan", price_minor=249_000, duration_hours=2160,
          duration_unit="days", screenshot_allowance=720, billing_type=BillingType.RECURRING,
          billing_interval_days=90, sort_order=50,
@@ -297,6 +311,7 @@ def ensure_catalogue(db: Session) -> int:
     if _mark(db, CATALOGUE_MIGRATION):
         _migrate_feature_copy(db)
         _migrate_feature_removal(db)
+        _migrate_description_copy(db)
         db.commit()
         return 0
     reason = "Initial catalogue: 5 plans (2026-10 pricing)"
@@ -336,6 +351,7 @@ def ensure_catalogue(db: Session) -> int:
     db.add(SchemaMigration(name=CATALOGUE_MIGRATION))
     _migrate_feature_copy(db)
     _migrate_feature_removal(db)
+    _migrate_description_copy(db)
     db.commit()
     logger.info("Plan catalogue migration %s applied (%d plan(s) created)", CATALOGUE_MIGRATION, created)
     return created
@@ -383,6 +399,21 @@ def _migrate_feature_removal(db: Session) -> None:
     logger.info("Plan feature removal migration %s applied (%d plan(s) updated)", FEATURE_REMOVAL_MIGRATION, changed)
 
 
+def _migrate_description_copy(db: Session) -> None:
+    """Apply ``_DESCRIPTION_COPY_FIXES`` to every plan once (caller commits)."""
+    if _mark(db, DESCRIPTION_COPY_MIGRATION):
+        return
+    changed = 0
+    for plan in db.scalars(select(SubscriptionPlan)).all():
+        fixed = _DESCRIPTION_COPY_FIXES.get(plan.description or "")
+        if fixed is not None:
+            plan.description = fixed
+            changed += 1
+    db.add(SchemaMigration(name=DESCRIPTION_COPY_MIGRATION))
+    db.flush()
+    logger.info("Plan description copy migration %s applied (%d plan(s) updated)", DESCRIPTION_COPY_MIGRATION, changed)
+
+
 # ------------------------------------------------------------ public views
 
 
@@ -402,6 +433,7 @@ __all__ = [
     "CATALOGUE_MIGRATION",
     "FEATURE_COPY_MIGRATION",
     "FEATURE_REMOVAL_MIGRATION",
+    "DESCRIPTION_COPY_MIGRATION",
     "DEFAULT_CURRENCIES",
     "DEFAULT_PLANS",
     "Quote",

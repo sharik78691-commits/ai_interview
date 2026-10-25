@@ -385,6 +385,34 @@ def test_feature_copy_migration_fixes_existing_plans_once_and_keeps_admin_text(c
         assert json.loads(plan.features_json) == ["Real-time AI answer guidance"]
 
 
+def test_default_plan_descriptions_use_call_wording(client):
+    with SessionLocal() as db:
+        for plan in db.scalars(select(SubscriptionPlan)).all():
+            assert "interview" not in (plan.description or "").lower()
+        assert db.get(SchemaMigration, pricing_service.DESCRIPTION_COPY_MIGRATION) is not None
+
+
+def test_description_copy_migration_fixes_existing_plans_once_and_keeps_admin_text(client):
+    with SessionLocal() as db:
+        plan = db.scalar(select(SubscriptionPlan).where(SubscriptionPlan.code == "1-day"))
+        other = db.scalar(select(SubscriptionPlan).where(SubscriptionPlan.code == "7-days"))
+        plan.description = "24-hour access with 8 screenshot analyses. Suitable for a single interview."
+        other.description = "Admin wrote this."
+        db.delete(db.get(SchemaMigration, pricing_service.DESCRIPTION_COPY_MIGRATION))
+        db.commit()
+        subs.seed_default_plans(db)
+        db.refresh(plan)
+        db.refresh(other)
+        assert plan.description == "24-hour access with 8 screenshot analyses. Suitable for a single Call."
+        assert other.description == "Admin wrote this."
+        # Runs once: a later admin edit back to the old wording is respected.
+        plan.description = "24-hour access with 8 screenshot analyses. Suitable for a single interview."
+        db.commit()
+        subs.seed_default_plans(db)
+        db.refresh(plan)
+        assert plan.description == "24-hour access with 8 screenshot analyses. Suitable for a single interview."
+
+
 def test_admin_has_unlimited_screenshot_analyses_without_a_plan(gemini, monkeypatch):
     # The per-minute spend guard still applies to admins; lift it to test the count.
     monkeypatch.setattr("app.api.screenshots.ANALYZE_PER_MINUTE", 1000)

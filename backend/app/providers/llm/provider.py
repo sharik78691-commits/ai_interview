@@ -601,6 +601,43 @@ class LLMQuotaError(RuntimeError):
     """Raised when the provider refuses the call due to quota/rate limits."""
 
 
+# Rate-limit cool-down. A per-minute limit (Cerebras' Developer tier allows
+# 5 requests/min) does not clear within the short retries, so every answer
+# used to pay 429 + 0.5 s + 429 + 1 s + 429 before the fallback even started —
+# several seconds of a blank card, once per question, until the window passed.
+# A model that answered 429 is now skipped (its fallback answers at once)
+# until its Retry-After — or this default — has passed.
+RATE_LIMIT_COOLDOWN_S = 20.0
+RATE_LIMIT_COOLDOWN_MAX_S = 60.0
+_rate_limited_until: dict[str, float] = {}
+
+
+def mark_rate_limited(key: str, retry_after: str | None = None) -> None:
+    """Start the cool-down for model ``key`` (Retry-After seconds win)."""
+    import time
+
+    if not key:
+        return
+    seconds = RATE_LIMIT_COOLDOWN_S
+    if retry_after and retry_after.strip().isdigit():
+        seconds = min(max(float(retry_after.strip()), 5.0), RATE_LIMIT_COOLDOWN_MAX_S)
+    _rate_limited_until[key] = time.monotonic() + seconds
+    logger.warning("LLM %s rate-limited: skipped for %.0fs (fallback answers)", key, seconds)
+
+
+def is_rate_limited(key: str | None) -> bool:
+    """True while model ``key`` is cooling down after a 429."""
+    import time
+
+    until = _rate_limited_until.get(key or "")
+    if until is None:
+        return False
+    if time.monotonic() >= until:
+        _rate_limited_until.pop(key or "", None)
+        return False
+    return True
+
+
 class OpenAICompatibleLLMProvider(LLMProvider):
     name = "openai-compatible"
 
@@ -686,6 +723,16 @@ class OpenAICompatibleLLMProvider(LLMProvider):
         # True when the latest streaming call emitted at least one delta
         # before finishing/failing (lets the caller pick single-shot retry).
         self.stream_had_deltas: bool = False
+        # Set by the caller when another model can answer: a 429 then raises
+        # at once instead of retrying into the same per-minute window.
+        self.fail_fast_rate_limit: bool = False
+
+    def _retry_rate_limit(self, status: int, exc: httpx.HTTPStatusError) -> bool:
+        """Record a 429 for the cool-down; False when it must not be retried."""
+        if status != 429:
+            return True
+        mark_rate_limited(self.name, exc.response.headers.get("retry-after"))
+        return not self.fail_fast_rate_limit
 
     def _suppress_reasoning_effort(self, status: int) -> bool:
         """True when this request-body rejection was caused by `reasoning_effort`.
@@ -988,6 +1035,7 @@ class OpenAICompatibleLLMProvider(LLMProvider):
                             continue
                         if (
                             status in (429, 500, 502, 503, 504)
+                            and self._retry_rate_limit(status, exc)
                             and attempt < self.max_retries
                             and not self.stream_had_deltas
                         ):
@@ -1148,7 +1196,11 @@ class OpenAICompatibleLLMProvider(LLMProvider):
                         if self._suppress_reasoning_effort(status):
                             continue
                         # Retry transient limits/server errors only.
-                        if status in (429, 500, 502, 503, 504) and attempt < self.max_retries:
+                        if (
+                            status in (429, 500, 502, 503, 504)
+                            and self._retry_rate_limit(status, exc)
+                            and attempt < self.max_retries
+                        ):
                             wait = RETRY_BACKOFF_BASE * (2**attempt)
                             retry_after = exc.response.headers.get("retry-after")
                             if retry_after and retry_after.isdigit():
@@ -1282,6 +1334,8 @@ class OpenAICompatibleLLMProvider(LLMProvider):
                     logger.warning("LLM follow-ups HTTP %d: %s", status, body[:300])
                     if self._suppress_reasoning_effort(status):
                         continue
+                    # The next live answer would hit the same window: skip ahead.
+                    self._retry_rate_limit(status, exc)
                     if status in (500, 502, 503, 504) and attempt < self.max_retries:
                         await asyncio.sleep(RETRY_BACKOFF_BASE * (2**attempt))
                         continue
@@ -1363,6 +1417,8 @@ class OpenAICompatibleLLMProvider(LLMProvider):
                     logger.warning("LLM json HTTP %d: %s", status, body[:300])
                     if self._suppress_reasoning_effort(status):
                         continue
+                    # The next live answer would hit the same window: skip ahead.
+                    self._retry_rate_limit(status, exc)
                     if status in (500, 502, 503, 504) and attempt < self.max_retries:
                         await asyncio.sleep(RETRY_BACKOFF_BASE * (2**attempt))
                         continue
