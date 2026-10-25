@@ -3,8 +3,7 @@
     <span class="eyebrow">Pricing</span>
     <h1>Pay for the time you need</h1>
     <p class="muted lead">
-      Every plan includes AI Call practice and preparation guidance and a set number of
-      screenshot analyses. <strong>Prepaid, no auto-renewal, no stored cards</strong> —
+      Every plan includes AI Call practice and preparation guidance. <strong>Prepaid, no auto-renewal, no stored cards</strong> —
       access runs for the exact time shown, from the moment your payment is confirmed.
     </p>
 
@@ -110,13 +109,12 @@
       <ul class="facts">
         <li><span class="fact-icon" aria-hidden="true">⏱</span><span><strong>{{ hours(p.duration_hours, p.duration_unit) }}</strong> of access
           <span class="unlimited">(Unlimited Call Sessions)</span></span></li>
-        <li><span class="fact-icon" aria-hidden="true">🖼</span><span><strong>{{ p.screenshot_allowance }}</strong> screenshot analyses</span></li>
         @if (p.available) {
           <li><span class="fact-icon" aria-hidden="true">📅</span><span>Just <strong>{{ perDay(p) }}</strong> per day</span></li>
         }
         <li><span class="fact-icon" aria-hidden="true">💳</span><span>{{ p.billing_type === 'recurring' ? 'Paid upfront · no auto-renewal' : 'One-time payment' }}</span></li>
       </ul>
-      @if (p.description) { <p class="tagline muted small">{{ p.description }}</p> }
+      @if (p.description) { <p class="tagline muted small">{{ planDescription(p.description) }}</p> }
       @if (p.trial_days > 0) {
         <p class="muted small">Includes a {{ p.trial_days }}-day free trial (once per account) — start it from Billing.</p>
       }
@@ -141,10 +139,9 @@
         <strong>{{ money(plan.price_minor, plan.currency) }} <span class="muted small">{{ plan.currency }}</span></strong>
       </p>
       <p class="muted small">
-        {{ hours(plan.duration_hours, plan.duration_unit) }} of access and
-        {{ plan.screenshot_allowance }} screenshot analyses, starting as soon as the
+        {{ hours(plan.duration_hours, plan.duration_unit) }} of access, starting as soon as the
         payment is confirmed. This is a separate purchase: any plan you already have
-        keeps its own time and screenshots. The price is fixed by our server.
+        keeps its own time. The price is fixed by our server.
       </p>
 
       @if (paymentsOff()) {
@@ -193,7 +190,6 @@
     <h2>Every plan includes</h2>
     <div class="grid3">
       <div class="card"><h3>🎯 Mock interviews</h3><p class="muted">Role-based practice questions with a score and feedback on every answer you give.</p></div>
-      <div class="card"><h3>🖼 Screenshot analysis</h3><p class="muted">Analyze screenshots of practice problems in the desktop app. One screenshot uses one analysis from your plan.</p></div>
       <div class="card"><h3>📄 Resume-aware</h3><p class="muted">Suggestions use your saved resume and target job description.</p></div>
       <div class="card"><h3>🎙 Question detection</h3><p class="muted">Audio from a mock interview or practice call you share is transcribed so questions are detected automatically.</p></div>
       <div class="card"><h3>🧠 Latest AI models</h3><p class="muted">Answers use the AI model we have chosen as the best fit for quality and cost, updated as better models arrive.</p></div>
@@ -205,8 +201,7 @@
     <h2>Billing questions</h2>
     <details class="card faq"><summary>Does any plan renew automatically?</summary><p class="muted">No. Passes are one-time payments. The Monthly and Quarterly plans are also paid upfront for 30 or 90 days — we don't save cards or set up recurring mandates.</p></details>
     <details class="card faq"><summary>When exactly does my access end?</summary><p class="muted">Exactly the time shown after your payment is confirmed — not at midnight. A 1 Day Pass bought at 11:15 PM ends at 11:15 PM the next day. Your Billing page shows the end time in your local time zone.</p></details>
-    <details class="card faq"><summary>What counts as a screenshot analysis?</summary><p class="muted">Each screenshot you analyze uses one from your plan's allowance. If an analysis fails on our side, it is not counted.</p></details>
-    <details class="card faq"><summary>What if I buy again before my plan ends?</summary><p class="muted">The new purchase starts immediately with its own time and screenshot allowance. Screenshots are used from the plan that ends soonest first, and nothing you already have is reset.</p></details>
+    <details class="card faq"><summary>What if I buy again before my plan ends?</summary><p class="muted">The new purchase starts immediately with its own time, and nothing you already have is reset.</p></details>
     <details class="card faq"><summary>Which currency am I charged in?</summary><p class="muted">The one shown at checkout. Prices in each currency are set by us directly — they are not converted live — and you are never charged in a different currency than the one you confirmed.</p></details>
     <details class="card faq"><summary>How do I pay?</summary><p class="muted">Through our {{ partnerLabel() }}. Available methods such as UPI, cards and net banking are offered on the gateway's own checkout page.</p></details>
     <details class="card faq"><summary>Can I get a refund?</summary><p class="muted">Refunds follow our <a routerLink="/refund-policy">Refund &amp; Cancellation Policy</a>. Please read it before purchasing.</p></details>

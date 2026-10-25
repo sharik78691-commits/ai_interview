@@ -387,6 +387,7 @@ export class InterviewComponent implements OnInit, OnDestroy {
       // A short pause lets the backend answer a finished live sentence now.
       this.interviewerAudio.pause$.subscribe(() => this.ws.sendSpeechPause(this.responseLength)),
       this.ws.liveText$.subscribe((t) => this.onLiveText(t)),
+      this.ws.handshake$.subscribe(() => this.resumeCaptureOnServer()),
       // When Auto Select needs a system-audio device, surface the setup helper
       // (with the list of devices the browser currently sees).
       this.interviewerAudio.systemAudioSetup$.subscribe(
@@ -459,6 +460,20 @@ export class InterviewComponent implements OnInit, OnDestroy {
     // Safety valve: never stall the queue if the backend stays silent.
     if (this.clipSlotTimer) clearTimeout(this.clipSlotTimer);
     this.clipSlotTimer = setTimeout(() => this.releaseClipSlot(), CLIP_SLOT_TIMEOUT_MS);
+  }
+
+  /**
+   * A (re)connected socket starts with capture OFF on the server, which then
+   * drops every audio frame: after a backend restart or network blip the
+   * Transcript froze on "Listening…" for the rest of the call. Re-announce
+   * the running capture, then free the clip slot whose clip died with the
+   * old socket so queued clips go out.
+   */
+  private resumeCaptureOnServer(): void {
+    if (!this.capturingInterviewer) return;
+    this.ws.sendInterviewerAudioStart('audio/wav');
+    this.dropStreamText();
+    this.releaseClipSlot();
   }
 
   private releaseClipSlot(): void {

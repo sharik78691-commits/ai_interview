@@ -45,6 +45,18 @@ describe('LandingComponent', () => {
     expect(el.querySelector('.plan.hl')?.textContent).toContain('900');
   });
 
+  it('hides the meeting/tab audio, answer length and latest-models feature lines on home plan cards', () => {
+    const el = render([{ ...PLAN, features: ['Resume-aware answers', 'Meeting / tab audio transcription', 'Answer length control (short / medium / long)', 'Coding questions', 'Latest AI models, chosen and updated by us'] }]);
+    const items = [...el.querySelectorAll('.feats li')].map((li) => li.textContent?.trim());
+    expect(items).toEqual(['Resume-aware answers', 'Coding questions']);
+  });
+
+  it('shows no screenshot wording on home plan cards', () => {
+    const el = render([{ ...PLAN, description: '30-day access with 240 screenshot analyses. Suitable for regular Call preparation.' }]);
+    expect(el.querySelector('.plan-desc')?.textContent).toContain('Suitable for regular Call preparation.');
+    expect(el.querySelector('.plans')?.textContent).not.toMatch(/screenshot/i);
+  });
+
   it('shows "(Unlimited Call Sessions)" on every plan card', () => {
     const el = render([PLAN, { ...PLAN, id: 2, is_highlighted: false }]);
     const tags = el.querySelectorAll('.plan [data-testid="plan-unlimited"]');

@@ -576,3 +576,45 @@ describe('InterviewComponent clip queue', () => {
     expect(sent).toEqual([1, 2, 3]);
   });
 });
+
+describe('Reconnect during a call', () => {
+  // Regression: after a backend restart / network blip the new socket had
+  // capture OFF, so every audio frame was dropped and the Transcript froze on
+  // "Listening for the next question…" for the rest of the call.
+  const make = (capturing: boolean) => {
+    const c = Object.create(InterviewComponent.prototype) as InterviewComponent;
+    const calls: string[] = [];
+    Object.assign(c, {
+      capturingInterviewer: capturing,
+      clipQueue: [{ data: new ArrayBuffer(4), mimeType: 'audio/wav' }],
+      audioBusy: true, // its clip died with the old socket
+      clipSlotTimer: null,
+      thinking: false,
+      audioStatus: '',
+      responseLength: 'short',
+      streamHold: null,
+      streamText: 'Can you explain',
+      streamOpen: true,
+      interviewerInterim: '',
+      liveTyped: new SmoothText(),
+      ws: {
+        isConnected: () => true,
+        sendInterviewerAudioStart: () => calls.push('start'),
+        sendAudioClip: () => calls.push('clip'),
+      },
+    });
+    return { resume: () => (c as unknown as { resumeCaptureOnServer(): void }).resumeCaptureOnServer(), calls };
+  };
+
+  it('re-announces the running capture before any queued clip', () => {
+    const { resume, calls } = make(true);
+    resume();
+    expect(calls).toEqual(['start', 'clip']);
+  });
+
+  it('does nothing when no capture is running', () => {
+    const { resume, calls } = make(false);
+    resume();
+    expect(calls).toEqual([]);
+  });
+});

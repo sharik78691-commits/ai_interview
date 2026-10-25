@@ -262,6 +262,8 @@ export class InterviewWsService {
           if (msg['access'] && typeof msg['access'] === 'object') {
             this.access$.next(msg['access'] as unknown as LiveAccess);
           }
+          // Only the handshake carries the feature flags: a new connection.
+          if (typeof msg['liveStream'] === 'boolean') this.handshake$.next();
           const s = msg['status'] as string | undefined;
           if (s === 'idle' || s === 'listening' || s === 'processing' || s === 'thinking' || s === 'ready' || s === 'paused' || s === 'error') {
             this.status$.next(s);
@@ -386,6 +388,12 @@ export class InterviewWsService {
   liveAnswers$ = new BehaviorSubject<boolean>(false);
   /** Streamed transcript of the current utterance; `final` closes the turn. */
   liveText$ = new Subject<{ text: string; final: boolean }>();
+  /**
+   * Fires once per (re)connection, after its handshake. The server keeps
+   * capture state PER SOCKET: a new socket ignores all meeting audio until it
+   * is told `interviewer_audio_start` again.
+   */
+  handshake$ = new Subject<void>();
 
   /** Tell the backend we are starting to stream interviewer audio. */
   sendInterviewerAudioStart(mimeType: string): void {

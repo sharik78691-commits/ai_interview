@@ -372,6 +372,22 @@ export function billingTypeLabel(type: string): string {
   return type === 'recurring' ? 'Subscription plan · paid upfront' : 'One-time pass';
 }
 
+/**
+ * Plan descriptions are stored in the database and some still say
+ * "with 8 screenshot analyses". Web pages don't offer screenshot analysis,
+ * so that clause is dropped at display time; the stored text is untouched.
+ */
+export function withoutScreenshotCopy(text: string): string {
+  return text.replace(/\s+(?:with|and)\s+\d[\d,]*\s+screenshot\s+analy[sz]es/gi, '');
+}
+
+/** Feature lines hidden on the home page only; the stored plan features are untouched. */
+const HOME_HIDDEN_FEATURE = /meeting\s*\/?\s*tab\s+audio\s+transcription|answer\s+length\s+control|latest\s+ai\s+models,?\s+chosen\s+and\s+updated\s+by\s+us/i;
+
+export function withoutHiddenFeatures(features: string[]): string[] {
+  return features.filter((f) => !HOME_HIDDEN_FEATURE.test(f));
+}
+
 /** A fresh idempotency key for one checkout / analysis attempt. */
 export function newRequestId(prefix = 'req'): string {
   const rand =

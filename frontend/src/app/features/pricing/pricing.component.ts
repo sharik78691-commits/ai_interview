@@ -18,6 +18,7 @@ import {
   formatMoney,
   hoursLabel,
   newRequestId,
+  withoutScreenshotCopy,
 } from '../../core/models/billing.models';
 
 const CURRENCY_KEY = 'oi_currency';
@@ -113,6 +114,7 @@ export class PricingComponent implements OnInit {
 
   readonly money = formatMoney;
   readonly hours = hoursLabel;
+  readonly planDescription = withoutScreenshotCopy;
   readonly billingLabel = billingTypeLabel;
 
   ngOnInit(): void {
