@@ -1,0 +1,57 @@
+.page { padding: 40px 24px 72px; max-width: 860px; }
+.page-head { margin-bottom: 22px; }
+.page-head h1 { font-size: clamp(1.6rem, 3vw, 2.1rem); font-weight: 800; letter-spacing: -0.02em; line-height: 1.2; }
+.page-head p { margin-top: 8px; max-width: 640px; }
+
+.card { padding: 24px; margin-bottom: 18px; }
+.card h2 { font-size: 1.25rem; font-weight: 800; line-height: 1.35; }
+.card h3 { font-size: .95rem; font-weight: 700; margin: 18px 0 6px; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+  border: 1px solid var(--border); background: transparent; color: var(--text);
+  padding: 7px 14px; border-radius: 999px; font: inherit; font-size: .9rem; cursor: pointer;
+  text-transform: capitalize;
+}
+.chip:hover { border-color: var(--accent); }
+.chip.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent, #fff); font-weight: 700; }
+.row2 { display: grid; grid-template-columns: 1fr; gap: 0 24px; }
+.hint { margin-top: 16px; }
+.start { margin-top: 18px; }
+
+.q-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
+.pill.type { background: var(--tint); }
+.q-text { margin-bottom: 8px; }
+.focus { font-size: .92rem; }
+textarea { width: 100%; }
+
+.actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; align-items: center; }
+.skip { margin-left: auto; }
+
+.fb-head { display: flex; gap: 16px; align-items: center; }
+.score {
+  flex: none; display: grid; place-items: center; width: 74px; height: 74px; border-radius: 50%;
+  font-size: 1.7rem; font-weight: 800; border: 3px solid var(--border);
+}
+.score small { font-size: .8rem; font-weight: 600; color: var(--muted); }
+.fb-summary { margin: 0; line-height: 1.5; }
+.good, .score.good { color: #15803d; border-color: #15803d; }
+.ok, .score.ok { color: #b45309; border-color: #b45309; }
+.low, .score.low { color: #b91c1c; border-color: #b91c1c; }
+.feedback ul { margin: 0; padding-left: 20px; line-height: 1.55; }
+.feedback li + li { margin-top: 4px; }
+
+.avg { font-size: 1.05rem; margin: 8px 0 14px; }
+.summary-list { padding-left: 20px; line-height: 1.5; }
+.summary-list li { margin-bottom: 10px; }
+.summary-list .q { margin-right: 8px; }
+.score-pill { display: inline-block; font-weight: 700; font-size: .85rem; padding: 2px 10px; border-radius: 999px; border: 1px solid currentColor; margin-right: 6px; }
+
+@media (min-width: 640px) {
+  .row2 { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 520px) {
+  .page { padding: 28px 16px 56px; }
+  .card { padding: 18px; }
+  .skip { margin-left: 0; }
+}

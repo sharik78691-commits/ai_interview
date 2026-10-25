@@ -1297,6 +1297,87 @@ class OpenAICompatibleLLMProvider(LLMProvider):
                     raise LLMQuotaError("Unable to reach the AI service.") from exc
         raise LLMQuotaError("Follow-up suggestions are unavailable right now.")
 
+    async def complete_json(self, system: str, user: str, max_tokens: int = 1200) -> dict:
+        """One free-form JSON request (mock-interview questions / feedback).
+
+        Same model, key, retries and reasoning setting as the answers, but the
+        caller owns the prompt and the shape of the JSON. Raises LLMQuotaError
+        when the provider cannot answer, so callers can fall back.
+        """
+        import asyncio
+        import time
+
+        def payload() -> dict:
+            body: dict = {
+                "model": self.model,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                self.max_tokens_param: max_tokens,
+            }
+            if self.supports_temperature:
+                body["temperature"] = 0.5
+            if self.reasoning_effort and not self._reasoning_disabled:
+                body["reasoning_effort"] = self.reasoning_effort
+            return body
+
+        t0 = time.perf_counter()
+        attempts = self.max_retries + 1 + (1 if self.reasoning_effort else 0)
+        async with shared_http() as client:
+            for attempt in range(attempts):
+                try:
+                    resp = await client.post(
+                        f"{self.base_url}/chat/completions",
+                        headers=self._headers(),
+                        json=payload(),
+                        timeout=30.0,
+                    )
+                    if resp.status_code >= 400:
+                        raise httpx.HTTPStatusError(
+                            f"HTTP {resp.status_code}", request=resp.request, response=resp
+                        )
+                    body_json = resp.json()
+                    usage = body_json.get("usage") or {}
+                    self.last_input_tokens = usage.get("prompt_tokens")
+                    self.last_output_tokens = usage.get("completion_tokens")
+                    self.last_latency_ms = (time.perf_counter() - t0) * 1000
+                    content = ((body_json["choices"][0].get("message") or {}).get("content") or "").strip()
+                    try:
+                        data = _extract_json(content)
+                    except ValueError:
+                        if attempt < self.max_retries:
+                            continue  # malformed JSON is usually a one-off
+                        self.last_error_category = "bad_response"
+                        raise LLMQuotaError("The AI response came back unreadable.") from None
+                    if not isinstance(data, dict):
+                        self.last_error_category = "bad_response"
+                        raise LLMQuotaError("The AI response came back unreadable.")
+                    self.last_error_category = "ok"
+                    return data
+                except httpx.HTTPStatusError as exc:
+                    status = exc.response.status_code
+                    body = exc.response.text or ""
+                    self.last_error_category = self._categorize_status(status, body)
+                    self.last_latency_ms = (time.perf_counter() - t0) * 1000
+                    logger.warning("LLM json HTTP %d: %s", status, body[:300])
+                    if self._suppress_reasoning_effort(status):
+                        continue
+                    if status in (500, 502, 503, 504) and attempt < self.max_retries:
+                        await asyncio.sleep(RETRY_BACKOFF_BASE * (2**attempt))
+                        continue
+                    raise LLMQuotaError(self._friendly_error(status, body, self.model)) from exc
+                except (httpx.TimeoutException, httpx.RequestError) as exc:
+                    self.last_error_category = (
+                        "timeout" if isinstance(exc, httpx.TimeoutException) else "network"
+                    )
+                    self.last_latency_ms = (time.perf_counter() - t0) * 1000
+                    if attempt < self.max_retries:
+                        await asyncio.sleep(RETRY_BACKOFF_BASE * (2**attempt))
+                        continue
+                    raise LLMQuotaError("Unable to reach the AI service.") from exc
+        raise LLMQuotaError("The AI service is unavailable right now.")
+
 
 def get_llm_provider() -> LLMProvider:
     settings = get_settings()

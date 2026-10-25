@@ -520,3 +520,59 @@ describe('Interview free trial', () => {
     expect(started).toBeFalse();
   });
 });
+
+describe('InterviewComponent clip queue', () => {
+  type Q = {
+    enqueueClip(c: { data: ArrayBuffer; mimeType: string }): void;
+    clipQueue: unknown[];
+    audioBusy: boolean;
+  };
+  const clip = (n: number) => ({ data: new ArrayBuffer(n), mimeType: 'audio/wav' });
+  const make = () => {
+    const c = Object.create(InterviewComponent.prototype) as InterviewComponent;
+    const sent: number[] = [];
+    Object.assign(c, {
+      clipQueue: [],
+      audioBusy: false,
+      clipSlotTimer: null,
+      thinking: false,
+      audioStatus: '',
+      responseLength: 'short',
+      ws: {
+        isConnected: () => true,
+        sendAudioClip: (data: ArrayBuffer) => sent.push(data.byteLength),
+      },
+    });
+    return { c, q: c as unknown as Q, sent, release: () => (c as unknown as { releaseClipSlot(): void }).releaseClipSlot() };
+  };
+
+  beforeEach(() => jasmine.clock().install());
+  afterEach(() => jasmine.clock().uninstall());
+
+  // Regression: a newer clip used to REPLACE the queued one, so the middle of
+  // a question ("Can you explain the difference between") never reached STT.
+  it('keeps every clip that arrives while one is in flight, in order', () => {
+    const { q, sent, release } = make();
+    q.enqueueClip(clip(1));
+    q.enqueueClip(clip(2));
+    q.enqueueClip(clip(3));
+    expect(sent).toEqual([1]);
+    release();
+    release();
+    expect(sent).toEqual([1, 2, 3]);
+  });
+
+  it('a stale safety timer never frees the next clip’s slot early', () => {
+    const { q, sent, release } = make();
+    q.enqueueClip(clip(1));
+    jasmine.clock().tick(9_000);
+    release(); // clip 1 answered at 9 s; clip 2 is not queued yet
+    q.enqueueClip(clip(2));
+    q.enqueueClip(clip(3));
+    jasmine.clock().tick(2_000); // clip 1's old 10 s timer would fire here
+    expect(sent).toEqual([1, 2]);
+    expect(q.audioBusy).toBeTrue();
+    jasmine.clock().tick(10_000); // clip 2's own timeout
+    expect(sent).toEqual([1, 2, 3]);
+  });
+});

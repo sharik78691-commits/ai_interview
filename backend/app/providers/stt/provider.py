@@ -8,6 +8,7 @@
 """
 import asyncio
 import logging
+import re
 import time
 
 import httpx
@@ -76,6 +77,20 @@ def is_stt_hallucination(text: str) -> bool:
     if not norm:
         return True
     return " ".join(norm) in _HALLUCINATIONS
+
+
+#: Sound annotations Whisper writes for non-speech: "*thud*", "[Music]",
+#: "[BLANK_AUDIO]", "(coughs)". Parentheses only count when lower-case, so an
+#: acronym such as "dependency injection (DI)" survives.
+_SOUND_TAG_RE = re.compile(r"\*[^*\n]{1,40}\*|\[[^\]\n]{1,40}\]|\([a-z][a-z ,'-]{0,38}\)")
+
+
+def strip_sound_tags(text: str) -> str:
+    """Remove non-speech annotations so a cough or a keyboard burst never
+    becomes part of a question (or a question of its own)."""
+    if not text:
+        return ""
+    return re.sub(r"\s{2,}", " ", _SOUND_TAG_RE.sub(" ", text)).strip()
 
 
 class STTUnavailableError(RuntimeError):

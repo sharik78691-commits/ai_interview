@@ -110,7 +110,7 @@
 .field input { padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--bg2); color: var(--text); }
 .checkout-actions { display: flex; gap: 10px; justify-content: flex-end; }
 
-/* "(Unlimited Interview Sessions)" on passes — a soft flashlight sweep across the text */
+/* "(Unlimited Call Sessions)" on passes — a soft flashlight sweep across the text */
 .unlimited {
   display: inline-block; font-weight: 700; white-space: nowrap;
   color: var(--accent);

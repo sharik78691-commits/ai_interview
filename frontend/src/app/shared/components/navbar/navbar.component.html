@@ -9,8 +9,8 @@
         <path d="M12 33l20 13 20-13v17a4 4 0 0 1-4 4H16a4 4 0 0 1-4-4z" class="lm-env"/>
       </svg>
       <span class="wordmark">OYE<span>INTERVIEW</span></span>
-      @if (mode === 'live') { <span class="live-badge">LIVE AI</span> }
-      @else if (mode === 'demo') { <span class="demo-badge" title="Template answers — add an LLM key for live AI">DEMO</span> }
+      @if (mode === 'live') { <span class="live-badge">AI</span> }
+      @else if (mode === 'demo') { <span class="demo-badge" title="Template answers — add an LLM key for real AI answers">DEMO</span> }
       @else if (mode === 'offline') { <span class="off-badge" title="Backend unreachable">OFFLINE</span> }
       @if (isDesktop) {
         <span class="hotkey-hint" title="Press Ctrl+Shift+A anywhere to hide or show this app">
@@ -30,6 +30,9 @@
       <a routerLink="/pricing" routerLinkActive="active">Pricing</a>
       @if (user) {
         <a routerLink="/dashboard" routerLinkActive="active">Dashboard</a>
+        @if (!isDesktop) {
+          <a routerLink="/mock-interview" routerLinkActive="active">Mock interview</a>
+        }
         @if (isDesktop) {
           <a routerLink="/screenshot-analysis" routerLinkActive="active">Screenshots</a>
         }

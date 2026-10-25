@@ -35,16 +35,21 @@ describe('LandingComponent', () => {
     return fixture.nativeElement as HTMLElement;
   }
 
+  it('names the main search keyword in the page heading', () => {
+    const h1 = render([PLAN]).querySelector('h1')?.textContent ?? '';
+    expect(h1).toContain('AI interview assistant');
+  });
+
   it('shows backend plan prices, not hard-coded ones', () => {
     const el = render([PLAN]);
     expect(el.querySelector('.plan.hl')?.textContent).toContain('900');
   });
 
-  it('shows "(Unlimited Interview Sessions)" on every plan card', () => {
+  it('shows "(Unlimited Call Sessions)" on every plan card', () => {
     const el = render([PLAN, { ...PLAN, id: 2, is_highlighted: false }]);
     const tags = el.querySelectorAll('.plan [data-testid="plan-unlimited"]');
     expect(tags.length).toBe(2);
-    expect(tags[0].textContent).toContain('(Unlimited Interview Sessions)');
+    expect(tags[0].textContent).toContain('(Unlimited Call Sessions)');
   });
 
   it('never says "free trial" when no plan has trial days', () => {

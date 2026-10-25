@@ -14,6 +14,7 @@ from app.api import (
     billing,
     health,
     interview,
+    mock_interview,
     resume,
     roles,
     screenshots,
@@ -137,6 +138,7 @@ app.include_router(billing.router, prefix="/api")
 app.include_router(resume.router, prefix="/api")
 app.include_router(roles.router, prefix="/api")
 app.include_router(interview.router, prefix="/api")
+app.include_router(mock_interview.router, prefix="/api")
 app.include_router(screenshots.router, prefix="/api")
 app.include_router(websocket.router)
 

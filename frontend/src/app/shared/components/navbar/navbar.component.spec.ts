@@ -28,4 +28,12 @@ describe('NavbarComponent', () => {
     expect(el.textContent).not.toContain('invisible on screen share');
     expect(el.querySelector('.hotkey-hint')).not.toBeNull(); // other desktop UI unchanged
   });
+
+  it('labels real AI mode as "AI", not "LIVE AI"', () => {
+    const f = TestBed.createComponent(NavbarComponent);
+    f.detectChanges();
+    const badge = (f.nativeElement as HTMLElement).querySelector('.live-badge');
+    expect(badge?.textContent?.trim()).toBe('AI');
+    expect((f.nativeElement as HTMLElement).textContent).not.toContain('LIVE AI');
+  });
 });

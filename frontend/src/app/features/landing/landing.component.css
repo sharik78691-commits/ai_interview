@@ -45,6 +45,16 @@ svg { display: block; }
 .c3 { animation: conf 2.6s ease-in 1.2s infinite; }
 .c4 { animation: conf 2.6s ease-in 1.8s infinite; }
 .check { stroke-dasharray: 24; animation: draw 3.6s ease-out infinite alternate; }
+@keyframes wave { 0%, 100% { opacity: .15; transform: translateX(0); } 50% { opacity: .9; transform: translateX(-3px); } }
+@keyframes pop { 0%, 8% { transform: scale(.4); opacity: 0; } 18% { transform: scale(1.08); opacity: 1; } 24%, 80% { transform: scale(1); opacity: 1; } 92%, 100% { transform: scale(.4); opacity: 0; } }
+@keyframes ring { 0% { stroke-dasharray: 0 88; } 45%, 100% { stroke-dasharray: 66 88; } }
+@keyframes twinkle { 0%, 100% { transform: scale(.6) rotate(0); opacity: .4; } 50% { transform: scale(1.15) rotate(45deg); opacity: 1; } }
+.wave { transform-box: fill-box; animation: wave 1.6s ease-in-out infinite; }
+.w2 { animation-delay: .4s; }
+.pop { transform-box: fill-box; transform-origin: center; animation: pop 4.4s cubic-bezier(.3, 1.4, .5, 1) infinite; }
+.ring { animation: ring 4.4s ease-out infinite; }
+.spark { transform-box: fill-box; transform-origin: center; animation: twinkle 2.4s ease-in-out infinite; }
+.spark-b { animation-delay: 1.2s; }
 
 /* ---------------- Sections ---------------- */
 .sec { padding: 48px 0; }
@@ -120,7 +130,7 @@ svg { display: block; }
 .price strong { font-size: 34px; font-weight: 800; letter-spacing: -0.02em; line-height: 1; }
 .price span { font-size: 14px; }
 .per-day { font-size: 13px; font-weight: 600; color: var(--accent); margin-top: 8px; }
-/* Same animated highlight as the Pricing page's "(Unlimited Interview Sessions)". */
+/* Same animated highlight as the Pricing page's "(Unlimited Call Sessions)". */
 .unlimited {
   display: inline-block; font-size: 13px; font-weight: 700; margin-top: 4px;
   color: var(--accent);
@@ -217,7 +227,7 @@ svg { display: block; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .rise, .c1, .c2, .c3, .c4, .check, .rec-dot, .live-dot { animation: none; }
+  .rise, .c1, .c2, .c3, .c4, .check, .wave, .pop, .ring, .spark, .rec-dot, .live-dot { animation: none; }
   .points li { animation: none; opacity: 1; }
   .card:hover, .final-btn:hover { transform: none; }
 }

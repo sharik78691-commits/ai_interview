@@ -27,6 +27,16 @@
   </header>
   <app-error-banner [message]="error" (dismiss)="error=''"></app-error-banner>
 
+  @if (!isDesktop) {
+    <section class="card mock-card" aria-label="Mock interview">
+      <div>
+        <h3>🎯 Mock interview</h3>
+        <p class="muted small">Practise with role-based questions, answer in your own words and get a score with feedback on every answer.</p>
+      </div>
+      <a routerLink="/mock-interview" class="btn-primary btn-sm">Start mock interview</a>
+    </section>
+  }
+
   @if (billing(); as b) {
     <!-- ======================= PLAN & SCREENSHOT CREDITS ======================= -->
     <section class="card plan-card" aria-label="Your plan">
@@ -57,7 +67,7 @@
               <span class="opt-tag">🎁 Free trial</span>
               <ul class="trial-list">
                 <li [class.used]="t.web.remainingSeconds === 0">
-                  <strong>{{ minutes(t.web.remainingSeconds) }} / {{ minutes(t.web.limitSeconds) }} min</strong> live interview on the website
+                  <strong>{{ minutes(t.web.remainingSeconds) }} / {{ minutes(t.web.limitSeconds) }} min</strong> practice sessions on the website
                 </li>
                 <li [class.used]="t.desktop.remainingSeconds === 0">
                   <strong>{{ minutes(t.desktop.remainingSeconds) }} / {{ minutes(t.desktop.limitSeconds) }} min</strong> extra in the desktop app

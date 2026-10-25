@@ -52,7 +52,7 @@
     <table class="legal-table">
       <thead><tr><th>Service</th><th>What it receives</th></tr></thead>
       <tbody>
-        <tr><td>AI model providers — depending on the model in use: Groq, Google (Gemini), OpenRouter (e.g. Qwen, Llama), OpenAI, DeepSeek</td><td>The question text, your resume and job description, a few recent questions for follow-up context, and your chosen answer length. In the desktop app, also the screenshots you choose to analyse (currently sent to Google Gemini).</td></tr>
+        <tr><td>AI model providers — depending on the model in use: Groq, Google (Gemini), OpenRouter (e.g. Qwen, Llama), OpenAI, DeepSeek</td><td>The question text, your resume and job description, a few recent questions for follow-up context, and your chosen answer length. For mock interviews, also the practice question and the answer you give, to score it and return feedback (not saved to your account). In the desktop app, also the screenshots you choose to analyse (currently sent to Google Gemini).</td></tr>
         <tr><td>Speech-to-text provider (Whisper-compatible service such as Groq or OpenAI)</td><td>Interviewer audio clips.</td></tr>
         <tr><td>Google (only if you use "Sign in with Google")</td><td>Standard sign-in flow; we receive your name, email and verified-email status.</td></tr>
         <tr><td>Payment gateway — Cashfree</td><td>The order amount and your email; for Cashfree also the mobile number you enter at checkout (we pass it on and do not store it). Card, UPI and bank details are entered on the gateway's page and never reach us.</td></tr>
@@ -104,7 +104,7 @@
     <ul>
       <li>View and edit your resumes and target roles from the dashboard, and see your subscription and payment history on the Billing page.</li>
       <li>Request a copy, correction or deletion of your personal data, or deletion of your account, by contacting us (account deletion is handled by support today). Payment records may be retained where the law requires it.</li>
-      <li>Withdraw consent where processing relies on consent, and raise a complaint with the authority applicable to you. <!-- CONFIRM: grievance officer details if required under Indian law (DPDP Act / IT Rules). --></li>
+      <li>Withdraw consent where processing relies on consent, and raise a complaint with the authority applicable to you. For any privacy concern you can also write to our grievance officer, {{ biz.operatorName }}, at <a [href]="'mailto:' + biz.email">{{ biz.email }}</a>.</li>
     </ul>
   </section>
 

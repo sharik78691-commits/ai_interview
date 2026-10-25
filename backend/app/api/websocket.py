@@ -57,6 +57,7 @@ from app.providers.stt.provider import (
     get_stt_provider,
     is_stt_hallucination,
     prewarm_stt,
+    strip_sound_tags,
 )
 from app.providers.stt.live_stream import LIVE_PCM_TAG, LiveTranscriptStream
 from app.services import free_trial_service as free_trial
@@ -542,6 +543,25 @@ async def ws_interview(websocket: WebSocket) -> None:
             )
         # Usage tracking: provider-reported tokens only, never estimated.
         # Off the event loop: a SQLite write must not delay the next question.
+        fb = getattr(service, "last_fallback", None)
+        if isinstance(fb, dict):
+            # The first model failed (rate limit / quota / network) and another
+            # one answered: record the failure too, so it stays measurable.
+            logger.warning(
+                "Answer came from fallback model %s after %s failed (%s)",
+                service.last_model, fb["model"], fb["usage"].get("error_category"),
+            )
+            await asyncio.to_thread(
+                log_llm_usage,
+                user_id=user_id,
+                request_type="interview",
+                provider=fb["provider"],
+                model=fb["model"],
+                latency_ms=fb["usage"].get("latency_ms"),
+                input_tokens=fb["usage"].get("input_tokens"),
+                output_tokens=fb["usage"].get("output_tokens"),
+                error_category=fb["usage"].get("error_category"),
+            )
         await asyncio.to_thread(
             log_llm_usage,
             user_id=user_id,
@@ -615,6 +635,33 @@ async def ws_interview(websocket: WebSocket) -> None:
         model_raw: object,
         seq: int | None = None,
         flushed_at: float | None = None,
+    ) -> None:
+        """Transcribe one clip; always end it with exactly one frame for the client.
+
+        The client keeps ONE clip in flight and frees the slot on that clip's
+        final transcript. A clip that yields no transcript (silence, a cough,
+        an STT error) used to send nothing that freed it, so the next clips
+        waited ~10 s behind it and newer ones replaced older ones in the
+        client's queue — losing half a question. ``clip_done`` closes those.
+        """
+        outcome = {"final": False}
+        try:
+            await _transcribe_clip(clip, clip_mime, length_raw, model_raw, seq, flushed_at, outcome)
+        finally:
+            if not outcome["final"]:
+                try:
+                    await websocket.send_json({"type": "clip_done", "seq": seq})
+                except Exception:
+                    logger.debug("[ws user=%s] clip_done dropped: socket closing", user_id)
+
+    async def _transcribe_clip(
+        clip: bytes,
+        clip_mime: str,
+        length_raw: object,
+        model_raw: object,
+        seq: int | None,
+        flushed_at: float | None,
+        outcome: dict,
     ) -> None:
         """Transcribe one interviewer audio clip, then run question detection.
 
@@ -713,6 +760,7 @@ async def ws_interview(websocket: WebSocket) -> None:
                 real_mime,
             )
 
+        text = strip_sound_tags(text)
         if text and is_stt_hallucination(text):
             logger.info("STT hallucination dropped: %r", text[:40])
             text = ""
@@ -734,6 +782,7 @@ async def ws_interview(websocket: WebSocket) -> None:
         if seq is not None:
             final_frame["seq"] = seq
         await websocket.send_json(final_frame)
+        outcome["final"] = True
 
         # The live stream heard this speech and answers (or holds) it itself:
         # judging the clip too would answer the same question twice.
@@ -831,7 +880,7 @@ async def ws_interview(websocket: WebSocket) -> None:
                     time.perf_counter() - t0,
                     len(clip),
                 )
-                text = (text or "").strip()
+                text = strip_sound_tags(text)
                 if seq != clip_seq or not text or is_stt_hallucination(text):
                     continue
                 await websocket.send_json(
@@ -1026,7 +1075,7 @@ async def ws_interview(websocket: WebSocket) -> None:
         await _answer_live(live_turns.settle(gen))
 
     async def _live_flush_carry() -> None:
-        await asyncio.sleep(live_turns.CARRY_S)
+        await asyncio.sleep(live_turns.carry_window)
         await _answer_live(live_turns.flush_carry())
 
     async def _live_owns_clip(seq: int, flushed_at: float | None) -> bool:

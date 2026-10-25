@@ -41,7 +41,7 @@ interface Feature {
       <section class="callout">
         <p>
           <strong>Good to know:</strong> AI answers can be wrong — check them before you rely on
-          them. Live microphone transcription needs a browser with speech recognition (Chrome or
+          them. Microphone transcription needs a browser with speech recognition (Chrome or
           Edge); everything else, including typed questions, works in other modern browsers.
         </p>
       </section>
@@ -56,12 +56,13 @@ interface Feature {
 export class FeaturesPageComponent {
   readonly groups: { title: string; items: Feature[] }[] = [
     {
-      title: 'Practice-session help',
+      title: 'Practice & mock interviews',
       items: [
-        { icon: '🎧', title: 'Interviewer audio detection', text: 'Share the audio of a mock interview or practice call and OyeInterview transcribes short clips to spot the questions automatically.' },
-        { icon: '🎙', title: 'Microphone transcription', text: 'Your own voice is transcribed by your browser’s speech recognition, separately from the interviewer audio.' },
+        { icon: '🎯', title: 'Mock interviews with scored feedback', text: 'Pick a role, interview type (technical, behavioral or HR) and difficulty. Answer each question in your own words, typed or spoken, and get a 1–10 score, what worked, what to improve and what a strong answer covers. Retry any question as often as you like.' },
+        { icon: '🎧', title: 'Mock-interview audio detection', text: 'Share the audio of a mock interview or practice call and OyeInterview transcribes short clips to spot the questions automatically.' },
+        { icon: '🎙', title: 'Microphone transcription', text: 'Your own voice is transcribed by your browser’s speech recognition, separately from the shared practice audio.' },
         { icon: '⌨️', title: 'Typed questions', text: 'Type or paste any question when audio isn’t available — you get the same structured answer.' },
-        { icon: '⚡', title: 'Streaming answers', text: 'Answer points appear while the model is still writing, then the full structured answer replaces them.' },
+        { icon: '🧾', title: 'Answer outlines', text: 'Short answer points come first, then the full structured answer replaces them.' },
         { icon: '🔁', title: 'Follow-up awareness', text: 'Short follow-ups like “why?” are answered in the context of your previous few questions.' },
         { icon: '📏', title: 'Answer length control', text: 'Switch between short, medium and long answers at any time during a session.' },
       ],

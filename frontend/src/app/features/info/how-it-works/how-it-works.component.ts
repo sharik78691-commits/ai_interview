@@ -10,7 +10,7 @@ import { RouterLink } from '@angular/router';
     <div class="container info">
       <header class="info-head">
         <h1>How it works</h1>
-        <p class="lead">From sign-up to live answers in a few minutes — and what happens to your data at each step.</p>
+        <p class="lead">From sign-up to your first practice answers in a few minutes — and what happens to your data at each step.</p>
       </header>
 
       <section>
@@ -32,6 +32,24 @@ import { RouterLink } from '@angular/router';
       </section>
 
       <section>
+        <h2>Mock interview practice</h2>
+        <ol class="steps">
+          <li class="card">
+            <h3>Pick what to practise</h3>
+            <p class="muted">Choose the role, interview type (technical, behavioral, HR or mixed), difficulty and number of questions. Your saved resume and target role make the questions specific to you.</p>
+          </li>
+          <li class="card">
+            <h3>Answer in your own words</h3>
+            <p class="muted">Type your answer, or speak it and let your browser transcribe it.</p>
+          </li>
+          <li class="card">
+            <h3>Get a score and feedback</h3>
+            <p class="muted">The question, your answer, resume and job description go to the AI model, which returns a score out of 10, what worked, what to improve and what a strong answer covers. Retry until it feels natural — answers are not saved to your account.</p>
+          </li>
+        </ol>
+      </section>
+
+      <section>
         <h2>During a practice session</h2>
         <ol class="steps">
           <li class="card">
@@ -40,10 +58,10 @@ import { RouterLink } from '@angular/router';
           </li>
           <li class="card">
             <h3>Questions are detected</h3>
-            <p class="muted">Interviewer audio is cut into short clips at natural pauses and sent to a speech-to-text service; your microphone is transcribed by your browser. When a complete question is recognised, it is queued once — repeats aren’t answered twice.</p>
+            <p class="muted">The shared audio is cut into short clips at natural pauses and sent to a speech-to-text service; your microphone is transcribed by your browser. When a complete question is recognised, it is queued once — repeats aren’t answered twice.</p>
           </li>
           <li class="card">
-            <h3>An answer streams in</h3>
+            <h3>An answer outline appears</h3>
             <p class="muted">The question, your resume, the job description and your last few questions go to the AI model you selected. Answer points appear as they are generated, then the full structured answer is shown.</p>
           </li>
           <li class="card">

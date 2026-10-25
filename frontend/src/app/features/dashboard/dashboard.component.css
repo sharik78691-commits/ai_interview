@@ -220,3 +220,8 @@
 .plan-card a { color: var(--accent); }
 .plan-card a.btn-primary { color: var(--on-accent); }
 .plan-link { justify-self: start; }
+
+/* Mock interview entry point (web only). */
+.mock-card { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 20px; margin-bottom: 18px; }
+.mock-card h3 { font-size: 1rem; font-weight: 700; margin: 0 0 4px; }
+.mock-card p { margin: 0; max-width: 520px; }

@@ -30,3 +30,13 @@ describe('serverRoutes (prerendering)', () => {
     expect(fallback.renderMode).toBe(RenderMode.Client);
   });
 });
+
+describe('home page SEO', () => {
+  it('targets "AI interview assistant" in the title and description', () => {
+    const seo = routes.find((r) => r.path === '')?.data?.['seo'] as SeoConfig;
+    expect(seo.title).toContain('AI Interview Assistant');
+    expect(seo.description.toLowerCase()).toContain('ai interview assistant');
+    expect(seo.title.length).toBeLessThanOrEqual(65);
+    expect(seo.description.length).toBeLessThanOrEqual(160);
+  });
+});

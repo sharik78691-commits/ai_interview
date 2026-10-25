@@ -24,9 +24,9 @@ export const routes: Routes = [
     // Public marketing page — the primary SEO target.
     data: {
       seo: {
-        title: 'OyeInterview — AI Interview Practice & Preparation Assistant',
+        title: 'OyeInterview — AI Interview Assistant for Practice & Preparation',
         description:
-          'OyeInterview is an AI interview practice and preparation assistant: resume-aware answers, STAR stories and code hints for technical, behavioral and coding interviews.',
+          'AI interview assistant for practice and preparation: resume-aware answers, STAR stories and code hints for technical, behavioral and coding interviews.',
         path: '/',
       },
     },
@@ -113,9 +113,26 @@ export const routes: Routes = [
     data: {
       preload: true,
       seo: {
-        title: 'Live interview — OyeInterview',
-        description: 'Your live OyeInterview session.',
+        title: 'Practice session — OyeInterview',
+        description: 'Your OyeInterview practice session.',
         path: '/interview',
+        noindex: true,
+      },
+    },
+  },
+  // Self-practice: role-based questions with scored feedback on your answers.
+  {
+    path: 'mock-interview',
+    loadComponent: () =>
+      import('./features/mock-interview/mock-interview.component').then(
+        (m) => m.MockInterviewComponent,
+      ),
+    canActivate: [authGuard],
+    data: {
+      seo: {
+        title: 'Mock interview — OyeInterview',
+        description: 'Practise with role-based questions and get a score with feedback on every answer.',
+        path: '/mock-interview',
         noindex: true,
       },
     },
@@ -224,7 +241,7 @@ export const routes: Routes = [
       seo: {
         title: 'Features — OyeInterview AI Interview Assistant',
         description:
-          'Interviewer audio detection, streaming resume-aware answers, STAR outlines, code hints, resume library and prepaid plans — what OyeInterview does today.',
+          'Mock interviews with scored feedback, resume-aware answer outlines, STAR outlines, code hints, resume library and prepaid plans — what OyeInterview does today.',
         path: '/features',
       },
     },
@@ -239,7 +256,7 @@ export const routes: Routes = [
       seo: {
         title: 'How it works — OyeInterview',
         description:
-          'Set up your resume and target role, share interviewer audio, and get streaming AI answer suggestions — plus where your data goes at each step.',
+          'Set up your resume and target role, practise with mock interviews and scored feedback, and get AI answer outlines — plus where your data goes at each step.',
         path: '/how-it-works',
       },
     },
