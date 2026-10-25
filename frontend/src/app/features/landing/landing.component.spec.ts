@@ -45,11 +45,11 @@ describe('LandingComponent', () => {
     expect(el.querySelector('.plan.hl')?.textContent).toContain('900');
   });
 
-  it('shows "(Unlimited Interview Sessions)" on every plan card', () => {
+  it('shows "(Unlimited Call Sessions)" on every plan card', () => {
     const el = render([PLAN, { ...PLAN, id: 2, is_highlighted: false }]);
     const tags = el.querySelectorAll('.plan [data-testid="plan-unlimited"]');
     expect(tags.length).toBe(2);
-    expect(tags[0].textContent).toContain('(Unlimited Interview Sessions)');
+    expect(tags[0].textContent).toContain('(Unlimited Call Sessions)');
   });
 
   it('never says "free trial" when no plan has trial days', () => {
