@@ -24,9 +24,9 @@ export const routes: Routes = [
     // Public marketing page — the primary SEO target.
     data: {
       seo: {
-        title: 'OyeInterview — AI Interview Practice & Preparation Assistant',
+        title: 'OyeInterview — AI Interview Assistant for Practice & Preparation',
         description:
-          'OyeInterview is an AI interview practice and preparation assistant: resume-aware answers, STAR stories and code hints for technical, behavioral and coding interviews.',
+          'AI interview assistant for practice and preparation: resume-aware answers, STAR stories and code hints for technical, behavioral and coding interviews.',
         path: '/',
       },
     },

@@ -35,6 +35,11 @@ describe('LandingComponent', () => {
     return fixture.nativeElement as HTMLElement;
   }
 
+  it('names the main search keyword in the page heading', () => {
+    const h1 = render([PLAN]).querySelector('h1')?.textContent ?? '';
+    expect(h1).toContain('AI interview assistant');
+  });
+
   it('shows backend plan prices, not hard-coded ones', () => {
     const el = render([PLAN]);
     expect(el.querySelector('.plan.hl')?.textContent).toContain('900');
