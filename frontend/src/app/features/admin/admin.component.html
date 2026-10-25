@@ -4,7 +4,7 @@
       <h1>OyeInterview — Business dashboard</h1>
       <p class="muted">What's happening in your product, who your customers are, and what to do next to grow.</p>
     </div>
-    <button class="btn-ghost btn-sm" type="button" (click)="refresh()">↻ Refresh</button>
+    <button class="btn-ghost btn-sm refresh-btn" type="button" (click)="refresh()">↻ Refresh</button>
   </div>
 
   <app-error-banner [message]="error" (dismiss)="error = ''"></app-error-banner>
@@ -563,6 +563,7 @@
           @if (!stats.ai_usage.length) {
             <p class="muted small">No AI calls recorded in this range.</p>
           } @else {
+            <div class="table-wrap">
             <table class="mini-table">
               <thead><tr><th>Model</th><th>Calls</th><th>Errors</th><th>Avg</th></tr></thead>
               <tbody>
@@ -579,6 +580,7 @@
                 }
               </tbody>
             </table>
+            </div>
           }
         </div>
       </div>
@@ -703,7 +705,8 @@
       <!-- ------------------------------- Users ------------------------------- -->
       <div class="card users-card">
         <div class="users-head">
-          <h3>Users @if (total) { <span class="muted small">({{ total }})</span> }</h3>          <div class="users-tools">
+          <h3>Users @if (total) { <span class="muted small">({{ total }})</span> }</h3>
+          <div class="users-tools">
             <input
               type="text"
               [(ngModel)]="query"

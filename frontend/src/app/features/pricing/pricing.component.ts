@@ -3,7 +3,7 @@ import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { HttpErrorResponse } from '@angular/common/http';
-import { firstValueFrom, forkJoin } from 'rxjs';
+import { catchError, firstValueFrom, forkJoin, of } from 'rxjs';
 import { AuthService } from '../../core/auth/auth.service';
 import { BUSINESS } from '../../core/business-info';
 import { CheckoutLauncherService } from '../../core/payments/checkout-launcher.service';
@@ -12,6 +12,7 @@ import {
   Currency,
   Gateway,
   GatewayKey,
+  PaymentStatusInfo,
   Plan,
   billingTypeLabel,
   formatMoney,
@@ -68,6 +69,25 @@ export class PricingComponent implements OnInit {
   readonly currency = signal('INR');
   readonly loading = signal(true);
   readonly loadError = signal('');
+  /** Site-wide switch set by the admin (null = older backend: assume open). */
+  readonly paymentStatus = signal<PaymentStatusInfo | null>(null);
+  /** Admin switched online payments off (or the active gateway is not set up). */
+  readonly paymentsOff = computed(() => this.paymentStatus()?.available === false);
+  readonly unavailableText = computed(
+    () => this.paymentStatus()?.message || 'Online payments are temporarily unavailable. Please try again later.',
+  );
+  /** The gateway(s) named in the FAQ ("our payment partner, …"). */
+  readonly partnerNames = computed(() => {
+    const st = this.paymentStatus();
+    if (st?.gateway_names?.length) return st.gateway_names;
+    return [st?.active_gateway_name || (st?.active_gateway === 'razorpay' ? 'Razorpay' : 'Cashfree')];
+  });
+  readonly partnerLabel = computed(() => {
+    const names = this.partnerNames();
+    return names.length > 1
+      ? `payment partners, ${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
+      : `payment partner, ${names[0]}`;
+  });
 
   readonly passes = computed(() => this.plans().filter((p) => p.billing_type !== 'recurring'));
   readonly longPlans = computed(() => this.plans().filter((p) => p.billing_type === 'recurring'));
@@ -96,6 +116,10 @@ export class PricingComponent implements OnInit {
   readonly billingLabel = billingTypeLabel;
 
   ngOnInit(): void {
+    this.billing
+      .paymentStatus()
+      .pipe(catchError(() => of(null)))
+      .subscribe((st) => this.paymentStatus.set(st));
     forkJoin({ currencies: this.billing.currencies(), gateways: this.billing.gateways() }).subscribe({
       next: ({ currencies, gateways }) => {
         this.currencies.set(currencies);
@@ -145,7 +169,7 @@ export class PricingComponent implements OnInit {
   }
 
   choose(p: Plan): void {
-    if (!p.available || !p.payable) return;
+    if (this.paymentsOff() || !p.available || !p.payable) return;
     if (!this.auth.isAuthenticated) {
       this.router.navigate(['/register'], { queryParams: { redirect: '/pricing' } });
       return;
@@ -174,6 +198,7 @@ export class PricingComponent implements OnInit {
 
   ctaLabel(p: Plan): string {
     if (!p.available) return `Not yet available in ${p.currency}`;
+    if (this.paymentsOff()) return 'Payments temporarily unavailable';
     if (!p.payable) return `${p.currency} payments coming soon`;
     return `Get ${p.name}`;
   }
@@ -209,10 +234,20 @@ export class PricingComponent implements OnInit {
         this.show(result.message || 'The payment did not go through.', 'error');
       }
     } catch (err) {
+      // 503 = the admin switched payments off since the page loaded.
+      if (err instanceof HttpErrorResponse && err.status === 503) this.markUnavailable(this.errorText(err));
       this.show(this.errorText(err), 'error');
     } finally {
       this.busy.set(false);
     }
+  }
+
+  private markUnavailable(message: string): void {
+    const st = this.paymentStatus();
+    this.paymentStatus.set({
+      payments_enabled: false, active_gateway: st?.active_gateway ?? 'cashfree',
+      active_gateway_name: st?.active_gateway_name ?? '', available: false, message,
+    });
   }
 
   private show(text: string, kind: 'info' | 'error'): void {

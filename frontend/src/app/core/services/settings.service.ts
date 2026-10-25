@@ -82,17 +82,22 @@ function normalizeBackground(value: unknown): BackgroundName {
 }
 
 /** Apply the background preset to <html>; 'default' keeps the theme's own colors. */
-export function applyBackgroundToDom(background: unknown): void {
-  if (typeof document === 'undefined') return;
+export function applyBackgroundToDom(background: unknown, doc: Document | undefined = globalDocument()): void {
+  if (!doc) return;
   const bg = normalizeBackground(background);
-  if (bg === 'default') delete document.documentElement.dataset['bg'];
-  else document.documentElement.dataset['bg'] = bg;
+  if (bg === 'default') doc.documentElement.removeAttribute('data-bg');
+  else doc.documentElement.setAttribute('data-bg', bg);
 }
 
 /** Apply the theme to <html> so the CSS-variable layer switches instantly. */
-function applyThemeToDom(theme: ThemeName): void {
-  if (typeof document === 'undefined') return;
-  document.documentElement.dataset['theme'] = theme;
+function applyThemeToDom(theme: ThemeName, doc: Document | undefined = globalDocument()): void {
+  if (!doc) return;
+  doc.documentElement.setAttribute('data-theme', theme);
+}
+
+/** The browser document, or undefined where there is none. */
+function globalDocument(): Document | undefined {
+  return typeof document === 'undefined' ? undefined : document;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -101,8 +106,17 @@ export class SettingsService {
 
   constructor() {
     // Apply the stored theme on startup (default light on web, dark on desktop; a saved choice is kept).
-    applyThemeToDom(normalizeTheme(this.settings$.value.theme));
-    applyBackgroundToDom(this.settings$.value.background);
+    this.applyToDocument();
+  }
+
+  /**
+   * Write the current theme + background onto `<html>`. Prerendering passes
+   * its server document (there is no global one) so static pages ship the
+   * default colors instead of flashing other ones before the app starts.
+   */
+  applyToDocument(doc: Document | undefined = globalDocument()): void {
+    applyThemeToDom(normalizeTheme(this.settings$.value.theme), doc);
+    applyBackgroundToDom(this.settings$.value.background, doc);
   }
 
   private load(): AppSettings {

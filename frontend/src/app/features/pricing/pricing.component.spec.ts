@@ -46,10 +46,13 @@ describe('PricingComponent (database-driven)', () => {
       payable_now: false, gateways: [], sort_order: 20, live_prices: 0 },
   ];
 
-  function render(plans: Plan[] = [PLAN]) {
+  const OPEN = { payments_enabled: true, active_gateway: 'cashfree', active_gateway_name: 'Cashfree', available: true, message: '' };
+
+  function render(plans: Plan[] = [PLAN], status: object = OPEN) {
     try { localStorage.setItem('oi_currency', 'INR'); } catch { /* ignore */ }
     const fixture = TestBed.createComponent(PricingComponent);
     fixture.detectChanges();
+    http.expectOne('/api/payments/status').flush(status);
     http.expectOne('/api/pricing/currencies').flush(CURRENCIES);
     http.expectOne('/api/payments/gateways').flush([{ key: 'mock', display_name: 'Test', currencies: ['INR', 'USD'] }]);
     http.expectOne('/api/plans?currency=INR').flush(plans);
@@ -140,6 +143,114 @@ describe('PricingComponent (database-driven)', () => {
     expect(nav).not.toHaveBeenCalled();
     expect(cmp.message()).toContain('signature');
     expect(cmp.messageKind()).toBe('error');
+  });
+});
+
+describe('PricingComponent (admin payment switch)', () => {
+  let http: HttpTestingController;
+  let launcher: jasmine.SpyObj<CheckoutLauncherService>;
+
+  beforeEach(() => {
+    launcher = jasmine.createSpyObj('CheckoutLauncherService', ['open']);
+    TestBed.configureTestingModule({
+      imports: [PricingComponent],
+      providers: [
+        provideRouter([]),
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        { provide: CheckoutLauncherService, useValue: launcher },
+        { provide: AuthService, useValue: { isAuthenticated: true, currentUser: { email: 'a@b.c' } } },
+      ],
+    });
+    http = TestBed.inject(HttpTestingController);
+  });
+
+  afterEach(() => http.verify());
+
+  function render(status: object, gateways: object[]) {
+    try { localStorage.setItem('oi_currency', 'INR'); } catch { /* ignore */ }
+    const fixture = TestBed.createComponent(PricingComponent);
+    fixture.detectChanges();
+    http.expectOne('/api/payments/status').flush(status);
+    http.expectOne('/api/pricing/currencies').flush([
+      { code: 'INR', name: 'Indian Rupee', minor_digits: 2, display_enabled: true, payments_enabled: true,
+        payable_now: gateways.length > 0, gateways: gateways.map((g) => (g as { key: string }).key), sort_order: 10, live_prices: 1 },
+    ]);
+    http.expectOne('/api/payments/gateways').flush(gateways);
+    http.expectOne('/api/plans?currency=INR').flush([{ ...PLAN, payable: gateways.length > 0 }]);
+    fixture.detectChanges();
+    return fixture;
+  }
+
+  it('shows a clear "temporarily unavailable" state and never starts checkout when payments are off', () => {
+    const fixture = render(
+      { payments_enabled: false, active_gateway: 'cashfree', active_gateway_name: '', available: false,
+        message: 'Online payments are temporarily unavailable. Please try again later.' },
+      [],
+    );
+    const el: HTMLElement = fixture.nativeElement;
+    expect(el.querySelector('.payments-off')?.textContent).toContain('temporarily unavailable');
+    const btn = el.querySelector('.plan .cta') as HTMLButtonElement;
+    expect(btn.disabled).toBeTrue();
+    expect(btn.textContent).toContain('Payments temporarily unavailable');
+    fixture.componentInstance.choose(PLAN);
+    expect(fixture.componentInstance.selected()).toBeNull();
+    expect(launcher.open).not.toHaveBeenCalled();
+  });
+
+  it('checks out through the gateway the admin selected (Razorpay) without asking for a phone', async () => {
+    const fixture = render(
+      { payments_enabled: true, active_gateway: 'razorpay', active_gateway_name: 'Razorpay', available: true, message: '' },
+      [{ key: 'razorpay', display_name: 'Razorpay', currencies: ['INR'] }],
+    );
+    const cmp = fixture.componentInstance;
+    expect((fixture.nativeElement as HTMLElement).textContent).toContain('payment partner, Razorpay');
+    launcher.open.and.resolveTo({ kind: 'dismissed' });
+    cmp.choose(PLAN);
+    expect(cmp.needsPhone()).toBeFalse();
+    const done = cmp.pay();
+    const co = http.expectOne('/api/payments/checkout');
+    expect(co.request.body.gateway).toBe('razorpay');
+    co.flush({ payment_id: 1, gateway: 'razorpay', order_id: 'o1', amount_minor: 90000, currency: 'INR', checkout: {} });
+    await done;
+    expect(launcher.open).toHaveBeenCalled();
+  });
+
+  it('offers both gateways when the admin turned both on, default pre-selected', () => {
+    const fixture = render(
+      { payments_enabled: true, active_gateway: 'razorpay', active_gateway_name: 'Razorpay',
+        gateway_names: ['Razorpay', 'Cashfree'], available: true, message: '' },
+      [
+        { key: 'razorpay', display_name: 'Razorpay', currencies: ['INR'] },
+        { key: 'cashfree', display_name: 'Cashfree', currencies: ['INR'] },
+      ],
+    );
+    const cmp = fixture.componentInstance;
+    cmp.choose(PLAN);
+    fixture.detectChanges();
+    const el: HTMLElement = fixture.nativeElement;
+    expect([...el.querySelectorAll('.gw-opt')].map((x) => x.textContent?.trim())).toEqual(['Razorpay', 'Cashfree']);
+    expect(cmp.gateway).toBe('razorpay');
+    expect(el.textContent).toContain('payment partners, Razorpay and Cashfree');
+    cmp.onGatewayChange('cashfree');
+    expect(cmp.needsPhone()).toBeTrue();
+  });
+
+  it('flips to the unavailable state when checkout returns 503 (switched off mid-session)', async () => {
+    const fixture = render(
+      { payments_enabled: true, active_gateway: 'cashfree', active_gateway_name: 'Cashfree', available: true, message: '' },
+      [{ key: 'mock', display_name: 'Test', currencies: ['INR'] }],
+    );
+    const cmp = fixture.componentInstance;
+    cmp.choose(PLAN);
+    const done = cmp.pay();
+    http.expectOne('/api/payments/checkout').flush(
+      { detail: 'Online payments are temporarily unavailable. Please try again later.' },
+      { status: 503, statusText: 'Service Unavailable' },
+    );
+    await done;
+    expect(cmp.paymentsOff()).toBeTrue();
+    expect(launcher.open).not.toHaveBeenCalled();
   });
 });
 

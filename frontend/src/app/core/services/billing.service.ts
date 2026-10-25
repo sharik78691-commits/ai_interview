@@ -8,6 +8,7 @@ import {
   Gateway,
   GatewayKey,
   MyBilling,
+  PaymentStatusInfo,
   Plan,
   Subscription,
   Usage,
@@ -23,11 +24,12 @@ import {
  * payment with the gateway itself.
  */
 /**
- * Gateways the site offers at checkout. The backend still supports Razorpay;
- * only Cashfree is shown for now (single gateway during merchant approval).
- * Add 'razorpay' back here to offer it again. 'mock' only exists in dev.
+ * Gateway keys this app knows how to open. Which one is offered is decided by
+ * the admin on the server (Admin → Billing & pricing): `/api/payments/gateways`
+ * returns only the active gateway, or nothing while payments are switched off.
+ * 'mock' only exists in dev.
  */
-export const CHECKOUT_GATEWAYS: readonly GatewayKey[] = ['cashfree', 'mock'];
+export const CHECKOUT_GATEWAYS: readonly GatewayKey[] = ['cashfree', 'razorpay', 'mock'];
 
 @Injectable({ providedIn: 'root' })
 export class BillingService {
@@ -56,6 +58,11 @@ export class BillingService {
     return this.http
       .get<Gateway[]>(`${this.base}/api/payments/gateways`)
       .pipe(map((gws) => gws.filter((g) => CHECKOUT_GATEWAYS.includes(g.key))));
+  }
+
+  /** Whether online checkout is open right now and through which gateway. */
+  paymentStatus(): Observable<PaymentStatusInfo> {
+    return this.http.get<PaymentStatusInfo>(`${this.base}/api/payments/status`);
   }
 
   myBilling(): Observable<MyBilling> {

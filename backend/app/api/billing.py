@@ -3,6 +3,7 @@
 GET  /api/plans?currency=INR|USD         public, database-driven pricing
 GET  /api/pricing/currencies             currencies shown on the pricing page
 GET  /api/payments/gateways              payment methods available right now
+GET  /api/payments/status                online payments on/off + active gateway
 GET  /api/billing/me                     the caller's subscription + history + credits
 GET  /api/billing/me/usage               the caller's screenshot credits only
 POST /api/billing/trial                  start the one-time free trial (if offered)
@@ -34,7 +35,7 @@ from app.providers.payments.base import (
     WebhookSignatureError,
 )
 from app.providers.payments.mock import MockGateway
-from app.providers.payments.registry import available_gateways, get_gateway
+from app.providers.payments.registry import get_gateway
 from app.schemas.billing import (
     CheckoutRequest,
     CheckoutResponse,
@@ -42,6 +43,7 @@ from app.schemas.billing import (
     GatewayOut,
     MockSimulateRequest,
     MyBilling,
+    PaymentStatusOut,
     PlanPublic,
     SubscriptionOut,
     TrialRequest,
@@ -50,6 +52,7 @@ from app.schemas.billing import (
     VerifyResponse,
 )
 from app.services import payment_service, pricing_service as pricing, subscription_service as subs
+from app.services import payment_settings_service as payment_settings
 from app.services import screenshot_credit_service as credits
 from app.services import free_trial_service as free_trial
 from app.services.billing_views import payment_out, plan_public, subscription_out, usage_out
@@ -72,9 +75,10 @@ def _gateway_http_error(exc: Exception) -> HTTPException:
 
 
 def _payable_now(db: Session, code: str) -> tuple[bool, list[str]]:
-    """Currency payments switched on AND accepted by a configured gateway."""
+    """Currency payments switched on AND accepted by a gateway checkout may use now
+    (site-wide payments on, admin's active gateway configured)."""
     cur = pricing.get_currency(db, code)
-    gws = [g["key"] for g in available_gateways() if code in g["currencies"]]
+    gws = [g["key"] for g in payment_settings.checkout_gateways(db) if code in g["currencies"]]
     return bool(cur and cur.payments_enabled and gws), gws
 
 
@@ -116,8 +120,15 @@ def public_currencies(db: Session = Depends(get_db)) -> list[CurrencyOut]:
 
 
 @router.get("/payments/gateways", response_model=list[GatewayOut])
-def gateways() -> list[GatewayOut]:
-    return [GatewayOut(**g) for g in available_gateways()]
+def gateways(db: Session = Depends(get_db)) -> list[GatewayOut]:
+    """Only the gateways a new checkout may use (the admin's active one; mock in dev)."""
+    return [GatewayOut(**g) for g in payment_settings.checkout_gateways(db)]
+
+
+@router.get("/payments/status", response_model=PaymentStatusOut)
+def payments_status(db: Session = Depends(get_db)) -> PaymentStatusOut:
+    """Whether online checkout is possible right now (no secrets)."""
+    return PaymentStatusOut(**payment_settings.status(db))
 
 
 # ------------------------------------------------------------------ user
@@ -190,6 +201,8 @@ async def checkout(
         )
     except payment_service.DuplicateCheckout as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    except payment_service.PaymentsUnavailable as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
     except (subs.SubscriptionError, payment_service.PaymentError) as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
     except PaymentGatewayError as exc:

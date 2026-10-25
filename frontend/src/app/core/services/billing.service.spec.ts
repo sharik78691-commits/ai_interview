@@ -12,16 +12,26 @@ describe('BillingService gateways', () => {
     }),
   );
 
-  // Checkout offers only Cashfree for now, even though the backend still has Razorpay.
-  it('hides Razorpay at checkout and keeps Cashfree', () => {
+  // The admin picks the gateway on the server; the client shows what it returns
+  // (known keys only) instead of hard-coding one gateway.
+  it('shows whichever known gateway the server offers, Razorpay included', () => {
     let keys: string[] = [];
     TestBed.inject(BillingService).gateways().subscribe((g) => (keys = g.map((x) => x.key)));
     TestBed.inject(HttpTestingController)
       .expectOne('/api/payments/gateways')
       .flush([
         { key: 'razorpay', display_name: 'Razorpay', currencies: ['INR'] },
-        { key: 'cashfree', display_name: 'Cashfree', currencies: ['INR'] },
+        { key: 'paypal', display_name: 'Unknown', currencies: ['USD'] },
       ] as unknown as Gateway[]);
-    expect(keys).toEqual(['cashfree']);
+    expect(keys).toEqual(['razorpay']);
+  });
+
+  it('reads the site-wide payment status', () => {
+    let available: boolean | undefined;
+    TestBed.inject(BillingService).paymentStatus().subscribe((s) => (available = s.available));
+    TestBed.inject(HttpTestingController)
+      .expectOne('/api/payments/status')
+      .flush({ payments_enabled: false, active_gateway: 'cashfree', active_gateway_name: '', available: false, message: 'x' });
+    expect(available).toBe(false);
   });
 });

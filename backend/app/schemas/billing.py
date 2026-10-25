@@ -256,6 +256,44 @@ class GatewayOut(BaseModel):
     currencies: list[str] = Field(default_factory=list)
 
 
+class PaymentStatusOut(BaseModel):
+    """Public: can a new checkout start right now, and through which gateway."""
+
+    payments_enabled: bool
+    active_gateway: str
+    active_gateway_name: str = ""
+    gateway_names: list[str] = Field(default_factory=list)
+    available: bool
+    message: str = ""
+
+
+class AdminGatewayOption(BaseModel):
+    key: str
+    display_name: str
+    enabled: bool
+    is_default: bool
+    configured: bool
+    currencies: list[str] = Field(default_factory=list)
+
+
+class PaymentSettingsOut(BaseModel):
+    payments_enabled: bool
+    active_gateway: str
+    checkout_available: bool
+    updated_at: Optional[datetime] = None
+    updated_by_user_id: Optional[int] = None
+    gateways: list[AdminGatewayOption]
+
+
+class PaymentSettingsUpdate(BaseModel):
+    payments_enabled: Optional[bool] = None
+    #: The default gateway (pre-selected at checkout); also switches it on.
+    active_gateway: Optional[Literal["cashfree", "razorpay"]] = None
+    #: Turn individual gateways on/off, e.g. {"razorpay": true}.
+    gateways_enabled: Optional[dict[Literal["cashfree", "razorpay"], bool]] = None
+    reason: str = Field(default="", max_length=500)
+
+
 # --------------------------------------------------------------- checkout
 
 

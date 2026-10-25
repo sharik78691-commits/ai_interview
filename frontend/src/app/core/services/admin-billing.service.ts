@@ -3,6 +3,7 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { API_BASE_URL } from '../api/api-config';
 import {
+  AdminPaymentSettings,
   AdminPlan,
   AdminSubscriptionRow,
   AdminUserBilling,
@@ -11,6 +12,7 @@ import {
   Currency,
   Paged,
   PaymentRecord,
+  PaymentSettingsUpdate,
   PlanInput,
   PlanPrice,
   PriceInput,
@@ -136,6 +138,15 @@ export class AdminBillingService {
     body: { display_enabled?: boolean; payments_enabled?: boolean; reason?: string },
   ): Observable<Currency[]> {
     return this.http.patch<Currency[]>(`${this.base}/api/admin/currencies/${encodeURIComponent(code)}`, body);
+  }
+
+  /** Site-wide online-payments switch and the active gateway (admin only). */
+  paymentSettings(): Observable<AdminPaymentSettings> {
+    return this.http.get<AdminPaymentSettings>(`${this.base}/api/admin/payment-settings`);
+  }
+
+  updatePaymentSettings(body: PaymentSettingsUpdate): Observable<AdminPaymentSettings> {
+    return this.http.patch<AdminPaymentSettings>(`${this.base}/api/admin/payment-settings`, body);
   }
 
   subscriptions(filters: SubscriptionFilters): Observable<Paged<AdminSubscriptionRow>> {

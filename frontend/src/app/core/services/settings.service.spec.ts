@@ -100,3 +100,19 @@ describe('SettingsService background color', () => {
     expect(document.documentElement.dataset['bg']).toBe('sunshine');
   });
 });
+
+describe('SettingsService.applyToDocument (prerendering)', () => {
+  beforeEach(() => localStorage.removeItem('aia_settings'));
+  afterEach(() => {
+    localStorage.removeItem('aia_settings');
+    document.documentElement.removeAttribute('data-theme');
+    document.documentElement.removeAttribute('data-bg');
+  });
+
+  it('writes the default theme and background onto a given document', () => {
+    const serverDoc = document.implementation.createHTMLDocument('prerender');
+    new SettingsService().applyToDocument(serverDoc);
+    expect(serverDoc.documentElement.getAttribute('data-theme')).toBe('light');
+    expect(serverDoc.documentElement.getAttribute('data-bg')).toBe('sunshine');
+  });
+});

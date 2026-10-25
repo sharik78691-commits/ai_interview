@@ -40,6 +40,8 @@
                   "with": "src/environments/environment.prod.ts"
                 }
               ],
+              "server": "src/main.server.ts",
+              "outputMode": "static",
               "budgets": [
                 {
                   "type": "initial",

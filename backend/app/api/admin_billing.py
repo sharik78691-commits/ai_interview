@@ -8,6 +8,8 @@ GET    /api/admin/plans/{id}/prices             full price history of a plan
 PUT    /api/admin/plans/{id}/prices             set the price in one currency (versioned)
 GET    /api/admin/currencies                    currencies + whether payable right now
 PATCH  /api/admin/currencies/{code}             show/hide, enable/disable payments
+GET    /api/admin/payment-settings              online payments on/off + active gateway
+PATCH  /api/admin/payment-settings              payments on/off, Cashfree/Razorpay on/off, default gateway
 Subscriptions
 GET    /api/admin/subscriptions                 filter/sort/paginate (user id/email/sub id/plan,
                                                 status, source, gateway, currency, payment status,
@@ -58,7 +60,6 @@ from app.models.billing import (
 )
 from app.models.user import User
 from app.providers.payments.base import PaymentGatewayError
-from app.providers.payments.registry import available_gateways
 from app.schemas.billing import (
     AdminPaymentsPage,
     AdminSubscriptionRow,
@@ -74,6 +75,8 @@ from app.schemas.billing import (
     ExtendRequest,
     GrantRequest,
     PaymentOut,
+    PaymentSettingsOut,
+    PaymentSettingsUpdate,
     PlanAdmin,
     PlanCreate,
     PlanUpdate,
@@ -84,6 +87,7 @@ from app.schemas.billing import (
     VerifyResponse,
 )
 from app.services import payment_service, pricing_service as pricing, subscription_service as subs
+from app.services import payment_settings_service as payment_settings
 from app.services import screenshot_credit_service as credits
 from app.services.billing_views import (
     audit_out,
@@ -271,7 +275,7 @@ def set_plan_price(
 
 
 def _currencies_out(db: Session) -> list[CurrencyOut]:
-    gateways = available_gateways()
+    gateways = payment_settings.checkout_gateways(db)
     live = pricing.count_prices(db)
     out = []
     for c in pricing.list_currencies(db):
@@ -317,6 +321,45 @@ def update_currency(
     db.commit()
     logger.info("Admin %s updated currency %s: %s", admin.id, cur.code, after)
     return _currencies_out(db)
+
+
+# ------------------------------------------------------- payment settings
+
+
+@router.get("/payment-settings", response_model=PaymentSettingsOut)
+def get_payment_settings(
+    request: Request, _admin: User = Depends(require_admin), db: Session = Depends(get_db)
+) -> PaymentSettingsOut:
+    return PaymentSettingsOut(**payment_settings.admin_view(db))
+
+
+@router.patch("/payment-settings", response_model=PaymentSettingsOut)
+def update_payment_settings(
+    body: PaymentSettingsUpdate,
+    request: Request,
+    admin: User = Depends(require_admin),
+    _csrf: None = Depends(require_csrf),
+    db: Session = Depends(get_db),
+) -> PaymentSettingsOut:
+    """Turn online payments on/off site-wide, switch Cashfree / Razorpay on or
+    off (both may be on — the customer then chooses) and pick the default.
+
+    Only affects NEW checkouts; existing orders still verify and receive
+    webhooks through the gateway that created them.
+    """
+    try:
+        out = payment_settings.update(
+            db, admin, payments_enabled=body.payments_enabled,
+            active_gateway=body.active_gateway, gateways_enabled=body.gateways_enabled,
+            reason=body.reason,
+        )
+    except payment_settings.GatewayNotSelectable as exc:
+        db.rollback()
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+    logger.info("Admin %s updated payment settings: enabled=%s default=%s on=%s",
+                admin.id, out["payments_enabled"], out["active_gateway"],
+                [g["key"] for g in out["gateways"] if g["enabled"]])
+    return PaymentSettingsOut(**out)
 
 
 # ---------------------------------------------------------- subscriptions

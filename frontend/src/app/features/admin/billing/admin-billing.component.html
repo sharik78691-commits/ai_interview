@@ -8,10 +8,18 @@
       <button type="button" [class.on]="view === 'plans'" (click)="setView('plans')">Plans &amp; pricing</button>
       <button type="button" [class.on]="view === 'audit'" (click)="setView('audit')">Audit log</button>
     </nav>
-    <form class="ab-lookup" (ngSubmit)="lookupUser()">
-      <input name="lookup" [(ngModel)]="userLookup" placeholder="User ID or email" aria-label="Find user by ID or email" />
-      <button type="submit" class="btn-ghost btn-sm">Find user</button>
-    </form>
+    <div class="ab-top-side">
+      @if (paySettings(); as ps) {
+        <button type="button" class="pay-chip" [attr.data-state]="payState(ps)"
+                (click)="setView('plans')" title="Online payments &amp; gateway settings">
+          <span class="pay-dot" aria-hidden="true"></span>{{ payStateLabel(ps) }}
+        </button>
+      }
+      <form class="ab-lookup" (ngSubmit)="lookupUser()">
+        <input name="lookup" [(ngModel)]="userLookup" placeholder="User ID or email" aria-label="Find user by ID or email" />
+        <button type="submit" class="btn-ghost btn-sm">Find user</button>
+      </form>
+    </div>
   </div>
 
   @if (error()) { <div class="banner error" role="alert">{{ error() }}</div> }
@@ -394,6 +402,81 @@
 
   <!-- ========================================================= plans -->
   @if (view === 'plans') {
+    @if (paySettings(); as ps) {
+      <section class="card pay-settings" aria-labelledby="pay-settings-title">
+        <div class="ps-head">
+          <div>
+            <h4 id="pay-settings-title">Online payments &amp; gateway</h4>
+            <p class="muted small">Applies to new checkouts immediately. Orders already started keep verifying through their own gateway. Gateway keys stay in the backend environment — never here.</p>
+          </div>
+          <span class="pay-chip static" [attr.data-state]="payState(ps)">
+            <span class="pay-dot" aria-hidden="true"></span>{{ payStateLabel(ps) }}
+          </span>
+        </div>
+
+        <div class="ps-grid">
+          <div class="ps-block">
+            <span class="ps-label">Site-wide online payments</span>
+            <div class="ps-switch-row">
+              <button type="button" role="switch" class="switch" [class.on]="ps.payments_enabled" [attr.aria-checked]="ps.payments_enabled"
+                      aria-label="Online payments for the whole site" [disabled]="busy()" (click)="togglePayments(ps)">
+                <span class="switch-knob" aria-hidden="true"></span>
+              </button>
+              <strong>{{ ps.payments_enabled ? 'On' : 'Off' }}</strong>
+            </div>
+            <p class="muted small">When off, the pricing page shows “Payments are temporarily unavailable” and no checkout can start.</p>
+          </div>
+
+          <div class="ps-block">
+            <span class="ps-label">Payment gateways</span>
+            <p class="muted small">Turn on one or both. With both on, customers choose at checkout; the default is pre-selected.</p>
+            <div class="gw-options">
+              @for (g of ps.gateways; track g.key) {
+                <div class="gw-card" [class.on]="g.enabled" [class.is-default]="g.is_default">
+                  <div class="gw-top">
+                    <span class="gw-text">
+                      <strong>{{ g.display_name }}</strong>
+                      <span class="small" [class.muted]="g.configured" [class.warn]="!g.configured">
+                        {{ g.configured ? 'Keys configured · ' + (g.currencies.join(', ') || '—') : 'Keys not set on the server' }}
+                      </span>
+                    </span>
+                    <button type="button" role="switch" class="switch" [class.on]="g.enabled" [attr.aria-checked]="g.enabled"
+                            [attr.aria-label]="g.display_name + ' for new checkouts'" [disabled]="busy()" (click)="toggleGateway(ps, g)">
+                      <span class="switch-knob" aria-hidden="true"></span>
+                    </button>
+                  </div>
+                  <div class="gw-bottom">
+                    <span class="small">{{ g.enabled ? (g.configured ? 'On · offered at checkout' : 'On · waiting for keys') : 'Off' }}</span>
+                    @if (g.is_default) {
+                      <span class="tag">Default</span>
+                    } @else {
+                      <button type="button" class="link small" [disabled]="busy()" (click)="setDefaultGateway(ps, g)">Make default</button>
+                    }
+                  </div>
+                </div>
+              }
+            </div>
+          </div>
+        </div>
+
+        @if (ps.payments_enabled && unconfiguredOn(ps).length) {
+          <div class="banner" role="status">
+            @for (g of unconfiguredOn(ps); track g.key) { {{ g.display_name }}{{ $last ? '' : ', ' }} }
+            {{ unconfiguredOn(ps).length > 1 ? 'are' : 'is' }} switched on but the keys are not set on the server, so customers are not offered it yet.
+            Add the keys to the backend environment (see <span class="mono">.env.example</span>) — it appears at checkout automatically.
+            @if (!ps.checkout_available) { <strong>Right now no gateway can take payments.</strong> }
+          </div>
+        }
+
+        <div class="ps-foot">
+          <input class="grow" [(ngModel)]="paySettingsReason" maxlength="500" placeholder="Reason for the change (optional, audited)" aria-label="Payment settings change reason" />
+          @if (ps.updated_at) {
+            <span class="muted small">Last changed {{ ps.updated_at | date: 'medium' }}{{ ps.updated_by_user_id ? ' by admin #' + ps.updated_by_user_id : '' }}</span>
+          }
+        </div>
+      </section>
+    }
+
     <div class="card">
       <h4>Currencies</h4>
       <p class="muted small">"Shown" puts the currency in the pricing-page selector. "Payments" allows checkout in it — it only works when a configured gateway accepts that currency (set <span class="mono">RAZORPAY_CURRENCIES</span> / <span class="mono">CASHFREE_CURRENCIES</span> on the server after enabling international payments at the gateway).</p>
@@ -417,9 +500,11 @@
           </tbody>
         </table>
       </div>
-      <input class="grow" [(ngModel)]="currencyReason" maxlength="500" placeholder="Reason for currency changes (optional, audited)" aria-label="Currency change reason" />
+      <input class="grow reason-input" [(ngModel)]="currencyReason" maxlength="500" placeholder="Reason for currency changes (optional, audited)" aria-label="Currency change reason" />
     </div>
 
+    <div class="card ab-section">
+    <h4>Plans</h4>
     <div class="row">
       <p class="muted small grow">Changes apply to new checkouts immediately. Past payments keep the amount and currency actually paid. Prices are per currency and never converted automatically. Plans can be deactivated but never deleted.</p>
       <button type="button" class="btn-primary btn-sm" (click)="newPlan()">+ New plan</button>
@@ -462,6 +547,7 @@
           }
         </tbody>
       </table>
+    </div>
     </div>
 
     @if (priceForm; as pf) {

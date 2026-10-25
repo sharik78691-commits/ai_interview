@@ -35,7 +35,12 @@
   } @else if (plans().length === 0) {
     <div class="banner info">No plans are available right now. Please check back soon.</div>
   } @else {
-    @if (noneAvailable()) {
+    @if (paymentsOff()) {
+      <div class="banner info center payments-off" role="status">
+        <strong>Payments are temporarily unavailable.</strong>
+        Please check back soon — prices below are for reference and nothing can be charged right now.
+      </div>
+    } @else if (noneAvailable()) {
       <div class="banner info center">
         Prices in {{ currency() }} are not available yet.
         @if (currency() !== 'INR') {
@@ -119,7 +124,7 @@
         type="button"
         class="cta"
         [class.primary]="p.is_highlighted"
-        [disabled]="!p.available || !p.payable"
+        [disabled]="paymentsOff() || !p.available || !p.payable"
         (click)="choose(p)"
       >
         {{ ctaLabel(p) }}
@@ -142,7 +147,12 @@
         keeps its own time and screenshots. The price is fixed by our server.
       </p>
 
-      @if (currencyGateways().length === 0) {
+      @if (paymentsOff()) {
+        <div class="banner info payments-off" role="status">{{ unavailableText() }}</div>
+        <div class="checkout-actions">
+          <button type="button" class="btn-ghost" (click)="cancel()">Close</button>
+        </div>
+      } @else if (currencyGateways().length === 0) {
         <div class="banner info">
           Online payments in {{ plan.currency }} are not enabled yet. Please contact support to purchase.
         </div>
@@ -198,7 +208,7 @@
     <details class="card faq"><summary>What counts as a screenshot analysis?</summary><p class="muted">Each screenshot you analyze uses one from your plan's allowance. If an analysis fails on our side, it is not counted.</p></details>
     <details class="card faq"><summary>What if I buy again before my plan ends?</summary><p class="muted">The new purchase starts immediately with its own time and screenshot allowance. Screenshots are used from the plan that ends soonest first, and nothing you already have is reset.</p></details>
     <details class="card faq"><summary>Which currency am I charged in?</summary><p class="muted">The one shown at checkout. Prices in each currency are set by us directly — they are not converted live — and you are never charged in a different currency than the one you confirmed.</p></details>
-    <details class="card faq"><summary>How do I pay?</summary><p class="muted">Through our payment partner, Cashfree. Available methods such as UPI, cards and net banking are offered on the gateway's own checkout page.</p></details>
+    <details class="card faq"><summary>How do I pay?</summary><p class="muted">Through our {{ partnerLabel() }}. Available methods such as UPI, cards and net banking are offered on the gateway's own checkout page.</p></details>
     <details class="card faq"><summary>Can I get a refund?</summary><p class="muted">Refunds follow our <a routerLink="/refund-policy">Refund &amp; Cancellation Policy</a>. Please read it before purchasing.</p></details>
     <details class="card faq"><summary>Do prices include taxes?</summary><p class="muted">The amount shown at checkout is the amount you pay. {{ gstNote }}</p></details>
   </section>

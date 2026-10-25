@@ -45,6 +45,7 @@ from app.providers.payments.base import (
     WebhookEvent,
 )
 from app.providers.payments.registry import gateway_supports, get_gateway
+from app.services import payment_settings_service as payment_settings
 from app.services import pricing_service as pricing
 from app.services import subscription_service as subs
 
@@ -57,6 +58,10 @@ class PaymentError(ValueError):
 
 class DuplicateCheckout(PaymentError):
     """The same idempotency key was already used for a checkout."""
+
+
+class PaymentsUnavailable(PaymentError):
+    """An admin switched online payments off for the whole site."""
 
 
 @dataclass(frozen=True)
@@ -107,6 +112,12 @@ def _quote_for_checkout(
     db: Session, user_id: int, plan_id: int, currency: str, gateway: str, idempotency_key: str | None
 ) -> tuple[SubscriptionPlan, pricing.Quote]:
     """Every check that must pass BEFORE an order is created at the gateway."""
+    try:
+        payment_settings.assert_checkout_allowed(db, gateway)
+    except payment_settings.PaymentsDisabled as exc:
+        raise PaymentsUnavailable(str(exc)) from exc
+    except payment_settings.GatewayNotSelectable as exc:
+        raise PaymentError(str(exc)) from exc
     if idempotency_key and db.scalar(select(Payment.id).where(
         Payment.user_id == user_id, Payment.idempotency_key == idempotency_key
     )):

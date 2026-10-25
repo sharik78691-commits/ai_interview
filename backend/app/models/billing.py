@@ -5,6 +5,7 @@ Tables
 ``subscription_plans``       admin-managed catalogue (prices are the CURRENT offer)
 ``plan_prices``              per-currency price of each plan (INR, USD, ...)
 ``billing_currencies``       which currencies are shown / payable
+``payment_settings``         site-wide on/off switch + the active checkout gateway
 ``payments``                 one row per checkout attempt; amounts are SNAPSHOTS
 ``user_subscriptions``       access periods per user (paid, manual grant, or trial)
 ``screenshot_usage``         one row per screenshot-analysis request (credits)
@@ -94,6 +95,8 @@ class UsageStatus:
 
 
 GATEWAYS = ("razorpay", "cashfree", "mock")
+#: Gateways an admin can make the site's active checkout gateway (mock is dev-only).
+SELECTABLE_GATEWAYS = ("cashfree", "razorpay")
 
 
 class SubscriptionPlan(Base):
@@ -414,6 +417,32 @@ class SubscriptionAuditLog(Base):
     )
 
 
+class PaymentSettings(Base):
+    """Site-wide payment switches (a single row, ``id = 1``, created lazily).
+
+    ``payments_enabled`` turns online checkout on/off for the whole site;
+    ``cashfree_enabled`` / ``razorpay_enabled`` choose which gateways new
+    checkouts may use (both at once is fine — the customer picks one) and
+    ``active_gateway`` is the DEFAULT, pre-selected at checkout. Gateway keys
+    and secrets stay in env vars — never here. Orders already created keep
+    verifying / receiving webhooks through their own gateway either way.
+    """
+
+    __tablename__ = "payment_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    payments_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    active_gateway: Mapped[str] = mapped_column(String(20), default="cashfree", nullable=False)
+    cashfree_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    razorpay_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    updated_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+
 class SchemaMigration(Base):
     """Marker for one-time data migrations (so they never run twice)."""
 
@@ -456,9 +485,11 @@ __all__ = [
     "BillingType",
     "GATEWAYS",
     "Payment",
+    "PaymentSettings",
     "PaymentStatus",
     "PaymentWebhookEvent",
     "PlanPrice",
+    "SELECTABLE_GATEWAYS",
     "SchemaMigration",
     "ScreenshotUsage",
     "SubscriptionAuditLog",

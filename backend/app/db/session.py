@@ -322,6 +322,10 @@ def _ensure_billing_columns() -> None:
         col("refunded_at", ts),
         col("refund_reference", ("VARCHAR(100) DEFAULT '' NOT NULL",)),
     ])
+    _add_missing_columns("payment_settings", [
+        col("cashfree_enabled", true),
+        col("razorpay_enabled", false),
+    ])
     _add_missing_columns("user_subscriptions", [
         col("screenshot_allowance", int0),
         col("screenshots_used", int0),
