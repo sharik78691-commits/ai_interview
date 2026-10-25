@@ -47,3 +47,72 @@ describe('SettingsService theme default', () => {
     });
   });
 });
+
+describe('SettingsService background color', () => {
+  beforeEach(() => localStorage.removeItem('aia_settings'));
+  afterEach(() => {
+    localStorage.removeItem('aia_settings');
+    document.documentElement.removeAttribute('data-theme');
+    document.documentElement.removeAttribute('data-bg');
+  });
+
+  it('uses the sunshine yellow background for new visitors', () => {
+    const svc = new SettingsService();
+    expect(svc.value.background).toBe('sunshine');
+    expect(document.documentElement.dataset['bg']).toBe('sunshine');
+  });
+
+  it('keeps an explicitly saved original-green background', () => {
+    localStorage.setItem('aia_settings', JSON.stringify({ background: 'default', bgVersion: 2 }));
+    const svc = new SettingsService();
+    expect(svc.value.background).toBe('default');
+    expect(document.documentElement.hasAttribute('data-bg')).toBeFalse();
+  });
+
+  it('moves a background saved before the yellow default to yellow once', () => {
+    localStorage.setItem('aia_settings', JSON.stringify({ background: 'calm' }));
+    const svc = new SettingsService();
+    expect(svc.value.background).toBe('sunshine');
+    expect(document.documentElement.dataset['bg']).toBe('sunshine');
+  });
+
+  it('applies and persists a picked background', () => {
+    const svc = new SettingsService();
+    svc.save({ background: 'blue' });
+    expect(document.documentElement.dataset['bg']).toBe('blue');
+    expect(new SettingsService().value.background).toBe('blue');
+  });
+
+  it('falls back to sunshine yellow for an unknown stored value', () => {
+    localStorage.setItem('aia_settings', JSON.stringify({ background: 'neon', bgVersion: 2 }));
+    const svc = new SettingsService();
+    expect(svc.value.background).toBe('sunshine');
+    expect(document.documentElement.dataset['bg']).toBe('sunshine');
+  });
+
+  it('keeps the background when the theme is toggled, and reset clears it', () => {
+    const svc = new SettingsService();
+    svc.save({ background: 'purple' });
+    svc.toggleTheme();
+    expect(document.documentElement.dataset['bg']).toBe('purple');
+    svc.reset();
+    expect(svc.value.background).toBe('sunshine');
+    expect(document.documentElement.dataset['bg']).toBe('sunshine');
+  });
+});
+
+describe('SettingsService.applyToDocument (prerendering)', () => {
+  beforeEach(() => localStorage.removeItem('aia_settings'));
+  afterEach(() => {
+    localStorage.removeItem('aia_settings');
+    document.documentElement.removeAttribute('data-theme');
+    document.documentElement.removeAttribute('data-bg');
+  });
+
+  it('writes the default theme and background onto a given document', () => {
+    const serverDoc = document.implementation.createHTMLDocument('prerender');
+    new SettingsService().applyToDocument(serverDoc);
+    expect(serverDoc.documentElement.getAttribute('data-theme')).toBe('light');
+    expect(serverDoc.documentElement.getAttribute('data-bg')).toBe('sunshine');
+  });
+});

@@ -29,6 +29,20 @@
       <option value="dark">Dark</option>
       <option value="light">Light</option>
     </select>
+    <label class="lbl" id="bg-label">Background color</label>
+    <div class="swatches" role="radiogroup" aria-labelledby="bg-label">
+      @for (b of backgroundOptions; track b.key) {
+        <button type="button" class="swatch" role="radio"
+          [class.selected]="background === b.key"
+          [attr.aria-checked]="background === b.key"
+          [title]="b.label" [attr.aria-label]="b.label"
+          [style.background]="theme === 'light' ? b.swatch.light : b.swatch.dark"
+          (click)="previewBackground(b.key)">
+          <span class="swatch-dot" aria-hidden="true" [style.background]="b.key === 'white' && theme !== 'light' ? '#ffffff' : b.accent"></span>
+        </button>
+      }
+    </div>
+    <p class="muted small" style="margin-top:-4px">{{ backgroundLabel() }} — click Save to keep it.</p>
     <label class="lbl" for="mic">Microphone</label>
     <select id="mic" [(ngModel)]="micId">
       <option value="">Default microphone</option>

@@ -84,6 +84,10 @@ export interface AppSettings {
   micId: string;
   /** AI Guidance text size in px (user-adjustable, persisted). */
   guidanceFontSize: number;
+  /** Site background color preset (see BACKGROUND_OPTIONS). */
+  background: string;
+  /** Background-default version the saved `background` was chosen under. */
+  bgVersion?: number;
 }
 
 export const RESPONSE_LENGTH_LABELS: Record<ResponseLength, string> = {

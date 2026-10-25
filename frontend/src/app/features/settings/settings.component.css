@@ -3,3 +3,14 @@
 .form { margin-top: 18px; }
 .row { display: flex; gap: 10px; align-items: center; margin-top: 20px; }
 .ok { color: var(--green); font-weight: 700; font-size: .9rem; }
+.swatches { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 10px; }
+.swatch {
+  width: 36px; height: 36px; border-radius: 50%; cursor: pointer;
+  border: 2px solid var(--border-strong); color: var(--accent);
+  font-weight: 800; font-size: .9rem; display: grid; place-items: center;
+  transition: transform .15s, border-color .15s;
+}
+.swatch:hover { transform: translateY(-1px); }
+.swatch.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+.swatch:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.swatch-dot { width: 14px; height: 14px; border-radius: 50%; border: 1px solid rgba(0,0,0,.15); }

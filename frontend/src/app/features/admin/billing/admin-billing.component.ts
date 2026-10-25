@@ -12,6 +12,8 @@ import {
   UsageFilters,
 } from '../../../core/services/admin-billing.service';
 import {
+  AdminGatewayOption,
+  AdminPaymentSettings,
   AdminPlan,
   AdminSubscriptionRow,
   AdminUserBilling,
@@ -21,7 +23,9 @@ import {
   Paged,
   PaymentRecord,
   PlanInput,
+  PaymentSettingsUpdate,
   PlanPrice,
+  SelectableGateway,
   Subscription,
   UsageRecord,
   billingTypeLabel,
@@ -118,6 +122,10 @@ export class AdminBillingComponent implements OnInit {
   readonly priceHistory = signal<{ plan: AdminPlan; rows: PlanPrice[] } | null>(null);
   currencyReason = '';
 
+  // --------------------------------------------- payments on/off + gateway
+  readonly paySettings = signal<AdminPaymentSettings | null>(null);
+  paySettingsReason = '';
+
   // ----------------------------------------------------- subscriptions
   subFilters: SubscriptionFilters = {
     q: '', plan_id: null, status: '', source: '', gateway: '', currency: '', payment_status: '',
@@ -158,6 +166,7 @@ export class AdminBillingComponent implements OnInit {
     this.loadPlans();
     this.loadCurrencies();
     this.loadOverview();
+    this.loadPaymentSettings();
   }
 
   setView(v: View): void {
@@ -171,6 +180,7 @@ export class AdminBillingComponent implements OnInit {
     if (v === 'plans') {
       this.loadPlans();
       this.loadCurrencies();
+      this.loadPaymentSettings();
     }
   }
 
@@ -185,6 +195,10 @@ export class AdminBillingComponent implements OnInit {
 
   loadCurrencies(): void {
     this.api.currencies().subscribe({ next: (c) => this.currencies.set(c), error: (e) => this.fail(e) });
+  }
+
+  loadPaymentSettings(): void {
+    this.api.paymentSettings().subscribe({ next: (p) => this.paySettings.set(p), error: (e) => this.fail(e) });
   }
 
   loadSubs(page = 1): void {
@@ -488,10 +502,83 @@ export class AdminBillingComponent implements OnInit {
     });
   }
 
+  // ---------------------------------------------- payments on/off + gateway
+  /** Short label for the status chip and the settings card. */
+  payStateLabel(ps: AdminPaymentSettings): string {
+    if (!ps.payments_enabled) return 'Payments off';
+    const on = this.enabledGateways(ps);
+    return on.length ? `Payments on · ${on.map((g) => g.display_name).join(' + ')}` : 'No gateway on';
+  }
+
+  /** on = checkout open through a configured gateway; warn = something is on without keys. */
+  payState(ps: AdminPaymentSettings): 'on' | 'warn' | 'off' {
+    if (!ps.payments_enabled) return 'off';
+    return ps.checkout_available && this.unconfiguredOn(ps).length === 0 ? 'on' : 'warn';
+  }
+
+  gatewayName(ps: AdminPaymentSettings, key: SelectableGateway): string {
+    return ps.gateways.find((g) => g.key === key)?.display_name ?? key;
+  }
+
+  enabledGateways(ps: AdminPaymentSettings): AdminGatewayOption[] {
+    return ps.gateways.filter((g) => g.enabled);
+  }
+
+  /** Gateways switched on whose keys are not set on the server (not offered at checkout yet). */
+  unconfiguredOn(ps: AdminPaymentSettings): AdminGatewayOption[] {
+    return ps.gateways.filter((g) => g.enabled && !g.configured);
+  }
+
+  togglePayments(ps: AdminPaymentSettings): void {
+    const next = !ps.payments_enabled;
+    if (!next && !confirm('Turn OFF online payments for the whole site? Customers will see "Payments are temporarily unavailable" and cannot start a checkout. Orders already paid still activate.')) return;
+    this.savePaymentSettings({ payments_enabled: next }, next ? 'Online payments are ON.' : 'Online payments are OFF for the whole site.');
+  }
+
+  /** Switch one gateway on/off. Both may be on — the customer then picks one at checkout. */
+  toggleGateway(ps: AdminPaymentSettings, g: AdminGatewayOption): void {
+    if (this.busy()) return;
+    const next = !g.enabled;
+    if (!next && this.enabledGateways(ps).length === 1) {
+      return this.warn('Keep at least one gateway on. To stop all payments, turn off site-wide online payments instead.');
+    }
+    if (!next && !confirm(`Turn OFF ${g.display_name} for new checkouts? Orders already started keep verifying through it.`)) return;
+    this.savePaymentSettings(
+      { gateways_enabled: { [g.key]: next } },
+      next
+        ? `${g.display_name} is ON${g.configured ? ' and offered at checkout' : ' — it is offered at checkout once its keys are set on the server'}.`
+        : `${g.display_name} is OFF for new checkouts.`,
+    );
+  }
+
+  /** The default gateway is pre-selected at checkout (switching it on if needed). */
+  setDefaultGateway(ps: AdminPaymentSettings, g: AdminGatewayOption): void {
+    if (g.is_default || this.busy()) return;
+    this.savePaymentSettings({ active_gateway: g.key }, `${g.display_name} is now the default gateway at checkout.`);
+  }
+
+  private savePaymentSettings(body: PaymentSettingsUpdate, ok: string): void {
+    this.busy.set(true);
+    this.error.set('');
+    this.api.updatePaymentSettings({ ...body, reason: this.paySettingsReason.trim() }).subscribe({
+      next: (p) => {
+        this.busy.set(false);
+        this.paySettings.set(p);
+        this.paySettingsReason = '';
+        this.info.set(ok);
+        this.loadCurrencies(); // "payable now" follows the switch
+      },
+      error: (e) => {
+        this.busy.set(false);
+        this.fail(e);
+      },
+    });
+  }
+
   // -------------------------------------------------------------- misc
   readonly auditActions = [
     'purchase', 'grant', 'extend', 'revoke', 'cancel', 'refund', 'credits_adjust', 'trial_start',
-    'plan_create', 'plan_update', 'price_set', 'currency_update', 'catalogue_migration',
+    'plan_create', 'plan_update', 'price_set', 'currency_update', 'payment_settings', 'catalogue_migration',
   ];
 
   label(action: string): string {

@@ -164,6 +164,47 @@ export interface Gateway {
   currencies: string[];
 }
 
+/** Gateways an admin can make the site's active checkout gateway. */
+export type SelectableGateway = 'cashfree' | 'razorpay';
+
+/** Public: whether a new checkout can start right now (admin switch). */
+export interface PaymentStatusInfo {
+  payments_enabled: boolean;
+  active_gateway: SelectableGateway;
+  active_gateway_name: string;
+  /** Every gateway offered at checkout right now, default first. */
+  gateway_names?: string[];
+  available: boolean;
+  message: string;
+}
+
+/** Admin: site-wide payment switch, per-gateway on/off and the default (keys stay in backend env). */
+export interface AdminPaymentSettings {
+  payments_enabled: boolean;
+  active_gateway: SelectableGateway;
+  checkout_available: boolean;
+  updated_at: string | null;
+  updated_by_user_id: number | null;
+  gateways: AdminGatewayOption[];
+}
+
+export interface AdminGatewayOption {
+  key: SelectableGateway;
+  display_name: string;
+  enabled: boolean;
+  /** Pre-selected at checkout. */
+  is_default: boolean;
+  configured: boolean;
+  currencies: string[];
+}
+
+export interface PaymentSettingsUpdate {
+  payments_enabled?: boolean;
+  active_gateway?: SelectableGateway;
+  gateways_enabled?: Partial<Record<SelectableGateway, boolean>>;
+  reason?: string;
+}
+
 export interface CheckoutResponse {
   payment_id: number;
   gateway: GatewayKey;

@@ -55,6 +55,118 @@
 [data-theme="light"] body {
   background: var(--bg) !important;
 }
+
+/* Background color presets. Applied when <html data-bg="…"> — picked in
+   Settings, persisted by SettingsService. No data-bg = the default green
+   palettes above. Each preset has a dark and a light variant; accent colors
+   stay on-brand. */
+:root[data-bg="white"]:not([data-theme="light"])  { --bg: #000000; --bg2: #0d0d0d; --panel: #161616; --panel2: #161616cc; --card: #161616; --border: #2e2e2e; --border-strong: #404040; --tint: #222222; }
+:root[data-bg="slate"]:not([data-theme="light"])  { --bg: #1e293b; --bg2: #243147; --panel: #2b3a52; --panel2: #2b3a52cc; --card: #2b3a52; --border: #3d4f6b; --border-strong: #55698a; --tint: #33445f; }
+:root[data-bg="blue"]:not([data-theme="light"])   { --bg: #0b2447; --bg2: #102c55; --panel: #143563; --panel2: #143563cc; --card: #143563; --border: #24497f; --border-strong: #345f9e; --tint: #1a3e72; }
+:root[data-bg="purple"]:not([data-theme="light"]) { --bg: #24124a; --bg2: #2c1758; --panel: #351d68; --panel2: #351d68cc; --card: #351d68; --border: #4b2f8a; --border-strong: #6242aa; --tint: #3e2378; }
+:root[data-bg="rose"]:not([data-theme="light"])   { --bg: #3d0f24; --bg2: #48142c; --panel: #551935; --panel2: #551935cc; --card: #551935; --border: #742a4d; --border-strong: #943d66; --tint: #611e3e; }
+:root[data-bg="cream"]:not([data-theme="light"])  { --bg: #33240f; --bg2: #3d2c13; --panel: #483418; --panel2: #483418cc; --card: #483418; --border: #654a25; --border-strong: #836135; --tint: #533c1c; }
+:root[data-bg="teal"]:not([data-theme="light"])   { --bg: #063c40; --bg2: #08474c; --panel: #0b5359; --panel2: #0b5359cc; --card: #0b5359; --border: #16707a; --border-strong: #228c97; --tint: #0d5f66; }
+:root[data-bg]:not([data-theme="light"]) .nav { background: color-mix(in srgb, var(--bg2) 88%, transparent) !important; }
+
+:root[data-theme="light"][data-bg="white"]  { --bg: #ffffff; --bg2: #f4f5f7; --border: #e2e8f0; --border-strong: #cbd5e1; --tint: #f1f5f9; }
+:root[data-theme="light"][data-bg="slate"]  { --bg: #dfe5ed; --bg2: #d3dbe5; --border: #bfc9d6; --border-strong: #a3b0c2; --tint: #cfd8e3; }
+:root[data-theme="light"][data-bg="blue"]   { --bg: #cfe3fb; --bg2: #bfd8f8; --border: #a6c7ef; --border-strong: #84b0e6; --tint: #c2dbf9; }
+:root[data-theme="light"][data-bg="purple"] { --bg: #e2d6fa; --bg2: #d6c6f6; --border: #c4adf0; --border-strong: #ab8de6; --tint: #d8c9f7; }
+:root[data-theme="light"][data-bg="rose"]   { --bg: #fad3e0; --bg2: #f6c1d3; --border: #eea8c0; --border-strong: #e488a8; --tint: #f8c8d8; }
+:root[data-theme="light"][data-bg="cream"]  { --bg: #f6e7c4; --bg2: #f0dcae; --border: #e5ca8f; --border-strong: #d8b570; --tint: #f3dfb5; }
+:root[data-theme="light"][data-bg="teal"]   { --bg: #c6ecec; --bg2: #b2e3e3; --border: #96d6d6; --border-strong: #72c5c5; --tint: #bae7e7; }
+
+/* "Sunshine yellow" preset: warm cream (dark: near-black) surfaces with a bright
+   yellow call-to-action. --accent-grad is the button fill; --accent stays a
+   darker amber so accent-colored text/icons remain readable. */
+:root[data-bg="sunshine"] { --accent-grad: #ffc61a; --on-accent: #1a1200; --green: #a16207; }
+:root[data-bg="sunshine"]:not([data-theme="light"]) { --bg: #14120a; --bg2: #1b180d; --panel: #211e11; --panel2: #211e11cc; --card: #211e11; --border: #35301a; --border-strong: #4d4524; --text: #fbf6e4; --muted: #c2b98f; --muted2: #968d68; --tint: #2e2810; --accent: #ffc61a; --accent2: #e0a800; --green: #ffc61a; }
+:root[data-bg="sunshine"][data-theme="light"] { --bg: #fffbea; --bg2: #fff4c9; --panel: #ffffff; --panel2: #ffffff; --card: #ffffff; --border: #f0e2a8; --border-strong: #e3cf7a; --text: #1a1a1a; --muted: #5c5640; --muted2: #8c8566; --tint: #fff0b3; --accent: #a16207; --accent2: #854d0e; }
+:root[data-bg="sunshine"][data-theme="light"] .nav { background: rgba(255,251,234,.92) !important; }
+/* Sunshine: per-page polish. Replaces the remaining hardcoded green/blue
+   accents in component styles (logo, badges, AI guidance, transcript, admin,
+   landing CTA) with the yellow/amber palette. --sun-* are local helpers. */
+:root[data-bg="sunshine"][data-theme="light"] { --sun-wash: rgba(255,198,26,.14); --sun-line: rgba(161,98,7,.32); --sun-ink: #854d0e; }
+:root[data-bg="sunshine"]:not([data-theme="light"]) { --sun-wash: rgba(255,198,26,.08); --sun-line: rgba(255,198,26,.32); --sun-ink: #ffd75e; }
+:root[data-bg="sunshine"] .lm-tile { fill: #ffc61a !important; }
+:root[data-bg="sunshine"] .lm-back { fill: #a16207 !important; }
+:root[data-bg="sunshine"] .lm-paper { fill: #fffbea !important; }
+:root[data-bg="sunshine"] .lm-check { stroke: #a16207 !important; }
+:root[data-bg="sunshine"] .lm-env { fill: #e0a800 !important; }
+:root[data-bg="sunshine"] .live-badge { background: var(--sun-wash) !important; border-color: var(--sun-line) !important; color: var(--sun-ink) !important; }
+:root[data-bg="sunshine"] .guidance { border-color: var(--sun-line) !important; background: linear-gradient(180deg, var(--sun-wash), transparent 60%), var(--card) !important; box-shadow: 0 0 40px rgba(255,198,26,.12) !important; }
+:root[data-bg="sunshine"] .guidance.flash { animation-name: sunshine-glow !important; }
+@keyframes sunshine-glow { 0% { box-shadow: 0 0 0 rgba(255,198,26,0); } 30% { box-shadow: 0 0 46px rgba(255,198,26,.5); } 100% { box-shadow: 0 0 40px rgba(255,198,26,.12); } }
+:root[data-bg="sunshine"] .entry.q { background: var(--sun-wash) !important; border-color: var(--sun-line) !important; }
+:root[data-bg="sunshine"] .demo { border-color: var(--sun-line) !important; color: var(--sun-ink) !important; }
+:root[data-bg="sunshine"] .spin { border-color: var(--sun-line) !important; border-top-color: var(--sun-ink) !important; }
+:root[data-bg="sunshine"] .thinking, :root[data-bg="sunshine"] .guidance h4 { color: var(--sun-ink) !important; }
+:root[data-bg="sunshine"] .csec.best { background: var(--sun-wash) !important; }
+:root[data-bg="sunshine"] .guidance-body .csec.best h4.csec-title { color: var(--sun-ink) !important; }
+:root[data-bg="sunshine"] .guidance-body code { background: var(--sun-wash) !important; color: var(--sun-ink) !important; }
+:root[data-bg="sunshine"] .example { background: var(--sun-wash) !important; }
+:root[data-bg="sunshine"] .audio-status:not(.live):not(.warn-reason) { color: var(--sun-ink) !important; background: var(--sun-wash) !important; border-color: var(--sun-line) !important; }
+:root[data-bg="sunshine"] .btn-green { background: #ffc61a !important; color: #1a1200 !important; box-shadow: 0 8px 24px rgba(255,198,26,.35) !important; }
+:root[data-bg="sunshine"] .f-fill.alt { background: linear-gradient(90deg, #ffc61a, #ffe27a) !important; }
+:root[data-bg="sunshine"] .range-bar input[type="date"] { background: var(--panel) !important; }
+:root[data-bg="sunshine"][data-theme="light"] .range-bar input[type="date"] { color-scheme: light; }
+:root[data-bg="sunshine"][data-theme="light"] .unlimited { background-image: linear-gradient(110deg, var(--accent) 0%, var(--accent) 38%, #ffd75e 50%, var(--accent) 62%, var(--accent) 100%) !important; }
+:root[data-bg="sunshine"] .final { background: #ffc61a !important; color: #1a1200 !important; border: 0 !important; }
+:root[data-bg="sunshine"] .final::before, :root[data-bg="sunshine"] .final::after { background: rgba(255,255,255,.22) !important; }
+:root[data-bg="sunshine"] .final-env { background: rgba(255,255,255,.4) !important; color: #1a1200 !important; }
+:root[data-bg="sunshine"] .final-btn { background: #1a1200 !important; color: #ffc61a !important; }
+:root[data-bg="sunshine"] .hero svg rect[fill="#c5e8d4"] { fill: #f3dc8a; }
+:root[data-bg="sunshine"] .hero svg circle[fill="#d3f0df"] { fill: #fff0b3; }
+:root[data-bg="sunshine"] .hero svg .check { stroke: #a16207; }
+:root[data-bg="sunshine"] .letter-title { fill: #a16207 !important; }
+:root[data-bg="sunshine"][data-theme="light"] .pill.thinking { color: #854d0e !important; }
+:root[data-bg="sunshine"][data-theme="light"] .banner.info { color: #854d0e !important; }
+:root[data-bg="sunshine"][data-theme="light"] .links a.active { color: #854d0e !important; }
+:root[data-bg="sunshine"][data-theme="light"] .demo-badge { color: #a16207 !important; }
+:root[data-bg="sunshine"][data-theme="light"] .pts.takeaways li { color: #854d0e !important; }
+:root[data-bg="sunshine"][data-theme="light"] .star-grid dt, :root[data-bg="sunshine"][data-theme="light"] .complexity { color: #854d0e !important; }
+:root[data-bg="sunshine"][data-theme="light"] .audio-status { color: #a16207 !important; }
+:root[data-bg="sunshine"][data-theme="light"] .audio-status.live { color: #854d0e !important; }
+:root[data-bg="sunshine"][data-theme="light"] .tag.lvl { color: #854d0e !important; }
+:root[data-bg="sunshine"][data-theme="light"] .hero-badge { color: #a16207 !important; }
+:root[data-bg="sunshine"][data-theme="light"] .chip { color: #854d0e !important; }
+
+/* "Calm white + orange" preset: clean white (dark: charcoal) surfaces with an
+   orange call-to-action color to make Buy/Get started buttons stand out. */
+:root[data-bg="calm"] { --accent: #f26a1b; --accent2: #d95510; --accent-grad: #f26a1b; --on-accent: #ffffff; --green: #f26a1b; }
+:root[data-bg="calm"]:not([data-theme="light"]) { --bg: #121212; --bg2: #191919; --panel: #1e1e1e; --panel2: #1e1e1ecc; --card: #1e1e1e; --border: #2e2e2e; --border-strong: #424242; --text: #f5f5f5; --muted: #b5b5b5; --muted2: #8c8c8c; --tint: #2b1a10; --accent: #ff7a2e; --accent-grad: #ff7a2e; --green: #ff7a2e; --on-accent: #1a0a00; }
+:root[data-bg="calm"][data-theme="light"] { --bg: #ffffff; --bg2: #f6f6f7; --panel: #ffffff; --panel2: #ffffff; --card: #ffffff; --border: #e6e6e8; --border-strong: #d0d0d4; --text: #1a1a1a; --muted: #55555c; --muted2: #8a8a92; --tint: #fff0e6; }
+:root[data-bg="calm"][data-theme="light"] .nav { background: rgba(255,255,255,.92) !important; }
+:root[data-bg="calm"][data-theme="light"] .pill.thinking { color: #d95510 !important; }
+:root[data-bg="calm"][data-theme="light"] .banner.info { color: #d95510 !important; }
+:root[data-bg="calm"][data-theme="light"] .links a.active { color: #d95510 !important; }
+:root[data-bg="calm"][data-theme="light"] .lm-tile { fill: #f26a1b !important; }
+:root[data-bg="calm"][data-theme="light"] .lm-check { stroke: #f26a1b !important; }
+:root[data-bg="calm"][data-theme="light"] .lm-env { fill: #d95510 !important; }
+:root[data-bg="calm"][data-theme="light"] .demo-badge { color: #f26a1b !important; }
+:root[data-bg="calm"][data-theme="light"] .live-badge { color: #d95510 !important; }
+:root[data-bg="calm"][data-theme="light"] .guidance h4 { color: #f26a1b !important; }
+:root[data-bg="calm"][data-theme="light"] .thinking { color: #f26a1b !important; }
+:root[data-bg="calm"][data-theme="light"] .spin { border-color: rgba(242,106,27,.3) !important; border-top-color: #f26a1b !important; }
+:root[data-bg="calm"][data-theme="light"] .example { background: rgba(242,106,27,.08) !important; color: #1e293b !important; }
+:root[data-bg="calm"][data-theme="light"] .pts.takeaways li { color: #d95510 !important; }
+:root[data-bg="calm"][data-theme="light"] .csec.best { background: rgba(242,106,27,.07) !important; }
+:root[data-bg="calm"][data-theme="light"] .guidance-body .csec.best h4.csec-title { color: #f26a1b !important; }
+:root[data-bg="calm"][data-theme="light"] .star-grid dt, :root[data-bg="calm"][data-theme="light"] .complexity { color: #d95510 !important; }
+:root[data-bg="calm"][data-theme="light"] .audio-status { color: #f26a1b !important; }
+:root[data-bg="calm"][data-theme="light"] .audio-status.live { color: #d95510 !important; }
+:root[data-bg="calm"][data-theme="light"] .tag.lvl { color: #d95510 !important; }
+:root[data-bg="calm"][data-theme="light"] .hero-badge { color: #f26a1b !important; }
+:root[data-bg="calm"][data-theme="light"] .chip { color: #d95510 !important; }
+
+/* "White / Black" preset is fully monochrome: accent, buttons, badges, logo and
+   any hardcoded color are gray-scaled. Other presets keep the brand green. */
+:root[data-bg="white"] { filter: grayscale(1); }
+:root[data-bg="white"]:not([data-theme="light"]) { --text: #ffffff; --muted: #b3b3b3; --muted2: #8a8a8a; --accent: #ffffff; --accent2: #d9d9d9; --accent-grad: #ffffff; --on-accent: #000000; --paper: #f2f2f2; --green: #ffffff; --red: #cfcfcf; --amber: #bdbdbd; }
+:root[data-theme="light"][data-bg="white"] { --text: #000000; --muted: #4d4d4d; --muted2: #808080; --accent: #000000; --accent2: #262626; --accent-grad: #000000; --on-accent: #ffffff; --paper: #ffffff; --green: #000000; --red: #4d4d4d; --amber: #666666; }
+:root[data-theme="light"][data-bg="white"] .nav { background: rgba(255,255,255,.9) !important; }
+:root[data-theme="light"][data-bg="white"] .lm-tile, :root[data-theme="light"][data-bg="white"] .lm-check { fill: #000 !important; stroke: #000 !important; }
 [data-theme="light"] .btn-ghost { background: rgba(15,23,42,.05) !important; }
 [data-theme="light"] .btn-ghost:hover { background: rgba(15,23,42,.09) !important; }
 [data-theme="light"] input[type="text"],

@@ -1,5 +1,5 @@
 .page { padding: 36px 24px 60px; }
-.page h1 { font-size: 1.8rem; font-weight: 800; margin: 0; }
+.page h1 { font-size: clamp(1.35rem, 3.6vw, 1.8rem); font-weight: 800; line-height: 1.2; letter-spacing: -0.02em; margin: 0; }
 .section-title { margin: 22px 0 0; font-size: 0.95rem; font-weight: 800; }
 
 /* ------------------------- Date range bar ------------------------------ */
@@ -13,6 +13,7 @@
 }
 .range-fields { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; }
 .range-fields .lbl {
+  margin: 0;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -23,13 +24,13 @@
   color: var(--muted);
 }
 .range-bar input[type="date"] {
-  background: #0d1322;
+  background: var(--bg2);
   border: 1px solid var(--border-strong);
   border-radius: 10px;
   color: var(--text);
   padding: 8px 12px;
   font-size: 0.82rem;
-  color-scheme: dark;
+  color-scheme: inherit; /* follows the light/dark theme on :root */
 }
 .range-presets { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .mono { font-family: ui-monospace, Consolas, monospace; font-size: 0.74rem; }
@@ -91,7 +92,7 @@
   font-size: 1.7rem;
   font-weight: 800;
   letter-spacing: -0.02em;
-  color: #c3d0ff;
+  color: var(--text);
 }
 .stat-lbl {
   margin-top: 4px;
@@ -132,7 +133,7 @@
   width: 100%;
   max-width: 26px;
   border-radius: 5px 5px 0 0;
-  background: linear-gradient(180deg, rgba(110, 139, 255, 0.9), rgba(110, 139, 255, 0.25));
+  background: linear-gradient(180deg, var(--accent), color-mix(in srgb, var(--accent) 25%, transparent));
 }
 .bar.alt {
   background: linear-gradient(180deg, rgba(74, 222, 128, 0.9), rgba(74, 222, 128, 0.25));
@@ -175,9 +176,9 @@
 .tag {
   display: inline-block;
   font-size: 0.68rem;
-  background: rgba(110, 139, 255, 0.12);
-  border: 1px solid rgba(110, 139, 255, 0.3);
-  color: #c3d0ff;
+  background: var(--tint);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
   padding: 2px 9px;
   border-radius: 999px;
   margin-right: 4px;
@@ -314,7 +315,7 @@
   background: none; border: 0; color: var(--muted); font: inherit; font-size: 0.75rem;
   font-weight: 700; padding: 6px 12px; cursor: pointer;
 }
-.seg-switch button.on { background: var(--accent); color: #fff; }
+.seg-switch button.on { background: var(--accent-grad); color: var(--on-accent); }
 .trend { width: 100%; height: 170px; margin-top: 10px; display: block; }
 .trend-area { fill: color-mix(in srgb, var(--accent) 22%, transparent); }
 .trend-line { stroke: var(--accent); stroke-width: 2.2; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
@@ -414,3 +415,60 @@
 .share { height: 4px; border-radius: 99px; background: rgba(255, 255, 255, 0.07); margin-top: 5px; overflow: hidden; }
 .share-fill { height: 100%; border-radius: 99px; }
 .bad-txt { color: var(--red); }
+
+/* ======================= Layout pass (2026-10-24) =======================
+   One spacing rhythm (12px between cards/grids, 16px card padding on
+   phones), grids that never force a column wider than the screen, cards in
+   a row stretched to equal height, and tabs that wrap instead of hiding. */
+.admin-head > div { min-width: 0; flex: 1 1 320px; }
+.refresh-btn { flex: none; }
+.range-bar input[type="date"] { min-height: 38px; }
+.tabs { flex-wrap: wrap; overflow-x: visible; row-gap: 2px; }
+.kpi-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr)); }
+.chart-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); align-items: stretch; }
+.chart-grid.three { grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); }
+.stat-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); }
+.rev-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); }
+.chart-grid > .card, .kpi-grid > .card, .stat-grid > .card { margin-top: 0; display: flex; flex-direction: column; }
+.chart-grid > .card .people { flex: 1 1 auto; }
+.users-head h3 { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+.card > h3 .muted.small { font-weight: 500; }
+.table-wrap { -webkit-overflow-scrolling: touch; }
+.mini-table { min-width: 100%; }
+.mini-table th, .mini-table td { white-space: nowrap; }
+.pill-ok { color: var(--green); background: color-mix(in srgb, var(--green) 12%, transparent); border-color: color-mix(in srgb, var(--green) 40%, transparent); }
+.pill-off { color: var(--red); background: color-mix(in srgb, var(--red) 10%, transparent); border-color: color-mix(in srgb, var(--red) 40%, transparent); }
+.admin-tag { color: var(--amber); background: color-mix(in srgb, var(--amber) 12%, transparent); border-color: color-mix(in srgb, var(--amber) 40%, transparent); }
+
+@media (max-width: 640px) {
+  .page .card { padding: 16px; }
+  .admin-head { align-items: center; }
+  .admin-head p { font-size: 0.82rem; }
+  /* Date range: From / To side by side, Apply full width, presets as a row. */
+  .range-bar { display: grid; gap: 12px; }
+  .range-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: end; }
+  .range-fields .lbl input { width: 100%; min-width: 0; }
+  .range-fields .btn-primary { grid-column: 1 / -1; width: 100%; }
+  .range-presets { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .range-presets > span { grid-column: 1 / -1; }
+  /* Tabs: a 2-column grid of pills — every section visible, no sideways scroll. */
+  .tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; border-bottom: 0; margin: 16px 0 4px; }
+  .tab {
+    border: 1px solid var(--border); border-radius: 10px; padding: 9px 10px; font-size: 0.78rem;
+    text-align: center; white-space: normal; line-height: 1.25; background: var(--card);
+  }
+  .tab.on { border-color: var(--accent); background: var(--tint); }
+  .tab:last-child:nth-child(odd) { grid-column: 1 / -1; }
+  .users-tools, .users-tools .search { width: 100%; max-width: none; }
+  .users-tools .search { flex: 1 1 0; }
+  .users-table th, .users-table td, .cost-table td { white-space: nowrap; }
+  .cost-head-row, .live-note { align-items: flex-start; }
+  .demo-toggle { margin-left: 0; }
+  .seg-switch { max-width: 100%; overflow-x: auto; }
+  .seg-switch button { white-space: nowrap; }
+  .insight { padding: 10px 12px; }
+  .eng-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .mini-stats { gap: 16px; }
+  .rev-num { font-size: 1.9rem; }
+  .pager { justify-content: center; }
+}
