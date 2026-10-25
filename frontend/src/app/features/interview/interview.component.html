@@ -117,7 +117,7 @@
             </div>
             @if (!capturingInterviewer) {
               <p class="muted small hint">
-                Choose how the AI hears the interviewer. Your microphone is never used for this.
+                Choose which audio the AI listens to. Your microphone is never used for this.
               </p>
               <button class="btn-primary btn-block" (click)="startInterviewerAudio()">
                 🎧 Select meeting audio
@@ -127,11 +127,11 @@
               <button class="btn-primary btn-block" (click)="autoSelectMeetingAudio()">
                 ⚡ Auto Select Meeting Audio
               </button>
-              <p class="muted small hint sub">Listens to your computer's sound and turns the interviewer's speech into questions.</p>
+              <p class="muted small hint sub">Listens to your computer's sound and turns the speaker's questions into text.</p>
             } @else {
               <p class="muted small hint">🎧 The AI is listening to the meeting. Keep this tab open.</p>
               <button class="btn-ghost btn-block" (click)="stopInterviewerAudio()">
-                ■ Stop interviewer audio
+                ■ Stop shared audio
               </button>
             }
             @if (systemAudioDevices !== null) {
@@ -177,7 +177,7 @@
             rows="4"
             [(ngModel)]="manualQuestion"
             (keydown.enter)="onManualEnter($event)"
-            placeholder="Paste or type the interviewer’s question here… (long questions welcome)"
+            placeholder="Paste or type the question here… (long questions welcome)"
           ></textarea>
           <div class="btn-row">
             <button class="btn-primary btn-sm" (click)="generateAnswer()">Generate Answer</button>
@@ -223,7 +223,7 @@
               class="btn-ghost btn-sm pause-audio"
               [class.paused]="audioPaused"
               (click)="toggleAudioPause()"
-              [title]="audioPaused ? 'Resume listening to the interviewer' : 'Pause interviewer audio, STT and AI answers'"
+              [title]="audioPaused ? 'Resume listening' : 'Pause shared audio, transcription and AI answers'"
             >
               {{ audioPaused ? '▶ Resume' : '❚❚ Pause' }}
             </button>
@@ -239,7 +239,7 @@
           [class.interim]="!!liveTranscript"
         >
           <div class="entry-head">
-            <span class="who">{{ liveTranscript ? 'Listening…' : '🎧 Interviewer' }}</span>
+            <span class="who">{{ liveTranscript ? 'Listening…' : '🎧 Speaker' }}</span>
             <button
               class="btn-ghost btn-sm copy-transcript"
               (click)="copyTranscript()"
@@ -249,7 +249,7 @@
               {{ copiedTranscript ? '✓ Copied' : 'Copy' }}
             </button>
           </div>
-          <p>{{ audioPaused ? 'Paused — the AI is not listening. Click Resume to continue.' : (liveTranscript || lastInterviewerText || 'Listening for the interviewer’s question…') }}</p>
+          <p>{{ audioPaused ? 'Paused — the AI is not listening. Click Resume to continue.' : (liveTranscript || lastInterviewerText || 'Listening for the next question…') }}</p>
         </div>
       </section>
 
@@ -408,7 +408,7 @@
                 <!-- 3. Key Details / What the interviewer expects -->
                 @if (card.keyDetails.length) {
                   <section class="csec">
-                    <h4 class="csec-title">What the interviewer expects</h4>
+                    <h4 class="csec-title">What a strong answer covers</h4>
                     <ul class="details">
                       @for (d of card.keyDetails; track $index) {
                         <li [innerHTML]="d | richText"></li>
@@ -521,12 +521,12 @@
       <div class="modal" (click)="$event.stopPropagation()">
         <h3 class="modal-title">Auto Select Meeting Audio</h3>
         <p class="muted small hint">
-          Capture the meeting or browser tab so the AI hears the interviewer, not you.
+          Capture the meeting or browser tab so the AI hears the other speaker, not you.
         </p>
         <p class="muted small hint">
           <strong>Auto Select</strong> listens to your computer's sound automatically — no tab to
           pick. It needs a system-audio device (Windows: enable "Stereo Mix" or install VB-Cable)
-          so the AI hears the interviewer even on headphones.
+          so the AI hears the other speaker even on headphones.
         </p>
         <div class="modal-actions">
           <button class="btn-primary btn-sm" (click)="confirmAutoSelect()">

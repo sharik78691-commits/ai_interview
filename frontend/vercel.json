@@ -9,7 +9,7 @@
     { "source": "/delivery-policy", "destination": "/shipping-policy", "permanent": true },
     { "source": "/about-us", "destination": "/about", "permanent": true },
     {
-      "source": "/:page(login|register|features|how-it-works|pricing|trust|contact|about|terms|acceptable-use|privacy-policy|refund-policy|shipping-policy|dashboard|interview|settings|billing|screenshot-analysis|admin|forgot-password|reset-password)/",
+      "source": "/:page(login|register|features|how-it-works|pricing|trust|contact|about|terms|acceptable-use|privacy-policy|refund-policy|shipping-policy|dashboard|interview|settings|billing|mock-interview|screenshot-analysis|admin|forgot-password|reset-password)/",
       "destination": "/:page",
       "permanent": true
     }
@@ -22,7 +22,7 @@
       "destination": "/:page/index.html"
     },
     {
-      "source": "/:page(dashboard|interview|settings|billing|screenshot-analysis|admin|forgot-password|reset-password)",
+      "source": "/:page(dashboard|interview|settings|billing|mock-interview|screenshot-analysis|admin|forgot-password|reset-password)",
       "destination": "/index.csr.html"
     }
   ]

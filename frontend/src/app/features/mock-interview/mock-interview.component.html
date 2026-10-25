@@ -1,0 +1,160 @@
+<div class="container page mock">
+  <header class="page-head">
+    <h1>Mock interview</h1>
+    <p class="muted">
+      Practise with role-based questions, answer in your own words, and get a score with
+      feedback on every answer. Retry any question until it feels natural.
+    </p>
+  </header>
+  <app-error-banner [message]="error()" (dismiss)="error.set('')"></app-error-banner>
+
+  @switch (phase()) {
+    @case ('setup') {
+      <section class="card setup" aria-label="Mock interview setup">
+        <label class="lbl" for="mock-role">Role you are practising for</label>
+        <input id="mock-role" type="text" [(ngModel)]="role" maxlength="120"
+          placeholder="e.g. Java Backend Developer" />
+
+        <span class="lbl">Interview type</span>
+        <div class="chips" role="radiogroup" aria-label="Interview type">
+          @for (t of types; track t.key) {
+            <button type="button" class="chip" role="radio" [attr.aria-checked]="interviewType === t.key"
+              [class.on]="interviewType === t.key" (click)="interviewType = t.key">{{ t.label }}</button>
+          }
+        </div>
+
+        <div class="row2">
+          <div>
+            <span class="lbl">Difficulty</span>
+            <div class="chips" role="radiogroup" aria-label="Difficulty">
+              @for (d of difficulties; track d) {
+                <button type="button" class="chip" role="radio" [attr.aria-checked]="difficulty === d"
+                  [class.on]="difficulty === d" (click)="difficulty = d">{{ d }}</button>
+              }
+            </div>
+          </div>
+          <div>
+            <span class="lbl">Questions</span>
+            <div class="chips" role="radiogroup" aria-label="Number of questions">
+              @for (n of counts; track n) {
+                <button type="button" class="chip" role="radio" [attr.aria-checked]="count === n"
+                  [class.on]="count === n" (click)="count = n">{{ n }}</button>
+              }
+            </div>
+          </div>
+        </div>
+
+        <p class="muted small hint">
+          Questions use your active resume and target role from the
+          <a routerLink="/dashboard">dashboard</a> when you have them.
+        </p>
+        <button type="button" class="btn-primary start" (click)="start()" [disabled]="busy()">
+          {{ busy() ? 'Preparing questions…' : 'Start mock interview' }}
+        </button>
+      </section>
+    }
+
+    @case ('summary') {
+      <section class="card summary" aria-label="Mock interview summary">
+        <h2>Your mock interview</h2>
+        @if (average() !== null) {
+          <p class="avg">Average best score <strong [class]="scoreClass(average())">{{ average() }}/10</strong></p>
+        } @else {
+          <p class="muted">You skipped every question — start again whenever you are ready.</p>
+        }
+        <ol class="summary-list">
+          @for (q of questions(); track q.id; let i = $index) {
+            <li>
+              <span class="q">{{ q.question }}</span>
+              @if (bestScores()[i]; as best) {
+                <span class="score-pill" [class]="scoreClass(best)">{{ best }}/10</span>
+                @if (results()[i].scores.length > 1) {
+                  <span class="muted small">({{ results()[i].scores.length }} attempts)</span>
+                }
+              } @else {
+                <span class="muted small">skipped</span>
+              }
+            </li>
+          }
+        </ol>
+        <div class="actions">
+          <button type="button" class="btn-primary" (click)="restart()">Start a new mock interview</button>
+          <a routerLink="/dashboard" class="btn-ghost">Back to dashboard</a>
+        </div>
+      </section>
+    }
+
+    @default {
+      @if (current(); as q) {
+        <section class="card question" aria-live="polite">
+          <div class="q-meta">
+            <span class="pill">Question {{ index() + 1 }} of {{ questions().length }}</span>
+            <span class="pill type">{{ typeLabel(q.type) }}</span>
+            @if (questionSource() === 'basic') {
+              <span class="muted small">Sample questions — AI questions are unavailable right now</span>
+            }
+          </div>
+          <h2 class="q-text">{{ q.question }}</h2>
+          @if (q.focus) {
+            <p class="focus muted"><strong>What a strong answer shows:</strong> {{ q.focus }}</p>
+          }
+
+          @if (phase() === 'answering') {
+            <label class="lbl" for="mock-answer">Your answer</label>
+            <textarea id="mock-answer" [(ngModel)]="answer" maxlength="6000" rows="7"
+              placeholder="Answer as you would in the interview — in your own words."></textarea>
+            <div class="actions">
+              <button type="button" class="btn-primary" (click)="submit()" [disabled]="busy() || !answer.trim()">
+                {{ busy() ? 'Reviewing…' : 'Get feedback' }}
+              </button>
+              @if (speechSupported) {
+                <button type="button" class="btn-ghost" (click)="toggleListening()" [attr.aria-pressed]="listening()">
+                  {{ listening() ? '■ Stop speaking' : '🎙 Speak your answer' }}
+                </button>
+              }
+              <button type="button" class="btn-ghost skip" (click)="skip()" [disabled]="busy()">
+                {{ isLast() ? 'Skip & finish' : 'Skip question' }}
+              </button>
+            </div>
+          }
+        </section>
+
+        @if (phase() === 'reviewing' && feedback(); as fb) {
+          <section class="card feedback" aria-label="Feedback on your answer">
+            <div class="fb-head">
+              <span class="score" [class]="scoreClass(fb.score)">{{ fb.score }}<small>/10</small></span>
+              <p class="fb-summary">{{ fb.summary }}</p>
+            </div>
+            @if (fb.strengths.length) {
+              <h3>What worked</h3>
+              <ul class="good-list">
+                @for (s of fb.strengths; track $index) { <li>{{ s }}</li> }
+              </ul>
+            }
+            @if (fb.improvements.length) {
+              <h3>Improve next time</h3>
+              <ul class="fix-list">
+                @for (s of fb.improvements; track $index) { <li>{{ s }}</li> }
+              </ul>
+            }
+            @if (fb.sampleAnswer.length) {
+              <h3>A strong answer would cover</h3>
+              <ul class="sample-list">
+                @for (s of fb.sampleAnswer; track $index) { <li>{{ s }}</li> }
+              </ul>
+            }
+            @if (fb.source === 'basic') {
+              <p class="muted small">Basic feedback — AI review is unavailable right now.</p>
+            }
+            <div class="actions">
+              <button type="button" class="btn-ghost" (click)="retry()">↻ Try this question again</button>
+              <button type="button" class="btn-primary" (click)="next()">
+                {{ isLast() ? 'See summary' : 'Next question →' }}
+              </button>
+            </div>
+          </section>
+        }
+      }
+    }
+  }
+</div>

@@ -296,12 +296,22 @@ def _starts_new_question(text: str) -> bool:
         counts as new once the sentence is terminated. Otherwise a normal
         mid-question split would be mistaken for a fresh prompt.
     """
-    t = (text or "").strip()
+    t = _NEXT_QUESTION_OPENER.sub("", (text or "").strip(), count=1)
     if not t:
         return False
     if _clean(t.split()[0]) in QUESTION_WORDS:
         return True
     return _sentence_terminated(t) and bool(_PROMPT_RE.match(t))
+
+
+#: Openers that announce the NEXT question ("Also, how does GC work?"), so it
+#: is not glued onto the one just answered. "And …" / "So …" are left out on
+#: purpose: they usually build on the previous answer ("And how would you
+#: scale it?").
+_NEXT_QUESTION_OPENER = re.compile(
+    r"^(?:also|next|okay|ok|alright|all\s+right|now|moving\s+on|another\s+question)\b[\s,.:-]*",
+    re.IGNORECASE,
+)
 
 
 def _has_question_signal(text: str) -> bool:
@@ -425,7 +435,25 @@ def awaits_continuation(text: str) -> bool:
     return _ends_dangling(t, words) or _wants_object(t)
 
 
-_TOKEN_RE = re.compile(r"[^\W_]+(?:'[^\W_]+)?")
+def is_context_statement(text: str) -> bool:
+    """True for a finished statement that only sets up the next question.
+
+    "In your last project you used Kafka." is usually followed by "How did you
+    handle duplicate messages?" — answering the statement on its own splits
+    the context from the question it belongs to. Such a sentence carries no
+    question or prompt cue and would only be answered by ``classify``'s safety
+    net; callers hold it briefly and stitch it onto the question that follows
+    (or answer it alone if none comes, so nothing is ever dropped).
+    """
+    t = (text or "").strip()
+    if not t.endswith((".", "!")) or not _sentence_terminated(t):
+        return False
+    if _has_question_signal(t):
+        return False
+    return classify(t) == ANSWER
+
+
+_TOKEN_RE =re.compile(r"[^\W_]+(?:'[^\W_]+)?")
 #: Words too common to tell two utterances apart ("what is java" vs "what is
 #: python" share 2 of 3 words but are different questions).
 _COMMON_WORDS = (
@@ -471,9 +499,11 @@ class QuestionBuffer:
         self.silence_ms = silence_ms
         self._buffer: str = ""
         self._last_push: float = 0.0
-        # A question whose clip boundary landed mid-phrase (see PARTIAL).
+        # A question whose clip boundary landed mid-phrase (see PARTIAL), or a
+        # set-up statement waiting for its question (see is_context_statement).
         self._held: str = ""
         self._held_at: float = 0.0
+        self._held_context = False
 
     # ---------------------------------------------------------------- held
     @property
@@ -496,13 +526,15 @@ class QuestionBuffer:
         held, self._held, self._held_at = self._held, "", 0.0
         return held
 
-    def _hold(self, text: str, now: float) -> None:
+    def _hold(self, text: str, now: float, context: bool = False) -> None:
         self._held = text
         self._held_at = now
+        self._held_context = context
 
     def _clear_held(self) -> None:
         self._held = ""
         self._held_at = 0.0
+        self._held_context = False
 
     # ------------------------------------------------------------- streaming
     def push(self, fragment: str) -> str | None:
@@ -551,6 +583,24 @@ class QuestionBuffer:
         held = self._held
         expired = bool(held) and (now - self._held_at) * 1000 >= self.HOLD_MS
 
+        # 0. A set-up statement is waiting: the next prompt is its question, so
+        #    it is stitched even when it opens a question of its own ("In your
+        #    last project you used Kafka." + "How did you handle duplicates?").
+        #    A backchannel in between ("okay") keeps the set-up waiting.
+        if held and incoming and not expired and self._held_context:
+            verdict = classify(incoming)
+            if verdict == NOISE:
+                return None
+            stitched = f"{held} {incoming}".strip()
+            if is_context_statement(incoming):
+                self._hold(stitched, now, context=True)  # more set-up
+                return None
+            if verdict == PARTIAL:
+                self._hold(stitched, now)
+                return None
+            self._clear_held()
+            return stitched
+
         # 1. A previous clip was cut mid-question and this one arrived inside
         #    the hold window. It is usually its second half — but only if it
         #    does not open a question of its own. (After an abandoned "Can you
@@ -571,6 +621,12 @@ class QuestionBuffer:
         #    or the hold window already closed): judge it on its own.
         self._clear_held()
         verdict = classify(incoming) if incoming else NOISE
+        if verdict == ANSWER and is_context_statement(incoming):
+            # Set-up for the next question: wait for it (answered alone by the
+            # hold flush if no question follows). A half-question held before
+            # is not lost — it is returned now, as below.
+            self._hold(incoming, now, context=True)
+            return held if held and classify(held) == PARTIAL else None
         if verdict == ANSWER:
             return incoming
         if verdict == PARTIAL and incoming:
@@ -613,6 +669,10 @@ class LiveTurnTracker:
 
     #: How long a dangling turn waits for its continuation (cf. HOLD_MS).
     CARRY_S = QuestionBuffer.HOLD_MS / 1000.0
+    #: How long a finished set-up statement waits for its question. The next
+    #: turn normally starts well within this; past it the statement is
+    #: answered alone (the safety net), just later.
+    CONTEXT_CARRY_S = 2.5
     #: An open turn with no update for this long belongs to a dead stream.
     STALE_S = 3.0
     #: New words after an answered question must be a question of their own
@@ -634,16 +694,25 @@ class LiveTurnTracker:
         self._fired = ""
         self._carry = ""
         self._carry_at = 0.0
+        self._carry_context = False
         self._last_update = 0.0
 
     @property
     def carrying(self) -> bool:
         return bool(self._carry)
 
+    @property
+    def carry_window(self) -> float:
+        """How long the current carry waits before it is answered alone."""
+        return self.CONTEXT_CARRY_S if self._carry_context else self.CARRY_S
+
+    def _set_carry(self, text: str, now: float, context: bool = False) -> None:
+        self._carry, self._carry_at, self._carry_context = text, now, context
+
     def deciding(self, now: float | None = None) -> bool:
         """True while this lane still owes a verdict on speech it has heard."""
         now = time.monotonic() if now is None else now
-        if self._carry and now - self._carry_at < self.CARRY_S:
+        if self._carry and now - self._carry_at < self.carry_window:
             return True
         fresh = len(self._turn.split()) > self._used
         return self._open and fresh and now - self._last_update < self.STALE_S
@@ -688,9 +757,10 @@ class LiveTurnTracker:
     def flush_carry(self, now: float | None = None) -> str | None:
         """Answer a dangling question whose continuation never came."""
         now = time.monotonic() if now is None else now
-        if not self._carry or self._open or now - self._carry_at < self.CARRY_S:
+        if not self._carry or self._open or now - self._carry_at < self.carry_window:
             return None
-        carry, self._carry = self._carry, ""
+        carry = self._carry
+        self._set_carry("", 0.0)
         return carry
 
     def _evaluate(self, now: float, closed: bool, settled: bool = False) -> str | None:
@@ -703,12 +773,23 @@ class LiveTurnTracker:
         new_question = _starts_new_question(fresh) and not _wants_object(
             self._fired or self._carry
         )
+        if self._fired and is_context_statement(fresh):
+            # A set-up for the NEXT question after an answered one: keep it
+            # for that question instead of re-answering the previous one.
+            if closed or settled:
+                self._set_carry(fresh, now, context=True)
+                self._used = len(words)
+            return None
         if self._fired:
             # Still talking after an answered question: the new words must
             # ask something on their own; then answer them WITH that context.
             base = "" if new_question else self._fired
             follow_on = len(fresh.split()) >= self.MIN_FOLLOW_ON_WORDS
             verdict = classify(fresh) if follow_on else NOISE
+        elif self._carry and self._carry_context:
+            # A carried set-up always leads into what follows, even a fresh
+            # question ("…you used Kafka." + "How did you handle duplicates?").
+            base, verdict = self._carry, None
         else:
             base = "" if new_question or not self._carry else self._carry
             verdict = None
@@ -717,17 +798,24 @@ class LiveTurnTracker:
             verdict = classify(candidate)
         complete = verdict == ANSWER and not awaits_continuation(candidate)
 
+        if complete and is_context_statement(candidate):
+            # Finished statement, no question yet: wait briefly for one.
+            if closed or settled:
+                self._set_carry(candidate, now, context=True)
+                self._used = len(words)
+            return None
         if complete and (closed or settled or _sentence_terminated(candidate)):
-            self._used, self._fired, self._carry = len(words), candidate, ""
+            self._used, self._fired = len(words), candidate
+            self._set_carry("", 0.0)
             return candidate
         if complete:
             self.recheck = True
             return None
         if closed:
             if verdict in (ANSWER, PARTIAL):
-                self._carry, self._carry_at = candidate, now  # hangs: wait for the rest
+                self._set_carry(candidate, now)  # hangs: wait for the rest
             else:
-                self._carry = ""
+                self._set_carry("", 0.0)
             self._used = len(words)
         return None
 

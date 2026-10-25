@@ -97,6 +97,14 @@ export function groupSentences(sentences: string[]): string[] {
 export const MAX_PAST_HISTORY = 4;
 /** How long a finished streamed utterance waits for its final transcript. */
 const STREAM_HOLD_MS = 2_500;
+/**
+ * Clips waiting while one is being transcribed. Every clip can hold part of a
+ * question, so they are kept in order; only past this backlog (a very slow
+ * provider) does the oldest give way.
+ */
+export const MAX_QUEUED_CLIPS = 4;
+/** Frees the clip slot if the backend never answers for a clip (old backend / lost frame). */
+export const CLIP_SLOT_TIMEOUT_MS = 10_000;
 /** One interview session is capped at 1h 15m; interviewer audio stops automatically. */
 export const MAX_SESSION_SECONDS = 75 * 60;
 
@@ -184,6 +192,7 @@ export class InterviewComponent implements OnInit, OnDestroy {
   /** One transcription request is in flight; extra clips wait their turn. */
   audioBusy = false;
   private clipQueue: { data: ArrayBuffer; mimeType: string }[] = [];
+  private clipSlotTimer: ReturnType<typeof setTimeout> | null = null;
   /**
    * Audio-input labels the browser can see, set when "Auto Select" needs the
    * user to enable a system-audio device. `null` means no setup is required.
@@ -395,7 +404,7 @@ export class InterviewComponent implements OnInit, OnDestroy {
             this.thinking = true;
           } else if (/no speech|waiting for a complete/i.test(msg)) {
             // Backchannel or silence — back to listening, spinner off.
-            this.audioStatus = "Listening for the interviewer's question…";
+            this.audioStatus = 'Listening for the next question…';
             this.thinking = false;
           } else if (/Already answered/i.test(msg)) {
             // Duplicate suppressed server-side: no new answer is coming, so
@@ -405,18 +414,17 @@ export class InterviewComponent implements OnInit, OnDestroy {
           } else if (/Generating|processing/i.test(msg)) {
             this.audioStatus = 'Generating answer…';
           } else if (/listening|connected|reset/i.test(msg)) {
-            this.audioStatus = "Listening for the interviewer's question…";
+            this.audioStatus = 'Listening for the next question…';
           }
         }
         if (m['type'] === 'ai_guidance') {
           this.audioStatus = 'Answer ready';
           this.thinking = false;
         }
-        // A failed transcription also frees the slot so the queue keeps moving.
-        if (m['type'] === 'error') {
-          this.releaseClipSlot();
-          this.thinking = false;
-        }
+        // A clip that produced no transcript (silence, a cough, an STT error)
+        // ends with clip_done: free the slot now instead of after the timeout.
+        if (m['type'] === 'clip_done') this.releaseClipSlot();
+        if (m['type'] === 'error') this.thinking = false;
       }),
       // Provisional streamed bullets (preview only, never the final answer).
       this.ws.streamPoints$.subscribe((pts) => (this.provisionalPoints = pts)),
@@ -425,12 +433,14 @@ export class InterviewComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Queue one interviewer clip. Only the newest clip is kept when the network
-   * is behind, because an older question is already out of date.
+   * Queue one interviewer clip, in order. Replacing the queued clip with the
+   * newest one used to drop the middle of a question whenever a clip was
+   * still in flight ("Can you explain the difference between" vanished and
+   * only "a process and a thread" reached the AI).
    */
   private enqueueClip(clip: { data: ArrayBuffer; mimeType: string }): void {
-    if (this.clipQueue.length) this.clipQueue = [clip];
-    else this.clipQueue.push(clip);
+    this.clipQueue.push(clip);
+    if (this.clipQueue.length > MAX_QUEUED_CLIPS) this.clipQueue.shift();
     this.pumpClipQueue();
   }
 
@@ -443,14 +453,18 @@ export class InterviewComponent implements OnInit, OnDestroy {
     // The live transcript may already have started the answer for this very
     // speech; keep saying so instead of stepping back to "Transcribing".
     const answering = this.thinking && this.audioStatus === 'Generating answer…';
-    if (!answering) this.audioStatus = 'Transcribing interviewer audio…';
+    if (!answering) this.audioStatus = 'Transcribing shared audio…';
     this.thinking = true;
     this.ws.sendAudioClip(clip.data, clip.mimeType, this.responseLength);
     // Safety valve: never stall the queue if the backend stays silent.
-    setTimeout(() => this.releaseClipSlot(), 10000);
+    if (this.clipSlotTimer) clearTimeout(this.clipSlotTimer);
+    this.clipSlotTimer = setTimeout(() => this.releaseClipSlot(), CLIP_SLOT_TIMEOUT_MS);
   }
 
   private releaseClipSlot(): void {
+    // A stale timer from an earlier clip must not free the slot of the next one.
+    if (this.clipSlotTimer) clearTimeout(this.clipSlotTimer);
+    this.clipSlotTimer = null;
     this.audioBusy = false;
     this.pumpClipQueue();
   }
@@ -566,7 +580,7 @@ export class InterviewComponent implements OnInit, OnDestroy {
   get lengthHint(): string {
     switch (this.responseLength) {
       case 'short': return '3–4 quick bullets';
-      default: return 'Complete answer + full interviewer checklist';
+      default: return 'Complete answer + full checklist';
     }
   }
 
@@ -703,7 +717,7 @@ export class InterviewComponent implements OnInit, OnDestroy {
       this.audioStatus = 'Paused — the AI is not listening.';
     } else {
       this.ws.setStatus('listening');
-      this.audioStatus = "Listening for the interviewer's question…";
+      this.audioStatus = 'Listening for the next question…';
     }
   }
 
@@ -893,7 +907,7 @@ export class InterviewComponent implements OnInit, OnDestroy {
     this.stopTimer();
     if (this.capturingInterviewer) {
       void this.stopInterviewerAudio();
-      this.error = 'Interview time limit (1h 15m) reached — interviewer audio stopped automatically.';
+      this.error = 'Interview time limit (1h 15m) reached — shared audio stopped automatically.';
     }
   }
 

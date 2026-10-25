@@ -35,6 +35,7 @@ import { BUSINESS } from '../../../core/business-info';
       <section class="legal-section">
         <h2>What you get</h2>
         <ul>
+          <li>Mock interviews with a score and feedback on every answer you give.</li>
           <li>Resume- and job-aware answer guidance for practice questions.</li>
           <li>Behavioral (STAR), technical and coding question support.</li>
           <li>Screenshot analysis of practice questions in the desktop app.</li>

@@ -319,6 +319,28 @@ def default_model_key() -> str:
     return DEFAULT_KEY
 
 
+def fallback_model_key(failed_key: str | None) -> str | None:
+    """Another configured + enabled model to try when ``failed_key`` is
+    rate-limited, out of quota or unreachable — or None when there is none.
+
+    Preference: the built-in fallbacks first (fast, steady), then catalog
+    order. Admin-disabled models are never used.
+    """
+    catalog = get_catalog()
+    try:
+        failed = get_model(failed_key).key
+    except ValueError:
+        failed = None
+    overrides = _load_overrides()
+    order = list(_DEFAULT_FALLBACKS) + [k for k in catalog if k not in _DEFAULT_FALLBACKS]
+    for key in order:
+        spec = catalog.get(key)
+        ov = overrides.get(key)
+        if key != failed and spec and spec.api_key and (ov.enabled if ov else True):
+            return key
+    return None
+
+
 def get_catalog() -> dict[str, ModelSpec]:
     return {m.key: m for m in _catalog()}
 

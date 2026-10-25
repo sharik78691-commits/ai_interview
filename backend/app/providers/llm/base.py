@@ -53,3 +53,11 @@ class LLMProvider(ABC):
         output); the candidate requests them with a button. Default: none.
         """
         return []
+
+    async def complete_json(self, system: str, user: str, max_tokens: int = 1200) -> dict:
+        """One free-form JSON request (mock-interview questions / feedback).
+
+        Providers that can call a real model override this. The default has
+        no model behind it, so callers fall back to their own templates.
+        """
+        raise NotImplementedError

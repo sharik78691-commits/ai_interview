@@ -10,10 +10,18 @@ from collections.abc import Awaitable, Callable
 from app.models.ai_response import AIInterviewResponse, FollowUp
 from app.providers.llm.base import LLMProvider
 from app.providers.llm.provider import LLMQuotaError, MockLLMProvider
-from app.providers.llm.registry import get_llm_provider
+from app.providers.llm.registry import fallback_model_key, get_llm_provider
 
 #: Resolves a model key (None = default model) to a provider instance.
 ProviderFactory = Callable[[str | None], LLMProvider]
+#: Second model to try when the first is rate-limited/unavailable (None = none).
+FallbackFactory = Callable[[str | None], LLMProvider | None]
+
+
+def registry_fallback(model_key: str | None) -> LLMProvider | None:
+    """Provider for another configured + enabled model, if there is one."""
+    key = fallback_model_key(model_key)
+    return get_llm_provider(key) if key else None
 
 
 class AIService:
@@ -26,6 +34,7 @@ class AIService:
         job_description: str = "",
         response_length: str = "medium",
         provider_factory: ProviderFactory | None = None,
+        fallback_factory: FallbackFactory | None = None,
     ) -> None:
         self.resume_text = resume_text or ""
         self.job_description = job_description or ""
@@ -33,6 +42,10 @@ class AIService:
         # None -> look up the module-level registry function at call time
         # (keeps existing monkeypatch-based tests working).
         self._provider_factory = provider_factory
+        self._fallback_factory = fallback_factory or registry_fallback
+        #: Set when the answer came from the fallback model:
+        #: {"provider", "model", "usage"} of the model that failed first.
+        self.last_fallback: dict | None = None
         # User-facing notice for the most recent call (None when all good).
         self.last_warning: str | None = None
         # Last provider/model actually used (for usage tracking + UI display).
@@ -61,6 +74,7 @@ class AIService:
         level = response_length or self.response_length
         self.response_length = level
         self.last_warning = None
+        self.last_fallback = None
         self.last_provider = getattr(provider, "name", "") or type(provider).__name__
         self.last_model = getattr(provider, "model", "") or ""
         # Passed only when there is history, so first questions (and providers
@@ -76,6 +90,8 @@ class AIService:
                     self.resume_text, self.job_description, question, level, **extra
                 )
         except LLMQuotaError as exc:
+            result = None
+            failure = exc
             if on_delta is not None and getattr(
                 provider, "stream_had_deltas", False
             ):
@@ -86,19 +102,24 @@ class AIService:
                         self.resume_text, self.job_description, question, level, **extra
                     )
                 except LLMQuotaError as exc2:
-                    self.last_warning = str(exc2)
-                    mock = MockLLMProvider()
-                    result = await mock.analyze_question(
-                        self.resume_text, self.job_description, question, level
-                    )
-            else:
+                    failure = exc2
+            if result is None:
+                # The model is rate-limited / out of quota / unreachable. A
+                # per-minute limit does not clear within the short retries, so
+                # ask another configured model once before falling back to
+                # template guidance.
+                result = await self._answer_with_fallback(provider, model_key, question, level, extra)
+            if result is None:
                 # Live AI is unusable right now — keep the interview flowing with
                 # template guidance, but tell the user why.
-                self.last_warning = str(exc)
+                self.last_warning = str(failure)
                 mock = MockLLMProvider()
                 result = await mock.analyze_question(
                     self.resume_text, self.job_description, question, level
                 )
+        if self.last_fallback is not None:
+            self._remember(question, result)
+            return result
         # Usage telemetry from the LIVE provider (never the mock fallback).
         self.last_usage = {
             "latency_ms": getattr(provider, "last_latency_ms", None),
@@ -111,6 +132,50 @@ class AIService:
             "error_category": getattr(provider, "last_error_category", None),
         }
         self._remember(question, result)
+        return result
+
+    async def _answer_with_fallback(
+        self,
+        failed: LLMProvider,
+        model_key: str | None,
+        question: str,
+        level: str,
+        extra: dict,
+    ) -> AIInterviewResponse | None:
+        """One single-shot answer from another model; None when there is none
+        or it fails too. Usage of BOTH models is kept for telemetry."""
+        try:
+            fallback = self._fallback_factory(model_key)
+        except Exception:
+            fallback = None
+        if fallback is None or isinstance(fallback, MockLLMProvider):
+            return None
+        failed_usage = {
+            "latency_ms": getattr(failed, "last_latency_ms", None),
+            "input_tokens": getattr(failed, "last_input_tokens", None),
+            "output_tokens": getattr(failed, "last_output_tokens", None),
+            "error_category": getattr(failed, "last_error_category", None),
+        }
+        try:
+            result = await fallback.analyze_question(
+                self.resume_text, self.job_description, question, level, **extra
+            )
+        except LLMQuotaError:
+            return None
+        self.last_fallback = {
+            "provider": self.last_provider,
+            "model": self.last_model,
+            "usage": failed_usage,
+        }
+        self.last_provider = getattr(fallback, "name", "") or type(fallback).__name__
+        self.last_model = getattr(fallback, "model", "") or ""
+        self.last_usage = {
+            "latency_ms": getattr(fallback, "last_latency_ms", None),
+            "first_delta_ms": None,
+            "input_tokens": getattr(fallback, "last_input_tokens", None),
+            "output_tokens": getattr(fallback, "last_output_tokens", None),
+            "error_category": getattr(fallback, "last_error_category", None),
+        }
         return result
 
     #: Turns kept for follow-up context (older ones add tokens, not signal).
