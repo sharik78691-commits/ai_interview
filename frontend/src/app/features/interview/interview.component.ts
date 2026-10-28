@@ -386,6 +386,8 @@ export class InterviewComponent implements OnInit, OnDestroy {
       this.interviewerAudio.livePcm$.subscribe((frame) => this.ws.sendLivePcm(frame)),
       // A short pause lets the backend answer a finished live sentence now.
       this.interviewerAudio.pause$.subscribe(() => this.ws.sendSpeechPause(this.responseLength)),
+      // The interviewer is talking again: a just-cut clip is not the whole question.
+      this.interviewerAudio.speechStart$.subscribe(() => this.ws.sendSpeechStart()),
       this.ws.liveText$.subscribe((t) => this.onLiveText(t)),
       this.ws.handshake$.subscribe(() => this.resumeCaptureOnServer()),
       // When Auto Select needs a system-audio device, surface the setup helper
@@ -494,7 +496,11 @@ export class InterviewComponent implements OnInit, OnDestroy {
       if (!t.text) return;
       // A preview of an older clip than the one shown is out of date.
       if (t.seq !== undefined && t.seq < this.interimSeq) return;
-      this.interviewerInterim = t.text;
+      // Batch STT closes every snapshot with "." / "?" ("Explain the Java.")
+      // that the next, longer snapshot drops again, so the line's end kept
+      // flickering and the typewriter had to back up. Provisional text shows
+      // no closing punctuation; the final transcript brings it.
+      this.interviewerInterim = t.text.replace(/[\s.,;:!?…]+$/u, '');
       this.interimSeq = t.seq ?? this.interimSeq;
       this.syncLive();
       return;

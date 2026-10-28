@@ -88,6 +88,15 @@ export class InterviewerAudioService {
   /** Set by the page when the backend answers from the live stream. */
   liveAnswers = false;
   /**
+   * Fires once per clip as soon as it holds MIN_VOICED_MS of real speech —
+   * the same bar that keeps the clip, so every signal is followed by a clip.
+   * Tells the backend the interviewer is talking again, so the clip it just
+   * transcribed ("Explain the Java collection framework" + pause) is held
+   * for the rest of the question instead of answered half-asked.
+   */
+  readonly speechStart$ = new Subject<void>();
+  private speechAnnounced = false;
+  /**
    * Paused: capture stays open, but every sample is dropped before it reaches
    * clips, previews or the live stream — nothing goes to STT or the AI.
    */
@@ -558,7 +567,15 @@ export class InterviewerAudioService {
     this.clipHasSpeech = false;
     this.voicedMs = 0;
     this.lastPreviewMs = 0;
+    this.speechAnnounced = false;
     this.clipStartedAt = Date.now();
+  }
+
+  /** Emit speechStart$ once per clip, when it first holds real speech. */
+  private _announceSpeech(): void {
+    if (this.speechAnnounced || this.voicedMs < MIN_VOICED_MS) return;
+    this.speechAnnounced = true;
+    this.speechStart$.next();
   }
 
   /**
@@ -654,6 +671,7 @@ export class InterviewerAudioService {
         this.silentTicks = 0;
         this.clipHasSpeech = true;
         this.voicedMs += 100;
+        this._announceSpeech();
         if (this.pendingCount * CHUNK_MS >= MAX_CLIP_MS) void this._cutClip();
       }
     }, 100);
@@ -675,6 +693,7 @@ export class InterviewerAudioService {
       this.clipHasSpeech = true;
       this.voicedMs += durationMs;
       this.silentMs = 0;
+      this._announceSpeech();
     } else {
       const wasSilentMs = this.silentMs;
       this.silentMs += durationMs;

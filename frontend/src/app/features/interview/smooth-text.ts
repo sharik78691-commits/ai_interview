@@ -34,7 +34,7 @@ export class SmoothText {
   constructor(
     private readonly tickMs = 30,
     private readonly catchUp = 5,
-    private readonly maxSpreadMs = 1_200,
+    private readonly maxSpreadMs = 900,
   ) {}
 
   set(target: string): void {
@@ -84,7 +84,9 @@ export class SmoothText {
     const left = this.target.length - this.shown.length;
     if (left <= 0) return;
     const spread = this.gapMs
-      ? Math.min(this.maxSpreadMs, Math.max(this.tickMs * this.catchUp, this.gapMs * 0.9))
+      ? // 60% of the gap: words still flow, but reach the screen sooner (the
+        // whole spread is extra lag behind the speaker).
+        Math.min(this.maxSpreadMs, Math.max(this.tickMs * this.catchUp, this.gapMs * 0.6))
       : this.tickMs * this.catchUp;
     const ticks = Math.max(1, Math.round(spread / this.tickMs));
     this.step = Math.max(1, Math.ceil(left / ticks));

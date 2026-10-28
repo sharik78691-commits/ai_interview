@@ -314,6 +314,23 @@ _NEXT_QUESTION_OPENER = re.compile(
 )
 
 
+#: An English question or prompt clause ANYWHERE in the utterance. Batch STT
+#: often returns a long, unpunctuated, lower-case run-on with a filler lead-in
+#: ("yeah hi so let me start with that question so what is the difference
+#: between hashmap and hashtable"); with only front-anchored cues that was
+#: dropped as housekeeping (seen locally 2026-10-29). Deliberately clause-shaped
+#: ("what is", "can you", "difference between"), not bare words, so "let me
+#: pull up your resume" stays noise.
+_EMBEDDED_Q_RE = re.compile(
+    r"\b(?:what|how|why|which|when|where|who)\s+(?:is|are|was|were|do|does|did|would|will|can|could|should|happens?)\b"
+    r"|\bwhat's\b|\bhow's\b"
+    r"|\b(?:can|could|would|will)\s+you\b"
+    r"|\btell\s+(?:me|us)\b|\bwalk\s+(?:me|us)\s+through\b"
+    r"|\bexplain\b|\bdescribe\b|\bdifference\s+between\b",
+    re.IGNORECASE,
+)
+
+
 def _has_question_signal(text: str) -> bool:
     """Does the utterance carry ANY question/prompt cue, in any supported form?
 
@@ -334,6 +351,8 @@ def _has_question_signal(text: str) -> bool:
     if _HINDI_Q_RE.search(t):
         return True
     if _PROMPT_RE.match(t):
+        return True
+    if _EMBEDDED_Q_RE.search(t):
         return True
     return bool(_HINDI_PROMPT_RE.search(t))
 
@@ -394,6 +413,8 @@ def classify(text: str) -> str:
         return ANSWER
     if _HINDI_PROMPT_RE.search(t):
         return ANSWER
+    if _EMBEDDED_Q_RE.search(t):
+        return ANSWER  # "so let me start with … so what is the difference between …"
 
     # Safety net. Every recognisable noise class above has already been
     # removed, so a substantial utterance left over is an interviewer asking
@@ -504,6 +525,11 @@ class QuestionBuffer:
         self._held: str = ""
         self._held_at: float = 0.0
         self._held_context = False
+        # Held because the interviewer kept talking after this clip (see
+        # hold_continuing): stitched onto the next clip whatever it opens with,
+        # and released by the caller when the speaker goes quiet — never by
+        # the HOLD_MS deadline, so a long continuation cannot drop it.
+        self._held_continuing = False
 
     # ---------------------------------------------------------------- held
     @property
@@ -518,23 +544,65 @@ class QuestionBuffer:
         and a question that was already stitched away is simply gone — the same
         question can never be answered twice.
         """
-        if not self._held:
-            return None
+        if not self._held or self._held_continuing:
+            return None  # a continuing hold is released by take_continuing()
         now = time.monotonic() if now is None else now
         if (now - self._held_at) * 1000 < self.HOLD_MS:
             return None
         held, self._held, self._held_at = self._held, "", 0.0
         return held
 
+    @property
+    def holding_continuing(self) -> bool:
+        """True while a clip waits for the rest of a still-spoken question."""
+        return bool(self._held) and self._held_continuing
+
+    def hold_continuing(self, text: str, now: float | None = None) -> None:
+        """The interviewer started talking again right after this clip, so it
+        is not the whole question even if it reads like one ("Explain the Java
+        collection framework" + pause + "hierarchy"). Hold it for the next clip.
+        """
+        self._hold(text, time.monotonic() if now is None else now)
+        self._held_continuing = True
+
+    @property
+    def held_text(self) -> str:
+        return self._held
+
+    @property
+    def holding_context(self) -> bool:
+        """True while a set-up statement waits for its question."""
+        return bool(self._held) and self._held_context
+
+    def take_held(self, expect: str) -> str | None:
+        """Release a plain half-question hold early (once), if it is still
+        exactly ``expect`` — e.g. when the speaker has gone quiet. Context and
+        continuing holds have their own release paths."""
+        if self._held and self._held == expect and not self._held_context and not self._held_continuing:
+            held = self._held
+            self._clear_held()
+            return held
+        return None
+
+    def take_continuing(self) -> str | None:
+        """Release a continuing hold (the speaker went quiet, nothing came)."""
+        if not self.holding_continuing:
+            return None
+        held = self._held
+        self._clear_held()
+        return held
+
     def _hold(self, text: str, now: float, context: bool = False) -> None:
         self._held = text
         self._held_at = now
         self._held_context = context
+        self._held_continuing = False
 
     def _clear_held(self) -> None:
         self._held = ""
         self._held_at = 0.0
         self._held_context = False
+        self._held_continuing = False
 
     # ------------------------------------------------------------- streaming
     def push(self, fragment: str) -> str | None:
@@ -581,7 +649,8 @@ class QuestionBuffer:
         now = time.monotonic() if now is None else now
         incoming = (text or "").strip()
         held = self._held
-        expired = bool(held) and (now - self._held_at) * 1000 >= self.HOLD_MS
+        continuing = self.holding_continuing
+        expired = bool(held) and not continuing and (now - self._held_at) * 1000 >= self.HOLD_MS
 
         # 0. A set-up statement is waiting: the next prompt is its question, so
         #    it is stitched even when it opens a question of its own ("In your
@@ -606,7 +675,12 @@ class QuestionBuffer:
         #    does not open a question of its own. (After an abandoned "Can you
         #    explain the difference between", a fresh "What is a closure?" must
         #    NOT be glued onto it.)
-        if held and incoming and not expired and not _starts_new_question(incoming):
+        #    A continuing hold is the same turn by definition (the speaker never
+        #    went quiet in between), so it is stitched whatever this clip opens
+        #    with — and a backchannel ("okay") never releases it.
+        if continuing and incoming and classify(incoming) == NOISE:
+            return None
+        if held and incoming and not expired and (continuing or not _starts_new_question(incoming)):
             self._clear_held()
             stitched = f"{held} {incoming}".strip()
             # Once stitching was needed the clip boundary is proven unreliable,
