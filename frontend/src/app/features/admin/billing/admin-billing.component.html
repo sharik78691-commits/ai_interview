@@ -150,9 +150,33 @@
         @if (pd.payment.refunded_at || pd.payment.refund_reference) {
           <dt>Refund / dispute</dt><dd>{{ (pd.payment.refunded_at | date: 'medium') || '' }} <span class="mono">{{ pd.payment.refund_reference }}</span></dd>
         }
+        @if (pd.payment.disputed_at) {
+          <dt>Chargeback</dt>
+          <dd>
+            Opened {{ pd.payment.disputed_at | date: 'medium' }} · <span class="mono">{{ pd.payment.dispute_status || 'open' }}</span>
+            @if (pd.payment.status === 'disputed' && pd.payment.dispute_respond_by) {
+              · <span class="warn">respond by {{ pd.payment.dispute_respond_by | date: 'medium' }}</span>
+            }
+          </dd>
+        }
         @if (pd.payment.failure_reason) { <dt>Note</dt><dd>{{ pd.payment.failure_reason }}</dd> }
         <dt>Subscription</dt><dd>{{ pd.subscription ? '#' + pd.subscription.id + ' · ' + pd.subscription.status : 'none' }}</dd>
       </dl>
+      @if (pd.payment.status === 'disputed') {
+        <div class="banner info small">
+          Chargeback open — access is kept until it is decided. Download the evidence pack and upload it on the
+          gateway's dispute page before the deadline. If the customer is right, accept the dispute there; don't refund separately.
+        </div>
+      }
+      <div class="ab-actions">
+        @if (pd.payment.status === 'paid' && pd.payment.gateway === 'cashfree') {
+          <input type="text" class="small" maxlength="500" [(ngModel)]="refundReason" placeholder="Refund reason (stored in audit log)" aria-label="Refund reason" />
+          <button type="button" class="btn-ghost btn-sm danger" [disabled]="busy()" (click)="refundPayment(pd.payment)">Refund {{ money(pd.payment.amount_minor, pd.payment.currency) }}</button>
+        }
+        @if (pd.payment.status === 'paid' || pd.payment.status === 'disputed' || pd.payment.disputed_at) {
+          <button type="button" class="btn-ghost btn-sm" (click)="downloadEvidence(pd.payment)">Download dispute evidence</button>
+        }
+      </div>
       <h4>Webhook events</h4>
       <ul class="audit small">
         @for (e of pd.webhook_events; track e.id) {
@@ -160,7 +184,7 @@
             @if (e.processing_error) { · <span class="danger">{{ e.processing_error }}</span> }</li>
         } @empty { <li class="muted">No webhooks received for this payment.</li> }
       </ul>
-      <p class="muted small">Refunds are issued in the gateway dashboard; the refund webhook then updates this payment and ends the access automatically.</p>
+      <p class="muted small">Refunds made here, or in the gateway dashboard, end the access automatically (the refund webhook updates this payment). Refunds are possible up to 180 days after payment.</p>
     </div>
   }
 
@@ -182,6 +206,15 @@
         <div class="kpi"><span class="kpi-label">Successful payments</span><strong>{{ (o.payments_by_status['paid'] || 0) | number }}</strong></div>
         <div class="kpi"><span class="kpi-label">Failed payments</span><strong>{{ (o.payments_by_status['failed'] || 0) | number }}</strong></div>
         <div class="kpi"><span class="kpi-label">Payment success rate</span><strong>{{ o.payment_success_rate === null ? '—' : (o.payment_success_rate * 100 | number: '1.0-1') + '%' }}</strong></div>
+        <div class="kpi"><span class="kpi-label">Chargeback ratio</span>
+          <strong [class.warn]="disputeLevel(o) === 'warn'" [class.danger]="disputeLevel(o) === 'danger'">
+            {{ o.dispute_value_rate_inr == null ? (o.dispute_rate == null ? '—' : (o.dispute_rate * 100 | number: '1.0-2') + '%') : (o.dispute_value_rate_inr * 100 | number: '1.0-2') + '%' }}
+          </strong>
+          <span class="muted small">{{ o.disputes_count ?? 0 }} disputed · keep below 1%</span></div>
+        <div class="kpi"><span class="kpi-label">Open chargebacks</span>
+          <strong [class.warn]="(o.open_disputes ?? 0) > 0">{{ (o.open_disputes ?? 0) | number }}</strong>
+          @if (o.next_dispute_deadline) { <span class="muted small">next deadline {{ o.next_dispute_deadline | date: 'medium' }}</span> }
+        </div>
         <div class="kpi"><span class="kpi-label">Screenshots analyzed</span><strong>{{ o.screenshots_analyzed | number }}</strong>
           <span class="muted small">{{ o.screenshot_requests | number }} requests · {{ o.screenshot_failures | number }} failed</span></div>
       </div>

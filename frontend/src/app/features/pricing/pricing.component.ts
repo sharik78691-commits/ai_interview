@@ -6,6 +6,7 @@ import { HttpErrorResponse } from '@angular/common/http';
 import { catchError, firstValueFrom, forkJoin, of } from 'rxjs';
 import { AuthService } from '../../core/auth/auth.service';
 import { BUSINESS } from '../../core/business-info';
+import { environment } from '../../../environments/environment';
 import { CheckoutLauncherService } from '../../core/payments/checkout-launcher.service';
 import { BillingService } from '../../core/services/billing.service';
 import {
@@ -205,9 +206,28 @@ export class PricingComponent implements OnInit {
     return `Get ${p.name}`;
   }
 
+  /**
+   * Desktop app: the gateway's checkout redirects to the WEBSITE's /billing,
+   * which a file:// app window cannot handle. Payment is completed on the
+   * website in the default browser instead (the desktop window hands https
+   * links to it); the plan belongs to the account, so it works in the app too.
+   */
+  readonly isDesktop = environment.electron;
+  readonly websitePricing = `${BUSINESS.website}/pricing`;
+
+  payInBrowser(): void {
+    window.open(this.websitePricing, '_blank', 'noopener');
+    this.show(
+      'Checkout opened in your web browser. Sign in there with the same account, complete the payment, ' +
+        'then come back here — your plan is active in the app as soon as the payment is confirmed.',
+      'info',
+    );
+  }
+
   async pay(): Promise<void> {
     const plan = this.selected();
     if (!plan || !this.gateway || this.busy()) return;
+    if (this.isDesktop) return this.payInBrowser();
     if (this.needsPhone() && this.phone.replace(/\D/g, '').length < 10) {
       this.show('Cashfree needs a 10-digit mobile number for the payment.', 'error');
       return;

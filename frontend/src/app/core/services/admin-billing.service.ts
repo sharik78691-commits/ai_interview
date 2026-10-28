@@ -10,6 +10,7 @@ import {
   AuditEntry,
   BillingOverview,
   Currency,
+  DisputeEvidence,
   Paged,
   PaymentRecord,
   PaymentSettingsUpdate,
@@ -200,6 +201,15 @@ export class AdminBillingService {
 
   reconcile(paymentId: number): Observable<VerifyResponse> {
     return this.http.post<VerifyResponse>(`${this.base}/api/admin/payments/${paymentId}/reconcile`, {});
+  }
+
+  /** Full refund through the gateway; ends the access the payment bought. */
+  refund(paymentId: number, reason: string): Observable<VerifyResponse> {
+    return this.http.post<VerifyResponse>(`${this.base}/api/admin/payments/${paymentId}/refund`, { reason });
+  }
+
+  evidence(paymentId: number): Observable<DisputeEvidence> {
+    return this.http.get<DisputeEvidence>(`${this.base}/api/admin/payments/${paymentId}/evidence`);
   }
 
   audit(filters: AuditFilters | number = {}): Observable<AuditEntry[]> {

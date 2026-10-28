@@ -34,13 +34,17 @@ describe('Payment-gateway approval pages', () => {
   it('About us names the operator and describes practice & preparation', () => {
     const t = text(AboutComponent);
     expect(t).toContain(BUSINESS.operatorName);
-    expect(t).toContain('Mohammed Raees Shaikh, Mumbai, Maharashtra, India');
+    expect(t).toContain('Mohammed Raees Shaikh, India');
+    expect(t).not.toContain('Mumbai');
+    expect(t).not.toContain('Maharashtra');
     expect(t).toContain('practice and preparation');
   });
 
-  it('Contact page shows city/state and a grievance officer', () => {
+  it('Contact page shows the country and a grievance officer', () => {
     const t = text(ContactComponent).replace(/\s+/g, ' ');
-    expect(t).toContain('Mumbai, Maharashtra, India');
+    expect(t).toContain('India');
+    expect(t).not.toContain('Mumbai');
+    expect(t).not.toContain('Maharashtra');
     expect(t).toContain('Grievance officer');
     expect(t).toContain(`grievance officer, ${BUSINESS.operatorName} (Proprietor)`);
     expect(t).toContain(BUSINESS.email);

@@ -55,6 +55,10 @@ coverage/
 release/
 tmp/
 
+# Local project folders
+/tauri-hello/
+/marketing/
+
 # Local databases and application logs
 backend/*.db
 backend/*.sqlite

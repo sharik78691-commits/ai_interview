@@ -125,6 +125,8 @@ def payment_out(p: Payment, subscription_id: int | None = None) -> PaymentOut:
         verified_via=p.verified_via, is_renewal=p.is_renewal,
         created_at=aware(p.created_at), paid_at=aware(p.paid_at),
         refunded_at=aware(p.refunded_at), refund_reference=p.refund_reference or "",
+        disputed_at=aware(p.disputed_at), dispute_status=p.dispute_status or "",
+        dispute_respond_by=aware(p.dispute_respond_by),
         subscription_id=subscription_id,
     )
 

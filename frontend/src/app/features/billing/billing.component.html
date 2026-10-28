@@ -97,7 +97,12 @@
                     @if (p.status === 'failed' && p.failure_reason) { <div class="muted small">{{ p.failure_reason }}</div> }
                   </td>
                   <td class="cap">{{ p.gateway }}</td>
-                  <td class="mono small">{{ p.gateway_payment_id || p.gateway_order_id }}</td>
+                  <td class="mono small">
+                    {{ p.gateway_payment_id || p.gateway_order_id }}
+                    @if (p.status === 'paid' || p.status === 'disputed') {
+                      <div><a class="help-link" [href]="helpLink(p)">Get help / request refund</a></div>
+                    }
+                  </td>
                 </tr>
               }
             </tbody>
@@ -134,8 +139,10 @@
     </section>
 
     <p class="muted small foot">
-      Questions about a payment? <a routerLink="/contact">Contact support</a> with the reference shown above.
-      See the <a routerLink="/refund-policy">Refund &amp; Cancellation Policy</a>.
+      Problem with a payment, or want a refund? Email <a [href]="'mailto:' + supportEmail">{{ supportEmail }}</a>
+      or <a routerLink="/contact">contact support</a> with the reference shown above. We review every refund
+      request within 5 business days. Please write to us before raising a dispute with your bank, since we can
+      usually sort it out much faster. See the <a routerLink="/refund-policy">Refund &amp; Cancellation Policy</a>.
     </p>
   }
 </div>

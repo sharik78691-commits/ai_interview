@@ -225,6 +225,9 @@ class PaymentOut(BaseModel):
     paid_at: Optional[datetime]
     refunded_at: Optional[datetime] = None
     refund_reference: str = ""
+    disputed_at: Optional[datetime] = None
+    dispute_status: str = ""
+    dispute_respond_by: Optional[datetime] = None
     subscription_id: Optional[int] = None
 
 
@@ -389,6 +392,10 @@ class RevokeRequest(BaseModel):
     reason: str = Field(min_length=3, max_length=500)
 
 
+class RefundRequest(BaseModel):
+    reason: str = Field(min_length=3, max_length=500)
+
+
 class CreditsRequest(BaseModel):
     allowance: int = Field(ge=0, le=100_000)
     reason: str = Field(min_length=3, max_length=500)
@@ -484,3 +491,13 @@ class BillingOverview(BaseModel):
     screenshots_analyzed: int
     screenshot_failures: int
     payment_success_rate: Optional[float]
+    #: Chargebacks: payments created in the range that were EVER disputed
+    #: (won, lost or open), as a share of captured payments. Cashfree may end
+    #: the merchant account above 1% (by value).
+    disputes_count: int = 0
+    dispute_rate: Optional[float] = None
+    #: Same ratio by INR value (Cashfree's measure), None without INR sales.
+    dispute_value_rate_inr: Optional[float] = None
+    #: Disputes still open right now (all time) and the nearest evidence deadline.
+    open_disputes: int = 0
+    next_dispute_deadline: Optional[datetime] = None

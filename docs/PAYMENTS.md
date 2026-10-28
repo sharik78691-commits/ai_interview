@@ -11,9 +11,10 @@ database-driven pricing, user and admin billing views, and a full audit trail.
 | Public pricing page reads `/api/plans` | ✅ Done. Admin price edits show without redeploying |
 | Checkout → verify → activation (gateway-agnostic) | ✅ Done, end-to-end tested with the mock gateway |
 | Razorpay adapter (Orders API, checkout signature, API confirmation, webhooks) | ✅ Implemented and unit-tested against a mocked HTTP transport. ⏳ **Not yet run against Razorpay** (no credentials) |
-| Cashfree adapter (PG Orders API, JS SDK redirect, API confirmation, signed webhooks) | ✅ Implemented and unit-tested against a mocked HTTP transport. ⏳ **Not yet run against Cashfree** (no credentials) |
+| Cashfree adapter (PG Orders API, JS SDK redirect, API confirmation, signed webhooks) | ✅ **Live in production** (Render) since 2026-10. Refund API and dispute webhooks added 2026-10-28 and unit-tested against a mocked HTTP transport |
 | Auto-renewal / recurring mandates | ❌ Not implemented. Monthly/Quarterly are sold **prepaid** for 30/90 days; all copy says "no auto-renewal" (see *Recurring billing*) |
-| Refunds | Issued in the gateway dashboard. Refund / chargeback **webhooks** now update the payment and end the access automatically |
+| Refunds | ✅ One-click full refund in Admin › Payments (Cashfree API), or in the gateway dashboard. Either way, access ends automatically (see *Refunds & chargebacks*) |
+| Chargebacks | ✅ Cashfree / Razorpay dispute webhooks: opened → flagged (access kept), won → paid again, lost → treated as a refund. Chargeback ratio, open disputes and an evidence pack in the admin panel |
 | Feature gating by subscription | ✅ Screenshot analysis (credits, below) and, since 2026-10-22, **live interview** after the one-time free trial (see *Free trial*) |
 | 2026-10 catalogue: 5 plans, exact-hour durations, screenshot credits | ✅ Done, tested (SQLite + PostgreSQL 18), applied to the local dev DB |
 | INR + USD per-currency prices, admin-managed | ✅ Done. **USD prices are not set** — an admin enters them; USD checkout also needs `*_CURRENCIES` and the gateway's international payments |
@@ -216,14 +217,44 @@ migration and seeding twice on a populated database changes nothing.
 6. Recommended: alerting on `payments.status='failed'` with an "Amount mismatch" reason,
    and on webhook rows with `processing_error`.
 
+## Refunds & chargebacks
+
+**Cashfree dashboard setup (one time):** Developers → Webhooks → add
+`https://<backend>/api/payments/webhooks/cashfree` for the **Refund** and **Dispute**
+events. Payment events already arrive through each order's `notify_url`, but refund and
+dispute events are only sent to endpoints configured in the dashboard.
+
+| Event | What happens |
+|-------|--------------|
+| Admin clicks **Refund** (Admin › Payments › payment) | Full refund through `POST /pg/orders/{order}/refunds` with refund id `rf_<receipt>`, so a double click or retry can never refund twice. Access ends as soon as Cashfree accepts the refund. Paid payments only, at most 180 days old, never while a chargeback is open |
+| `REFUND_STATUS_WEBHOOK` (SUCCESS) | Full refund → payment `refunded`, subscription `refunded`. Partial refund → recorded, access kept. Idempotent after an admin refund |
+| `DISPUTE_CREATED` / `DISPUTE_UPDATED` (open statuses) | Payment `disputed`, `disputed_at` set once, gateway status and `respond_by` deadline stored. **Access is kept** |
+| `…_MERCHANT_WON` | Payment back to `paid`; access untouched |
+| `…_MERCHANT_LOST` / `…_MERCHANT_ACCEPTED` | Same as a full refund: access ends |
+| `RETRIEVAL_*`, `…_INSUFFICIENT_EVIDENCE` | Stays `disputed` (document request, not a final result) |
+
+* **Chargeback ratio** (Admin › Overview): payments in the range that were *ever* disputed,
+  as a share of captured payments, by count and by INR value. It turns amber at 0.5% and red
+  at 1%, which is Cashfree's termination threshold.
+* **Evidence pack** (payment detail → *Download dispute evidence*): the verified payment, the
+  account, sign-ins / interviews / AI answers / screenshots during the paid period, and the
+  policy links shown at purchase, as an upload-ready `.txt`. Built only from data we already
+  store (`app/services/dispute_evidence.py`).
+* **Users:** each paid payment on `/billing` has a pre-filled "Get help / request refund"
+  email, and the page asks people to contact support before raising a bank dispute.
+* Migration: `payments.disputed_at`, `dispute_status`, `dispute_respond_by` are added on
+  start by `_ensure_billing_columns` (additive, idempotent).
+
 ## Known limitations
 
 * **Desktop app:** Cashfree's redirect returns to the website's `/billing`, not the
-  `file://` app. Recommend buying on the website. Razorpay's popup should work in the
-  desktop window but hasn't been tested there.
-* **Gateway field names** (Cashfree webhook idempotency header, payment-group labels) follow
-  the public docs and need confirming in sandbox. Unknown events are stored and acknowledged
-  as `ignored`.
-* Refunds and chargebacks don't update `payments` automatically. Record them by revoking
-  access in the admin panel with a reason.
+  `file://` app. The desktop pricing page therefore opens the website's pricing page in the
+  default browser (`environment.electron` only; the web build is unchanged). The plan
+  belongs to the account, so it works in the app after payment. This ships with the next
+  `.exe` build.
+* **Gateway field names** for dispute webhooks (`data.dispute`, `data.order_details`,
+  `dispute_status` values) follow Cashfree's public docs. Check the first real dispute in
+  Admin › payment › Webhook events. Unknown events are stored and acknowledged as `ignored`.
+* Admin refunds are full refunds via Cashfree only. Partial refunds, or refunds for other
+  gateways, are made in the gateway dashboard and arrive through the refund webhook.
 * The rate limiter is per process (see ARCHITECTURE §7).

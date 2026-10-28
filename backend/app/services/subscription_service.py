@@ -314,7 +314,9 @@ def activate_from_payment(db: Session, payment: Payment, now: datetime | None = 
     return sub
 
 
-def end_for_payment(db: Session, payment: Payment, *, status: str, reason: str) -> UserSubscription | None:
+def end_for_payment(
+    db: Session, payment: Payment, *, status: str, reason: str, actor_user_id: int | None = None,
+) -> UserSubscription | None:
     """Refund / lost chargeback: end the access the payment bought (caller commits).
 
     Usage history is kept; only the subscription's stored status changes.
@@ -324,7 +326,7 @@ def end_for_payment(db: Session, payment: Payment, *, status: str, reason: str) 
         return sub
     sub.status = status
     sub.revoked_at = utcnow()
-    _audit(db, action="refund", user_id=sub.user_id, subscription_id=sub.id,
+    _audit(db, action="refund", user_id=sub.user_id, actor_user_id=actor_user_id, subscription_id=sub.id,
            payment_id=payment.id, plan_id=sub.plan_id, reason=reason,
            details={"status": status, "expires_at": aware(sub.expires_at),
                     "screenshots_used": sub.screenshots_used})

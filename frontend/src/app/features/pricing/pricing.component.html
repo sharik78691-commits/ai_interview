@@ -163,7 +163,12 @@
             </label>
           }
         </fieldset>
-        @if (needsPhone()) {
+        @if (isDesktop) {
+          <div class="banner info small">
+            For your security, payment is completed on our website in your web browser.
+            Sign in there with the same account; your plan then works in this app too.
+          </div>
+        } @else if (needsPhone()) {
           <label class="field">
             <span class="small">Mobile number (required by Cashfree, not stored by us)</span>
             <input type="tel" inputmode="tel" autocomplete="tel" maxlength="20" [(ngModel)]="phone" placeholder="10-digit mobile number" />
@@ -175,7 +180,7 @@
         <div class="checkout-actions">
           <button type="button" class="btn-ghost" (click)="cancel()" [disabled]="busy()">Cancel</button>
           <button type="button" class="btn-primary" (click)="pay()" [disabled]="busy() || !gateway">
-            {{ busy() ? 'Please wait…' : 'Pay ' + money(plan.price_minor, plan.currency) }}
+            {{ busy() ? 'Please wait…' : isDesktop ? 'Continue to payment in browser' : 'Pay ' + money(plan.price_minor, plan.currency) }}
           </button>
         </div>
         <p class="muted small">

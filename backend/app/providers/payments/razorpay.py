@@ -210,10 +210,11 @@ class RazorpayGateway(PaymentGateway):
                 amount_minor=int(refund["amount"]) if "amount" in refund else None,
                 currency=str(refund.get("currency") or "") or base.currency,
             )
-        if event_type in ("payment.dispute.created", "payment.dispute.lost"):
+        if event_type in ("payment.dispute.created", "payment.dispute.won", "payment.dispute.lost"):
             dispute = (payload.get("dispute") or {}).get("entity") or {}
+            outcome = {"created": "disputed", "won": "dispute_won"}.get(event_type.rsplit(".", 1)[1], "dispute_lost")
             return replace(
-                base, outcome="disputed" if event_type.endswith("created") else "dispute_lost",
+                base, outcome=outcome, dispute_status=event_type.rsplit(".", 1)[1].upper(),
                 reference=str(dispute.get("id") or "")[:100],
                 failure_reason=str(dispute.get("reason_code") or "")[:300],
             )

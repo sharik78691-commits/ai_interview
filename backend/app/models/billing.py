@@ -259,6 +259,13 @@ class Payment(Base):
     refunded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Gateway refund / dispute id, when the gateway reported one.
     refund_reference: Mapped[str] = mapped_column(String(100), default="", nullable=False)
+    # First time a chargeback/dispute was opened. Kept after the dispute is won
+    # or lost so the chargeback ratio counts every disputed payment.
+    disputed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Latest gateway dispute status (e.g. CHARGEBACK_CREATED, DISPUTE_MERCHANT_WON).
+    dispute_status: Mapped[str] = mapped_column(String(40), default="", nullable=False)
+    # Deadline to upload evidence at the gateway, when it sent one.
+    dispute_respond_by: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
     )

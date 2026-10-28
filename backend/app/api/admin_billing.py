@@ -82,6 +82,7 @@ from app.schemas.billing import (
     PlanUpdate,
     PriceOut,
     PriceSet,
+    RefundRequest,
     RevokeRequest,
     SubscriptionOut,
     VerifyResponse,
@@ -89,6 +90,7 @@ from app.schemas.billing import (
 from app.services import payment_service, pricing_service as pricing, subscription_service as subs
 from app.services import payment_settings_service as payment_settings
 from app.services import screenshot_credit_service as credits
+from app.services.dispute_evidence import build_evidence
 from app.services.billing_views import (
     audit_out,
     payment_out,
@@ -687,6 +689,39 @@ async def reconcile_payment(
     return VerifyResponse(**result.__dict__)
 
 
+@router.post("/payments/{payment_id}/refund", response_model=VerifyResponse)
+async def refund_payment(
+    payment_id: int,
+    body: RefundRequest,
+    request: Request,
+    admin: User = Depends(require_admin),
+    _csrf: None = Depends(require_csrf),
+    db: Session = Depends(get_db),
+) -> VerifyResponse:
+    """Full refund through the gateway; ends the access the payment bought.
+    Safe to retry: the gateway refund id is fixed per payment."""
+    try:
+        result = await payment_service.admin_refund(db, payment_id, admin_id=admin.id, reason=body.reason.strip())
+    except payment_service.PaymentError as exc:
+        code = status.HTTP_404_NOT_FOUND if str(exc) == "Payment not found." else status.HTTP_409_CONFLICT
+        raise HTTPException(code, str(exc)) from exc
+    except PaymentGatewayError as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc) or "Gateway error.") from exc
+    return VerifyResponse(**result.__dict__)
+
+
+@router.get("/payments/{payment_id}/evidence")
+def payment_evidence(
+    payment_id: int, request: Request, admin: User = Depends(require_admin), db: Session = Depends(get_db),
+) -> dict:
+    """Chargeback evidence pack (payment, account, usage in the paid period)."""
+    data = build_evidence(db, payment_id)
+    if data is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Payment not found.")
+    logger.info("Admin %s built dispute evidence for payment %s", admin.id, payment_id)
+    return data
+
+
 # ------------------------------------------------------------ usage
 
 
@@ -786,6 +821,17 @@ def billing_overview(
     paid = by_status.get(PaymentStatus.PAID, 0) + by_status.get(PaymentStatus.REFUNDED, 0) \
         + by_status.get(PaymentStatus.DISPUTED, 0)
     failed = by_status.get(PaymentStatus.FAILED, 0)
+    ever_disputed = Payment.disputed_at.is_not(None)
+    inr = Payment.currency == "INR"
+    disputes = db.execute(window(select(
+        func.sum(case((ever_disputed, 1), else_=0)),
+        func.coalesce(func.sum(case((inr, Payment.amount_minor), else_=0)), 0),
+        func.coalesce(func.sum(case((inr & ever_disputed, Payment.amount_minor), else_=0)), 0),
+    ).where(Payment.status.in_((PaymentStatus.PAID, PaymentStatus.REFUNDED, PaymentStatus.DISPUTED))),
+        Payment.created_at)).one()
+    disputed_count, inr_value, inr_disputed = int(disputes[0] or 0), int(disputes[1]), int(disputes[2])
+    open_disputes = db.execute(select(func.count(Payment.id), func.min(Payment.dispute_respond_by))
+                               .where(Payment.status == PaymentStatus.DISPUTED)).one()
     return BillingOverview(
         date_from=start, date_to=end,
         total_users=db.scalar(window(select(func.count(User.id)), User.created_at)) or 0,
@@ -800,6 +846,11 @@ def billing_overview(
         screenshots_analyzed=int(usage[1] or 0),
         screenshot_failures=int(usage[2] or 0),
         payment_success_rate=round(paid / (paid + failed), 4) if (paid + failed) else None,
+        disputes_count=disputed_count,
+        dispute_rate=round(disputed_count / paid, 4) if paid else None,
+        dispute_value_rate_inr=round(inr_disputed / inr_value, 4) if inr_value else None,
+        open_disputes=int(open_disputes[0] or 0),
+        next_dispute_deadline=subs.aware(open_disputes[1]),
     )
 
 

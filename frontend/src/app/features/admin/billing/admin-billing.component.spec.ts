@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { of } from 'rxjs';
-import { AdminPaymentSettings, BillingOverview } from '../../../core/models/billing.models';
+import { AdminPaymentSettings, BillingOverview, PaymentRecord } from '../../../core/models/billing.models';
 import { AdminBillingService } from '../../../core/services/admin-billing.service';
 import { AdminBillingComponent } from './admin-billing.component';
 
@@ -110,5 +110,92 @@ describe('AdminBillingComponent (online payments & gateway)', () => {
     gwSwitch(fixture.nativeElement, 0).click();
     expect(api.updatePaymentSettings).not.toHaveBeenCalled();
     expect(fixture.componentInstance.error()).toContain('at least one gateway');
+  });
+});
+
+describe('AdminBillingComponent (refunds & chargebacks)', () => {
+  let api: jasmine.SpyObj<AdminBillingService>;
+
+  const PAY: PaymentRecord = {
+    id: 5, user_id: 7, user_email: 'a@b.c', plan_id: 3, plan_code: '1-month', plan_name: 'Monthly Plan',
+    duration_days: 30, duration_hours: 720, screenshot_allowance: 240, amount_minor: 99900, currency: 'INR',
+    gateway: 'cashfree', receipt: 'oi_5', gateway_order_id: 'oi_5', gateway_payment_id: '9001', status: 'paid',
+    method: 'upi', failure_reason: '', verified_via: 'webhook', is_renewal: false, created_at: null, paid_at: null,
+    refunded_at: null, refund_reference: '', subscription_id: 1,
+  };
+  const OVERVIEW = {
+    date_from: null, date_to: null, total_users: 1, active_subscriptions: 1, expired_subscriptions: 0,
+    ended_subscriptions: 0, payments_by_status: { paid: 1 }, revenue_by_currency: [], refunds_by_currency: [],
+    subscriptions_by_plan: {}, screenshot_requests: 0, screenshots_analyzed: 0, screenshot_failures: 0,
+    payment_success_rate: 1, disputes_count: 1, dispute_rate: 0.012, dispute_value_rate_inr: 0.012,
+    open_disputes: 1, next_dispute_deadline: '2026-11-05T18:29:59Z',
+  } as BillingOverview;
+
+  beforeEach(() => {
+    api = jasmine.createSpyObj<AdminBillingService>('AdminBillingService', [
+      'plans', 'currencies', 'overview', 'paymentSettings', 'paymentDetail', 'refund', 'evidence',
+    ]);
+    api.plans.and.returnValue(of([]));
+    api.currencies.and.returnValue(of([]));
+    api.overview.and.returnValue(of(OVERVIEW));
+    api.paymentSettings.and.returnValue(of(SETTINGS));
+    api.paymentDetail.and.callFake(() => of({ payment: PAY, subscription: null, webhook_events: [] }));
+    TestBed.configureTestingModule({
+      imports: [AdminBillingComponent],
+      providers: [{ provide: AdminBillingService, useValue: api }],
+    });
+  });
+
+  function render() {
+    const fixture = TestBed.createComponent(AdminBillingComponent);
+    fixture.detectChanges();
+    return fixture;
+  }
+
+  it('flags a chargeback ratio above 1% and shows open disputes with the deadline', () => {
+    const fixture = render();
+    const kpis = [...fixture.nativeElement.querySelectorAll('.kpi')] as HTMLElement[];
+    const ratio = kpis.find((k) => k.textContent?.includes('Chargeback ratio'))!;
+    expect(ratio.textContent).toContain('1.2%');
+    expect(ratio.querySelector('strong')?.classList).toContain('danger');
+    expect(kpis.find((k) => k.textContent?.includes('Open chargebacks'))?.textContent).toContain('next deadline');
+    expect(fixture.componentInstance.disputeLevel({ ...OVERVIEW, dispute_value_rate_inr: 0.006 })).toBe('warn');
+    expect(fixture.componentInstance.disputeLevel({ ...OVERVIEW, dispute_value_rate_inr: 0.001 })).toBe('ok');
+  });
+
+  it('refund needs a reason and a confirmation, then calls the API once', () => {
+    const fixture = render();
+    const cmp = fixture.componentInstance;
+    api.refund.and.returnValue(of({ status: 'refunded', payment_id: 5, subscription_id: 1, message: 'Refund initiated; access ended.' }));
+    const confirm = spyOn(window, 'confirm').and.returnValue(false);
+    cmp.refundPayment(PAY);
+    expect(cmp.error()).toContain('refund reason');
+    cmp.refundReason = 'Customer asked';
+    cmp.refundPayment(PAY);
+    expect(confirm).toHaveBeenCalled();
+    expect(api.refund).not.toHaveBeenCalled();
+    confirm.and.returnValue(true);
+    cmp.refundPayment(PAY);
+    expect(api.refund).toHaveBeenCalledOnceWith(5, 'Customer asked');
+    expect(cmp.info()).toContain('Refund initiated');
+  });
+
+  it('shows refund and evidence actions on a paid Cashfree payment, evidence only when disputed', () => {
+    const fixture = render();
+    fixture.componentInstance.openPayment(PAY);
+    fixture.detectChanges();
+    let actions = (fixture.nativeElement.querySelector('.ab-actions') as HTMLElement).textContent!;
+    expect(actions).toContain('Refund ₹999');
+    expect(actions).toContain('Download dispute evidence');
+    api.paymentDetail.and.returnValue(of({
+      payment: { ...PAY, status: 'disputed', disputed_at: '2026-10-28T00:00:00Z', dispute_status: 'CHARGEBACK_CREATED' },
+      subscription: null, webhook_events: [],
+    }));
+    fixture.componentInstance.openPayment(PAY);
+    fixture.detectChanges();
+    actions = (fixture.nativeElement.querySelector('.ab-actions') as HTMLElement).textContent!;
+    expect(actions).not.toContain('Refund ₹');
+    expect(actions).toContain('Download dispute evidence');
+    expect(fixture.nativeElement.textContent).toContain('CHARGEBACK_CREATED');
   });
 });

@@ -321,6 +321,9 @@ def _ensure_billing_columns() -> None:
         col("idempotency_key", ("VARCHAR(64)",)),
         col("refunded_at", ts),
         col("refund_reference", ("VARCHAR(100) DEFAULT '' NOT NULL",)),
+        col("disputed_at", ts),
+        col("dispute_status", ("VARCHAR(40) DEFAULT '' NOT NULL",)),
+        col("dispute_respond_by", ts),
     ])
     _add_missing_columns("payment_settings", [
         col("cashfree_enabled", true),

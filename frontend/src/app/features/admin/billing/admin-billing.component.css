@@ -21,6 +21,8 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 .ab-detail { display: grid; gap: 10px; }
 .ab-detail-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
 .ab-detail h3 { font-size: 1.1rem; font-weight: 800; }
+.ab-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.ab-actions input { flex: 1 1 220px; min-width: 0; }
 .ab-detail h4, .plan-form h4, .ab-grant h4 { font-size: .9rem; font-weight: 700; margin: 6px 0; }
 .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 12px; }
 table { width: 100%; border-collapse: collapse; font-size: .83rem; }
