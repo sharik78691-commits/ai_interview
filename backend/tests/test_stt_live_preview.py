@@ -196,6 +196,39 @@ class TestLivePreview:
         assert stt_factory.return_value.transcribe.await_count == 1
 
     @patch("app.api.websocket.get_stt_provider")
+    def test_one_failed_preview_does_not_freeze_the_transcript(self, stt_factory) -> None:
+        """Before: one failed/slow snapshot paused previews for 20 s (the
+        final-clip cooldown), so the Transcript line froze mid-question."""
+        import time
+
+        from fastapi.testclient import TestClient
+
+        from app.main import app
+        from app.providers.stt.provider import STTRequestError
+
+        stt_factory.return_value = _fake_stt([STTRequestError("timeout"), "Can you explain"])
+
+        with patch("app.api.websocket.PREVIEW_RETRY_SECONDS", 0.05), patch(
+            "app.api.websocket.PREVIEW_COOLDOWN_SECONDS", 999.0
+        ), patch("app.main.app"), TestClient(app) as client:
+            _auth(client)
+            with client.websocket_connect("/ws/interview") as ws:
+                ws.receive_json()  # handshake
+                ws.send_json({"type": "interviewer_audio_start"})
+                ws.send_bytes(WEBM + b"clip-one")
+                ws.send_json({"type": "audio_preview"})
+                ws.send_json({"type": "ping"})
+                frames = _recv_until(ws, _is_pong)
+                time.sleep(0.1)  # past the short preview retry, far inside 20 s
+                ws.send_bytes(WEBM + b"clip-one-longer")
+                ws.send_json({"type": "audio_preview"})
+                frames += _recv_until(ws, lambda m: m.get("type") == "stt_transcript")
+
+        live = [m for m in frames if m.get("type") == "stt_transcript"]
+        assert live and live[-1]["text"] == "Can you explain" and live[-1]["final"] is False
+        assert stt_factory.return_value.transcribe.await_count == 2
+
+    @patch("app.api.websocket.get_stt_provider")
     def test_preview_provider_gets_one_attempt_final_keeps_retries(self, stt_factory) -> None:
         from fastapi.testclient import TestClient
 

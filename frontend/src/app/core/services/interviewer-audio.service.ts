@@ -840,11 +840,14 @@ const MIN_CLIP_MS = 1_500;
  */
 export const MIN_VOICED_MS = 400;
 /**
- * Live transcript cadence: one snapshot per second of clip audio, so the
- * Transcript panel trails the interviewer by ~1s + STT latency instead of
- * waiting for the whole sentence plus the silence cut.
+ * Live transcript cadence: one snapshot per 0.7 s of clip audio, so the
+ * Transcript panel trails the interviewer by ~0.7 s + STT latency instead of
+ * waiting for the whole sentence plus the silence cut. Matches the measured
+ * snapshot STT latency (Whisper on DeepInfra, 2026-10-29: median 0.65–0.98 s
+ * for 1–8 s of audio), so the next snapshot is ready as the previous returns;
+ * the backend runs one at a time and keeps only the newest.
  */
-export const PREVIEW_INTERVAL_MS = 1_000;
+export const PREVIEW_INTERVAL_MS = 700;
 /** No snapshot once the speaker has been quiet this long (nothing new to show). */
 const PREVIEW_QUIET_MS = 300;
 /** Tag on every live-stream frame (backend: live_stream.LIVE_PCM_TAG). */

@@ -94,7 +94,12 @@ MAX_CONCURRENT_TRANSCRIPTIONS = 2
 # snapshot supersedes it) and a failing provider pauses previews for a while so
 # they never compete with the FINAL clip for the rate limit.
 PREVIEW_TIMEOUT_SECONDS = 6.0
+#: After a FINAL clip failed (rate limit / provider trouble): finals first.
 PREVIEW_COOLDOWN_SECONDS = 20.0
+#: After a preview's OWN failure (one slow/failed snapshot). It used to share
+#: the 20 s cooldown, so a single network blip froze the Transcript line for
+#: 20 s while the interviewer kept talking; the next snapshot now retries soon.
+PREVIEW_RETRY_SECONDS = 3.0
 # Live answering (LiveTurnTracker). A complete but unpunctuated prompt is
 # answered this long after the pause if no new word arrived meanwhile.
 LIVE_SETTLE_SECONDS = 0.6
@@ -901,10 +906,12 @@ async def ws_interview(websocket: WebSocket) -> None:
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
-                    preview_paused_until = time.monotonic() + PREVIEW_COOLDOWN_SECONDS
+                    preview_paused_until = max(
+                        preview_paused_until, time.monotonic() + PREVIEW_RETRY_SECONDS
+                    )
                     logger.info(
                         "Live preview paused %.0fs after STT failure: %s",
-                        PREVIEW_COOLDOWN_SECONDS,
+                        PREVIEW_RETRY_SECONDS,
                         str(exc)[:120] or type(exc).__name__,
                     )
                     continue
