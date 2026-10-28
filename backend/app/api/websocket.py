@@ -56,6 +56,7 @@ from app.providers.stt.provider import (
     STTUnavailableError,
     get_stt_provider,
     is_stt_hallucination,
+    live_stream_selected,
     prewarm_stt,
     strip_sound_tags,
 )
@@ -376,8 +377,11 @@ async def ws_interview(websocket: WebSocket) -> None:
     preview_running = False
     preview_paused_until = 0.0
 
-    # Word-by-word stream (needs a Gemini key). When on, the client streams
-    # PCM instead of sending snapshots, so the preview lane above stays idle.
+    # Word-by-word stream: ONLY when the admin-selected STT is Gemini Transcribe
+    # Live (the one streaming model). With any other STT (e.g. Whisper on
+    # DeepInfra) the live transcript comes from the snapshot previews above,
+    # through that same admin-selected STT. When on, the client streams PCM
+    # instead of sending snapshots, so the preview lane stays idle.
     settings = get_settings()
     live_stream: LiveTranscriptStream | None = None
     # Live answering: the streamed transcript also decides WHEN a question is
@@ -392,7 +396,7 @@ async def ws_interview(websocket: WebSocket) -> None:
     live_length_raw: object = None
     live_model_raw: object = None
     last_flush_at = 0.0
-    if live_preview and settings.gemini_api_key and settings.stt_live_model:
+    if live_preview and live_stream_selected() and settings.gemini_api_key and settings.stt_live_model:
 
         async def _on_live_text(text: str, final: bool) -> None:
             # Track the words BEFORE showing them: a pause the client reports

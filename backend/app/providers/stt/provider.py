@@ -581,16 +581,8 @@ def get_stt_provider() -> STTProvider:
     table (see /api/admin/stt-models). A model is used only when it is enabled
     AND its provider key is present.
     """
-    specs = {sp["key"]: sp for sp in _stt_specs()}
-    overrides = _stt_overrides()
-    default_key = default_stt_key()
-    ordered = [default_key] + [k for k in specs if k != default_key]
-    for key in ordered:
-        sp = specs[key]
-        ov = overrides.get(key)
-        enabled = ov.enabled if ov else True
-        if not enabled or not sp["api_key"]:
-            continue
+    sp = _selected_stt_spec()
+    if sp is not None:
         # Gemini transcription uses the native generateContent API (or the
         # Live WebSocket API); everything else rides the OpenAI-compatible
         # /audio/transcriptions path.
@@ -607,6 +599,30 @@ def get_stt_provider() -> STTProvider:
             send_prompt=sp.get("send_prompt", True),
         )
     return MockSTTProvider()
+
+
+def _selected_stt_spec() -> dict | None:
+    """The STT model actually in use: the admin default when it is enabled and
+    has a key, else the next usable one; None when none is usable (mock)."""
+    specs = {sp["key"]: sp for sp in _stt_specs()}
+    overrides = _stt_overrides()
+    default_key = default_stt_key()
+    ordered = [default_key] + [k for k in specs if k != default_key]
+    for key in ordered:
+        sp = specs[key]
+        ov = overrides.get(key)
+        enabled = ov.enabled if ov else True
+        if enabled and sp["api_key"]:
+            return sp
+    return None
+
+
+def live_stream_selected() -> bool:
+    """True only when the STT in use is Gemini Transcribe Live — the one
+    streaming model. The word-by-word transcript then uses it; with any other
+    STT the live transcript comes from snapshot previews through that STT."""
+    sp = _selected_stt_spec()
+    return sp is not None and sp.get("api_style") == "gemini_live"
 
 
 # --- STT model catalog + admin selection (enable/disable + default) ---
