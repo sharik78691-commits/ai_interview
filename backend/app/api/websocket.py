@@ -65,7 +65,12 @@ from app.services import free_trial_service as free_trial
 from app.services.activity import log_llm_usage
 from app.services.ai_service import AIService
 from app.services.interview_context import VALID_LENGTHS, context_store, normalize_length
-from app.services.question_service import LiveTurnTracker, QuestionBuffer, same_utterance
+from app.services.question_service import (
+    LiveTurnTracker,
+    QuestionBuffer,
+    awaits_continuation,
+    same_utterance,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -100,9 +105,47 @@ PREVIEW_COOLDOWN_SECONDS = 20.0
 #: the 20 s cooldown, so a single network blip froze the Transcript line for
 #: 20 s while the interviewer kept talking; the next snapshot now retries soon.
 PREVIEW_RETRY_SECONDS = 3.0
+# Batch STT has a long tail: snapshots normally take 0.6–1.0 s but one in ~10
+# takes 3–4 s (measured locally 2026-10-29, Whisper on DeepInfra). With one
+# preview at a time that froze the Transcript line for the whole spike. A
+# snapshot still running after this long gets a newer one started alongside;
+# whichever NEWER result lands first is shown, an older one never overwrites it.
+PREVIEW_HEDGE_SECONDS = 1.4
+PREVIEW_MAX_INFLIGHT = 2
+# The final clip has the same tail (a 10 s question: 1.8–2.3 s normally, up to
+# 7.6 s measured). Once it runs well past its normal time a second identical
+# request is sent and the first answer wins; the other is cancelled.
+FINAL_HEDGE_BASE_SECONDS = 1.5
+FINAL_HEDGE_PER_AUDIO_SECOND = 0.1
 # Live answering (LiveTurnTracker). A complete but unpunctuated prompt is
 # answered this long after the pause if no new word arrived meanwhile.
 LIVE_SETTLE_SECONDS = 0.6
+# Clip answering (turn-taking). A clip is cut after ~0.85 s of quiet, but
+# people pause that long mid-question ("Explain the Java collection
+# framework … hierarchy"), and batch STT punctuates every clip, so a
+# half-asked question used to be answered. A clip that reads complete is
+# answered only once this long has passed since its cut with the interviewer
+# still quiet; batch STT takes ~0.7–1 s anyway (measured 2026-10-29), so this
+# normally adds nothing. If they started talking again (client speech_start,
+# or a live snapshot), the clip is held and stitched onto the next one.
+TURN_END_GRACE_SECONDS = 0.8
+# A held clip is answered once the interviewer has been quiet this long and no
+# clip is still transcribing (the continuation never came, e.g. a cough) ...
+TURN_QUIET_SECONDS = 1.5
+# ... and at the latest after this long, however long they keep talking.
+TURN_HOLD_MAX_SECONDS = 20.0
+# A clip this long was cut by the client's 15 s cap (MAX_CLIP_MS), not by a
+# pause, so "speech right after it" is no sign of an unfinished question: the
+# interviewer simply never stopped. Seen locally 2026-10-29: three cap-cut
+# clips of one long monologue were all held and answered as one 286-char blob
+# ~50 s after it began. Such clips are judged on their own text again.
+CAP_CUT_SECONDS = 13.5
+# Speech that starts within this long of a cut continues the same question
+# (cut = 0.85 s quiet, so ~2 s of silence in all); later speech is a new one.
+TURN_RESUME_WINDOW_SECONDS = 1.2
+# A voice signal (speech_start, or a live snapshot) arrives ~0.4 s after the
+# speech it reports began (the client needs MIN_VOICED_MS of real speech).
+VOICE_SIGNAL_LAG_SECONDS = 0.4
 # A clip's own question detection waits until this long after its cut, so the
 # live stream's turn close (~0.45 s after the cut) has landed and it is known
 # whether the live lane already owns that speech.
@@ -153,6 +196,50 @@ MIME_BY_FORMAT = {
     "ogg": "audio/ogg",
     "mp3": "audio/mpeg",
 }
+
+
+def _wav_seconds(clip: bytes) -> float:
+    """Audio length of a WAV clip from its header (5 s when unknown)."""
+    if len(clip) > 44 and clip[:4] == b"RIFF":
+        byte_rate = int.from_bytes(clip[28:32], "little")
+        if byte_rate > 0:
+            return (len(clip) - 44) / byte_rate
+    return 5.0
+
+
+async def _transcribe_hedged(provider, clip: bytes, mime: str) -> str:
+    """``provider.transcribe`` with a hedge against its latency tail.
+
+    A clip still unanswered after FINAL_HEDGE_* gets a second identical
+    request; the first SUCCESSFUL result wins and the other call is
+    cancelled. A failure before the hedge point surfaces exactly as before.
+    """
+    hedge_after = FINAL_HEDGE_BASE_SECONDS + FINAL_HEDGE_PER_AUDIO_SECOND * _wav_seconds(clip)
+    first = asyncio.ensure_future(provider.transcribe(clip, mime_type=mime))
+    try:
+        return await asyncio.wait_for(asyncio.shield(first), timeout=hedge_after)
+    except asyncio.TimeoutError:
+        pass
+    except asyncio.CancelledError:
+        first.cancel()
+        raise
+    logger.info("Final STT still running after %.1fs: hedging with a second request", hedge_after)
+    second = asyncio.ensure_future(provider.transcribe(clip, mime_type=mime))
+    pending = {first, second}
+    error: BaseException | None = None
+    try:
+        while pending:
+            done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+            for task in done:
+                if task.exception() is None:
+                    if task is second:
+                        logger.info("Hedged final STT request answered first")
+                    return task.result()
+                error = error or task.exception()
+        raise error  # both failed: report the first failure
+    finally:
+        for task in pending:
+            task.cancel()
 
 
 def _substantial(text: str) -> bool:
@@ -378,8 +465,16 @@ async def ws_interview(websocket: WebSocket) -> None:
     #: so a preview that finishes after its clip's final is dropped as stale.
     clip_seq = 0
     #: Newest unsent snapshot (clip, seq) — latest wins, older ones drop.
-    preview_pending: tuple[bytes, int] | None = None
-    preview_running = False
+    #: Newest unstarted snapshot (clip, seq, idx); idx counts snapshots.
+    preview_pending: tuple[bytes, int, int] | None = None
+    preview_idx = 0
+    #: idx of the newest snapshot whose text was sent (older results drop).
+    preview_shown_idx = -1
+    #: Running preview calls: idx -> start time.
+    preview_inflight: dict[int, float] = {}
+    #: Clip seqs whose final transcript (or clip_done) went out: a preview of
+    #: such a clip is out of date, however new it is.
+    finals_done: set[int] = set()
     preview_paused_until = 0.0
 
     # Word-by-word stream: ONLY when the admin-selected STT is Gemini Transcribe
@@ -401,6 +496,25 @@ async def ws_interview(websocket: WebSocket) -> None:
     live_length_raw: object = None
     live_model_raw: object = None
     last_flush_at = 0.0
+    # Turn-taking for clip answers (see TURN_END_GRACE_SECONDS).
+    #: The interviewer is mid-clip: speech_start seen, its audio_flush not yet.
+    interviewer_speaking = False
+    #: Last sign of interviewer speech (speech_start or a live snapshot).
+    last_voice_at = 0.0
+    #: Estimated speech onsets, one per clip (newest last, a few kept).
+    voice_onsets: list[float] = []
+    clip_voice_noted = False
+
+    def _note_voice() -> None:
+        nonlocal last_voice_at, clip_voice_noted
+        last_voice_at = time.monotonic()
+        if not clip_voice_noted:
+            clip_voice_noted = True
+            # Speech in this clip began after the last cut (the cut needs quiet).
+            voice_onsets.append(max(last_voice_at - VOICE_SIGNAL_LAG_SECONDS, last_flush_at))
+            del voice_onsets[:-8]
+    #: Clips still being transcribed (a held clip waits for them).
+    clips_in_flight = 0
     if live_preview and live_stream_selected() and settings.gemini_api_key and settings.stt_live_model:
 
         async def _on_live_text(text: str, final: bool) -> None:
@@ -682,15 +796,27 @@ async def ws_interview(websocket: WebSocket) -> None:
         waited ~10 s behind it and newer ones replaced older ones in the
         client's queue — losing half a question. ``clip_done`` closes those.
         """
+        nonlocal clips_in_flight
         outcome = {"final": False}
         try:
             await _transcribe_clip(clip, clip_mime, length_raw, model_raw, seq, flushed_at, outcome)
         finally:
+            clips_in_flight -= 1
+            if seq is not None:
+                finals_done.add(seq)  # also when it yielded no transcript
             if not outcome["final"]:
                 try:
                     await websocket.send_json({"type": "clip_done", "seq": seq})
                 except Exception:
                     logger.debug("[ws user=%s] clip_done dropped: socket closing", user_id)
+
+    def _spawn_clip(*args) -> None:
+        """Transcribe a cut clip in the background. Counted in clips_in_flight
+        from the cut itself, so a held question never sees "nothing left to
+        transcribe" while this clip's task has not started yet."""
+        nonlocal clips_in_flight
+        clips_in_flight += 1
+        _spawn(_transcribe_and_detect(*args))
 
     async def _transcribe_clip(
         clip: bytes,
@@ -753,7 +879,7 @@ async def ws_interview(websocket: WebSocket) -> None:
         async with stt_slots:
             t0 = time.perf_counter()
             try:
-                text = await stt.transcribe(clip, mime_type=real_mime)
+                text = await _transcribe_hedged(stt, clip, real_mime)
             except STTUnavailableError:
                 # No transcription backend configured at all.
                 logger.warning("Interviewer audio received but no STT provider is configured")
@@ -819,6 +945,7 @@ async def ws_interview(websocket: WebSocket) -> None:
         final_frame: dict = {"type": "stt_transcript", "text": text, "final": True}
         if seq is not None:
             final_frame["seq"] = seq
+            finals_done.add(seq)  # no provisional text for this clip after this
         await websocket.send_json(final_frame)
         outcome["final"] = True
 
@@ -843,9 +970,43 @@ async def ws_interview(websocket: WebSocket) -> None:
         # and on half-asked questions, and because answers run one-at-a-time on
         # the queue, each of those delayed the real question.
         question = buffer.push_complete(text)
+        cap_cut = _wav_seconds(clip) >= CAP_CUT_SECONDS
+        if question and not cap_cut and await _speaker_resumed(flushed_at):
+            # They are still asking: answering now would answer half of it.
+            buffer.hold_continuing(question)
+            logger.info(
+                "Interviewer kept talking after this clip; holding %d chars for the rest",
+                len(question),
+            )
+            _spawn(_flush_when_quiet(length_raw, model_raw))
+            await websocket.send_json(
+                {
+                    "type": "status",
+                    "status": "listening",
+                    "message": "listening... (waiting for the rest of the question)",
+                }
+            )
+            return
         if question:
             logger.info("Interviewer prompt (%d chars): %s", len(question), question[:100])
             await _enqueue_answer(question, length_raw, model_raw, announce=True, source="clip")
+            return
+
+        if buffer.holding_continuing:
+            # A backchannel while the rest of the question is still awaited:
+            # _flush_when_quiet already owns the held text.
+            return
+
+        if buffer.holding_partial and not buffer.holding_context and not awaits_continuation(buffer.held_text):
+            # Stitched and grammatically finished — only the closing "?" is
+            # missing (batch STT often drops it). Answer as soon as the
+            # interviewer is quiet instead of waiting out the 5 s hold; if
+            # they are still talking, their next clip is stitched on first.
+            logger.info(
+                "Holding %d chars (reads finished, no closing punctuation) until the interviewer is quiet",
+                len(buffer.held_text),
+            )
+            _spawn(_flush_when_quiet(length_raw, model_raw, partial=buffer.held_text))
             return
 
         if buffer.holding_partial:
@@ -874,60 +1035,135 @@ async def ws_interview(websocket: WebSocket) -> None:
             }
         )
 
-    async def _preview_worker() -> None:
-        """Transcribe live snapshots of the clip still being spoken.
+    def _pump_previews() -> None:
+        """Start the newest snapshot when the preview lane can take it.
 
-        DISPLAY ONLY: the result is sent as `final: false` and never touches
-        the QuestionBuffer or the answer queue, so a provisional transcript can
-        never be answered (or answered twice). One preview runs at a time and
-        only the newest snapshot is kept, which bounds the extra STT calls to
-        the provider's own latency.
+        DISPLAY ONLY: previews are sent as `final: false` and never touch the
+        QuestionBuffer or the answer queue, so a provisional transcript can
+        never be answered (or answered twice). Normally one preview runs at a
+        time and only the newest snapshot is kept; a second one starts only
+        when the running one has passed PREVIEW_HEDGE_SECONDS (a provider
+        latency spike), so the extra STT calls stay bounded.
         """
-        nonlocal preview_pending, preview_running, preview_paused_until
+        nonlocal preview_pending
+        if preview_pending is None:
+            return
+        now = time.monotonic()
+        if preview_inflight and (
+            len(preview_inflight) >= PREVIEW_MAX_INFLIGHT
+            or now - max(preview_inflight.values()) < PREVIEW_HEDGE_SECONDS
+        ):
+            return  # picked up when the running one returns (or turns slow)
+        clip, seq, idx = preview_pending
+        preview_pending = None
+        # Stale (its clip was already flushed), paused after a provider
+        # failure, or every final slot busy (finals have priority).
+        if seq != clip_seq or now < preview_paused_until or stt_slots.locked():
+            return
+        real_mime = MIME_BY_FORMAT.get(sniff_audio(clip))
+        if not real_mime:
+            return
+        preview_inflight[idx] = now
+        _spawn(_run_preview(clip, real_mime, seq, idx))
+
+    async def _run_preview(clip: bytes, real_mime: str, seq: int, idx: int) -> None:
+        nonlocal preview_paused_until, preview_shown_idx
+        t0 = time.perf_counter()
         try:
-            while preview_pending is not None:
-                clip, seq = preview_pending
-                preview_pending = None
-                # Stale (its clip was already flushed), paused after a provider
-                # failure, or every final slot busy (finals have priority).
-                if seq != clip_seq or time.monotonic() < preview_paused_until:
-                    continue
-                if stt_slots.locked():
-                    continue
-                real_mime = MIME_BY_FORMAT.get(sniff_audio(clip))
-                if not real_mime:
-                    continue
-                t0 = time.perf_counter()
-                try:
-                    text = await asyncio.wait_for(
-                        preview_stt.transcribe(clip, mime_type=real_mime),
-                        timeout=PREVIEW_TIMEOUT_SECONDS,
-                    )
-                except asyncio.CancelledError:
-                    raise
-                except Exception as exc:
-                    preview_paused_until = max(
-                        preview_paused_until, time.monotonic() + PREVIEW_RETRY_SECONDS
-                    )
-                    logger.info(
-                        "Live preview paused %.0fs after STT failure: %s",
-                        PREVIEW_RETRY_SECONDS,
-                        str(exc)[:120] or type(exc).__name__,
-                    )
-                    continue
-                logger.info(
-                    "STT preview latency: %.2fs for %d bytes",
-                    time.perf_counter() - t0,
-                    len(clip),
+            try:
+                text = await asyncio.wait_for(
+                    preview_stt.transcribe(clip, mime_type=real_mime),
+                    timeout=PREVIEW_TIMEOUT_SECONDS,
                 )
-                text = strip_sound_tags(text)
-                if seq != clip_seq or not text or is_stt_hallucination(text):
-                    continue
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                preview_paused_until = max(
+                    preview_paused_until, time.monotonic() + PREVIEW_RETRY_SECONDS
+                )
+                logger.info(
+                    "Live preview paused %.0fs after STT failure: %s",
+                    PREVIEW_RETRY_SECONDS,
+                    str(exc)[:120] or type(exc).__name__,
+                )
+                return
+            logger.info(
+                "STT preview latency: %.2fs for %d bytes",
+                time.perf_counter() - t0,
+                len(clip),
+            )
+            text = strip_sound_tags(text)
+            usable = bool(text) and not is_stt_hallucination(text)
+            # Show it if nothing newer is on screen and its clip has no final
+            # yet — including the clip that was JUST cut: its final is still a
+            # second or two away, and dropping this text made the last words
+            # of a question appear all at once with the final.
+            if usable and idx > preview_shown_idx and seq not in finals_done and seq >= clip_seq - 1:
+                preview_shown_idx = idx
                 await websocket.send_json(
                     {"type": "stt_transcript", "text": text, "final": False, "seq": seq}
                 )
+
         finally:
-            preview_running = False
+            preview_inflight.pop(idx, None)
+            _pump_previews()
+
+    async def _speaker_resumed(flushed_at: float | None) -> bool:
+        """Did the interviewer start talking again after this clip was cut?
+
+        Waits until TURN_END_GRACE_SECONDS after the cut first (usually already
+        passed: batch STT takes longer), so a resumed sentence has time to show.
+        A typed/manual question (no cut time) never waits.
+        """
+        if flushed_at is None:
+            return False
+        wait = flushed_at + TURN_END_GRACE_SECONDS - time.monotonic()
+        if wait > 0:
+            await asyncio.sleep(wait)
+        return any(
+            flushed_at - 0.3 < onset <= flushed_at + TURN_RESUME_WINDOW_SECONDS
+            for onset in voice_onsets
+        )
+
+    async def _flush_when_quiet(
+        length_raw: object, model_raw: object, partial: str | None = None
+    ) -> None:
+        """Answer a held clip once the interviewer is done talking.
+
+        Holds two kinds: a clip they kept talking after (``partial`` None), or
+        a stitched half-question that reads finished but came back without
+        closing punctuation (``partial`` = that text). That second kind used
+        to wait the full HOLD_MS (5 s) even after the interviewer stopped
+        (seen locally 2026-10-29: "…What are checked and unchecked
+        exceptions" answered 5.0 s late).
+
+        Normally the next clip is stitched onto it first and this simply ends.
+        Otherwise the held text is answered once they have been quiet
+        TURN_QUIET_SECONDS with nothing left transcribing — nothing is lost
+        and nothing is answered twice (take_* hands the text out exactly once).
+        """
+        def still_held() -> bool:
+            if partial is None:
+                return buffer.holding_continuing
+            return buffer.held_text == partial and not buffer.holding_continuing
+
+        deadline = time.monotonic() + TURN_HOLD_MAX_SECONDS
+        try:
+            while still_held():
+                await asyncio.sleep(0.25)
+                quiet = (
+                    not interviewer_speaking
+                    and clips_in_flight == 0
+                    and time.monotonic() - last_voice_at >= TURN_QUIET_SECONDS
+                )
+                if quiet or time.monotonic() >= deadline:
+                    held = buffer.take_continuing() if partial is None else buffer.take_held(partial)
+                    if held:
+                        logger.info("Held question answered after the speaker went quiet (%d chars)", len(held))
+                        await _enqueue_answer(held, length_raw, model_raw, announce=True, source="clip")
+                    return
+        except asyncio.CancelledError:
+            return
 
     async def _flush_held_question(
         delay_s: float, length_raw: object, model_raw: object
@@ -1157,6 +1393,8 @@ async def ws_interview(websocket: WebSocket) -> None:
             "liveStream": live_stream is not None,
             # The client sends speech_pause frames only when this is set.
             "liveAnswers": live_answers,
+            # The client sends speech_start frames only when this is set.
+            "turnSignals": True,
             # Trial / plan state (additive field; later updates arrive as
             # {type:"access"} frames from the trial meter).
             "access": _access_frame(access, client_kind),
@@ -1295,17 +1533,14 @@ async def ws_interview(websocket: WebSocket) -> None:
 
             elif mtype == "interviewer_audio_stop":
                 interviewer_capturing = False
+                interviewer_speaking = False
                 stop_at = time.monotonic()
                 if audio_buffer:
                     # Snapshot synchronously, then transcribe in the background
                     # so the "stopped" status (and everything else) stays fast.
                     clip = bytes(audio_buffer)
                     audio_buffer = bytearray()
-                    _spawn(
-                        _transcribe_and_detect(
-                            clip, audio_mime, None, None, clip_seq, stop_at
-                        )
-                    )
+                    _spawn_clip(clip, audio_mime, None, None, clip_seq, stop_at)
                 if live_answers:
                     # No more audio reaches the stream, so its turn never
                     # closes by itself: judge what it heard now.
@@ -1336,15 +1571,15 @@ async def ws_interview(websocket: WebSocket) -> None:
                 seq = clip_seq
                 clip_seq += 1  # previews of this clip are stale from now on
                 last_flush_at = time.monotonic()
-                _spawn(
-                    _transcribe_and_detect(
-                        clip,
-                        audio_mime,
-                        msg.get("responseLength"),
-                        msg.get("model"),
-                        seq,
-                        last_flush_at,
-                    )
+                interviewer_speaking = False
+                clip_voice_noted = False
+                _spawn_clip(
+                    clip,
+                    audio_mime,
+                    msg.get("responseLength"),
+                    msg.get("model"),
+                    seq,
+                    last_flush_at,
                 )
                 if live_answers and interviewer_capturing:
                     # The cut means ~0.85 s of quiet: also a pause for the
@@ -1352,6 +1587,13 @@ async def ws_interview(websocket: WebSocket) -> None:
                     live_length_raw = msg.get("responseLength")
                     live_model_raw = msg.get("model")
                     await _live_pause(after_cut=True)
+
+            elif mtype == "speech_start":
+                # A new clip holds real speech: the interviewer is talking
+                # again, so a just-cut clip may be only half the question.
+                if interviewer_capturing:
+                    interviewer_speaking = True
+                    _note_voice()
 
             elif mtype == "speech_pause":
                 # The interviewer went quiet for ~0.45 s: a finished sentence
@@ -1368,11 +1610,12 @@ async def ws_interview(websocket: WebSocket) -> None:
                 # preview lane; the newest snapshot replaces an unsent one.
                 snapshot = bytes(audio_buffer)
                 audio_buffer = bytearray()
+                if snapshot and interviewer_capturing:
+                    _note_voice()  # they are speaking right now
                 if snapshot and interviewer_capturing and live_preview:
-                    preview_pending = (snapshot, clip_seq)
-                    if not preview_running:
-                        preview_running = True
-                        _spawn(_preview_worker())
+                    preview_idx += 1
+                    preview_pending = (snapshot, clip_seq, preview_idx)
+                    _pump_previews()
 
             elif mtype == "interviewer_question":
                 # Manual/typed interviewer question -> existing AI flow.

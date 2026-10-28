@@ -339,3 +339,18 @@ def test_short_unrecognised_fragments_stay_noise() -> None:
     assert classify("ok done") == NOISE
     assert classify("bilkul theek") == NOISE
     assert classify("yes haan") == NOISE
+
+
+def test_unpunctuated_question_after_a_filler_lead_in_is_not_dropped() -> None:
+    """Seen locally 2026-10-29: batch STT returned a lower-case run-on with no
+    punctuation, and the real question after "let me start" was dropped as
+    housekeeping."""
+    for text in [
+        "yeah hi so let me start with that question so what is the difference between hashmap and hashtable",
+        "so let me ask you this can you walk me through your last project",
+        "okay so tell me about a time you led a team",
+    ]:
+        assert classify(text) == ANSWER, text
+    # Housekeeping without any question clause is still noise.
+    for text in ["let me pull up your resume", "okay let me see", "let me share my screen", "can you hear me"]:
+        assert classify(text) == NOISE, text

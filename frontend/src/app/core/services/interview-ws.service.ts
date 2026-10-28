@@ -259,6 +259,7 @@ export class InterviewWsService {
           if (typeof msg['livePreview'] === 'boolean') this.livePreview$.next(msg['livePreview']);
           if (typeof msg['liveStream'] === 'boolean') this.liveStream$.next(msg['liveStream']);
           if (typeof msg['liveAnswers'] === 'boolean') this.liveAnswers$.next(msg['liveAnswers']);
+          if (typeof msg['turnSignals'] === 'boolean') this.turnSignals$.next(msg['turnSignals']);
           if (msg['access'] && typeof msg['access'] === 'object') {
             this.access$.next(msg['access'] as unknown as LiveAccess);
           }
@@ -337,6 +338,7 @@ export class InterviewWsService {
       this.livePreview$.next(false); // re-learned from the next handshake
       this.liveStream$.next(false);
       this.liveAnswers$.next(false);
+      this.turnSignals$.next(false);
       this.scheduleReconnect();
     };
     this.ws.onerror = (ev: Event) => {
@@ -386,6 +388,8 @@ export class InterviewWsService {
   liveStream$ = new BehaviorSubject<boolean>(false);
   /** True when the backend answers from the live stream (accepts speech_pause). */
   liveAnswers$ = new BehaviorSubject<boolean>(false);
+  /** True when the backend accepts speech_start (holds a half-asked clip). */
+  turnSignals$ = new BehaviorSubject<boolean>(false);
   /** Streamed transcript of the current utterance; `final` closes the turn. */
   liveText$ = new Subject<{ text: string; final: boolean }>();
   /**
@@ -440,6 +444,16 @@ export class InterviewWsService {
    * sentence from the live transcript without waiting for the clip cut.
    * Older backends reject unknown types, so it is gated on liveAnswers.
    */
+  /**
+   * The interviewer started talking again (a new clip holds real speech).
+   * The backend then holds the clip it just transcribed for the rest of the
+   * question. Older backends reject unknown types, so it is gated.
+   */
+  sendSpeechStart(): void {
+    if (this.ws?.readyState !== WebSocket.OPEN || !this.turnSignals$.value) return;
+    this.ws.send(JSON.stringify({ type: 'speech_start' }));
+  }
+
   sendSpeechPause(responseLength = 'default'): void {
     if (this.ws?.readyState !== WebSocket.OPEN || !this.liveAnswers$.value) return;
     this.ws.send(JSON.stringify({ type: 'speech_pause', responseLength }));
