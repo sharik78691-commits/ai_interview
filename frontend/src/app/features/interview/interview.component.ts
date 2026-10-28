@@ -504,7 +504,20 @@ export class InterviewComponent implements OnInit, OnDestroy {
     // the list stays for microphone / demo speech only.
     this.lastInterviewerText = t.text;
     // The final replaces its own clip's live text; a newer clip's stays.
-    if (t.seq === undefined || t.seq >= this.interimSeq) this.clearInterviewerInterim();
+    if (t.seq === undefined || t.seq >= this.interimSeq) {
+      if (this.liveTyped.shown && this.interviewerInterim && !this.streamText && t.seq !== undefined) {
+        // Mid-typing: glide the live line into the final words (corrections
+        // swap in place) instead of jumping, then hand over to the final line.
+        const text = t.text;
+        this.interviewerInterim = text;
+        this.syncLive();
+        this.liveTyped.finish(() => {
+          if (this.interviewerInterim === text) this.clearInterviewerInterim();
+        });
+      } else {
+        this.clearInterviewerInterim();
+      }
+    }
     // A finished streamed utterance yields to the final transcript; one still
     // being spoken (the interviewer only paused) keeps growing on screen.
     if (!this.streamOpen) this.dropStreamText();

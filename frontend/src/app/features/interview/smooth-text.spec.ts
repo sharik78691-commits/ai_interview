@@ -37,6 +37,46 @@ describe('SmoothText (live transcript typewriter)', () => {
     expect(t.shown).toBe('Can you explain the difference between the');
   });
 
+  it('spreads each burst over the learned gap so the line keeps moving', () => {
+    // Before: a burst typed in ~150 ms, then the line stood still until the
+    // next snapshot (~0.8 s later) — "jump, wait, jump".
+    jasmine.clock().mockDate(new Date(2026, 9, 29));
+    const t = new SmoothText();
+    t.set('Explain the Java');
+    t.flush();
+    jasmine.clock().tick(800);
+    t.set('Explain the Java collection framework'); // second burst, 800 ms later
+    jasmine.clock().tick(300);
+    const mid = t.shown.length;
+    expect(mid).toBeGreaterThan('Explain the Java'.length); // already moving...
+    expect(mid).toBeLessThan('Explain the Java collection framework'.length); // ...not dumped at once
+    jasmine.clock().tick(500);
+    expect(t.shown).toBe('Explain the Java collection framework'); // done before the next burst
+  });
+
+  it('never spreads a burst longer than maxSpreadMs (cannot fall far behind)', () => {
+    jasmine.clock().mockDate(new Date(2026, 9, 29));
+    const t = new SmoothText(30, 5, 1_200);
+    t.set('Tell me');
+    t.flush();
+    jasmine.clock().tick(2_500);
+    t.set('Tell me about a time you led a team');
+    jasmine.clock().tick(1_250);
+    expect(t.shown).toBe('Tell me about a time you led a team');
+  });
+
+  it('finish() runs once the text is fully revealed', () => {
+    const t = new SmoothText();
+    const done = jasmine.createSpy('done');
+    t.set('Hello world');
+    t.finish(done);
+    expect(done).not.toHaveBeenCalled();
+    jasmine.clock().tick(1_000);
+    expect(done).toHaveBeenCalledTimes(1);
+    t.finish(done); // already revealed: immediately
+    expect(done).toHaveBeenCalledTimes(2);
+  });
+
   it('clears instantly', () => {
     const t = new SmoothText();
     t.set('Hello world');

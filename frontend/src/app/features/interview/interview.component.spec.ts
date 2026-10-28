@@ -411,6 +411,23 @@ describe('Live interviewer transcript (meeting audio)', () => {
     expect(release).toHaveBeenCalledTimes(1);
   });
 
+  it('a final arriving mid-typing glides into the final words instead of jumping', () => {
+    const { c, release } = make();
+    c.onInterviewerTranscript({ text: 'Explain the Java', final: false, seq: 0 });
+    typed(c);
+    c.onInterviewerTranscript({ text: 'Explain the Java collection framework', final: false, seq: 0 });
+    jasmine.clock().tick(30); // typing the new words
+    c.onInterviewerTranscript({ text: 'Explain the Java collection framework hierarchy.', final: true, seq: 0 });
+    // Still the live line, still typing — no jump to the full final text.
+    const mid = c.liveTranscript;
+    expect(mid.length).toBeGreaterThan('Explain the Java'.length - 1);
+    expect(mid.length).toBeLessThan('Explain the Java collection framework hierarchy.'.length);
+    expect(release).toHaveBeenCalledTimes(1); // the answer slot is freed at once
+    // Once fully typed, the line hands over to the final transcript.
+    expect(typed(c)).toBe('');
+    expect(c.lastInterviewerText).toBe('Explain the Java collection framework hierarchy.');
+  });
+
   it('a late final of an older clip keeps the newer clip’s live text', () => {
     const { c } = make();
     c.onInterviewerTranscript({ text: 'And how does', final: false, seq: 1 });
