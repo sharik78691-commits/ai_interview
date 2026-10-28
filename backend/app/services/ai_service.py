@@ -11,7 +11,7 @@ from collections.abc import Awaitable, Callable
 from app.models.ai_response import AIInterviewResponse, FollowUp
 from app.providers.llm.base import LLMProvider
 from app.providers.llm.provider import LLMQuotaError, MockLLMProvider, is_rate_limited
-from app.providers.llm.registry import fallback_model_key, get_llm_provider
+from app.providers.llm.registry import get_llm_provider
 
 logger = logging.getLogger(__name__)
 
@@ -21,10 +21,14 @@ ProviderFactory = Callable[[str | None], LLMProvider]
 FallbackFactory = Callable[[str | None], LLMProvider | None]
 
 
-def registry_fallback(model_key: str | None) -> LLMProvider | None:
-    """Provider for another configured + enabled model, if there is one."""
-    key = fallback_model_key(model_key)
-    return get_llm_provider(key) if key else None
+def admin_model_only(model_key: str | None) -> LLMProvider | None:
+    """No second model: answers come ONLY from the admin-selected model.
+
+    A rate-limited / failing model keeps its own retries and then falls back
+    to template guidance with a warning — it never switches silently to
+    another provider (e.g. Gemini) the admin did not choose.
+    """
+    return None
 
 
 class AIService:
@@ -45,7 +49,7 @@ class AIService:
         # None -> look up the module-level registry function at call time
         # (keeps existing monkeypatch-based tests working).
         self._provider_factory = provider_factory
-        self._fallback_factory = fallback_factory or registry_fallback
+        self._fallback_factory = fallback_factory or admin_model_only
         #: Set when the answer came from the fallback model:
         #: {"provider", "model", "usage"} of the model that failed first.
         self.last_fallback: dict | None = None

@@ -226,7 +226,9 @@ class TestWebSocketLiveStream:
         ai_cls.return_value.analyze = AsyncMock()
         ai_cls.return_value.last_warning = None
 
-        with patch.object(get_settings(), "gemini_api_key", "test-key"), patch.object(
+        with patch.object(get_settings(), "gemini_api_key", "test-key"), patch(
+            "app.api.websocket.live_stream_selected", return_value=True  # admin STT = Gemini Live
+        ), patch.object(
             ls, "_connect", lambda key: sock
         ):
             with patch("app.main.app"), TestClient(app) as client:
@@ -269,7 +271,9 @@ class TestWebSocketLiveStream:
             opened.append(1)
             return FakeLiveSocket()
 
-        with patch.object(get_settings(), "gemini_api_key", "test-key"), patch.object(
+        with patch.object(get_settings(), "gemini_api_key", "test-key"), patch(
+            "app.api.websocket.live_stream_selected", return_value=True  # admin STT = Gemini Live
+        ), patch.object(
             ls, "_connect", _conn
         ):
             with patch("app.main.app"), TestClient(app) as client:

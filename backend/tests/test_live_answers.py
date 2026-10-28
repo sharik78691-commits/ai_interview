@@ -204,7 +204,9 @@ class TestWebSocketLiveAnswers:
 
         # The turn close must win over the settle beat however slow the test
         # host is (otherwise the unpunctuated interim is what gets answered).
-        with patch.object(get_settings(), "gemini_api_key", "test-key"), patch.object(
+        with patch.object(get_settings(), "gemini_api_key", "test-key"), patch(
+            "app.api.websocket.live_stream_selected", return_value=True  # admin STT = Gemini Live
+        ), patch.object(
             ls, "_connect", lambda key: sock
         ), patch("app.api.websocket.LIVE_SETTLE_SECONDS", 30.0):
             with patch("app.main.app"), TestClient(app) as client:
@@ -247,7 +249,9 @@ class TestWebSocketLiveAnswers:
         ai_cls.return_value.analyze = AsyncMock(return_value=_guidance("DI"))
         ai_cls.return_value.last_warning = None
 
-        with patch.object(get_settings(), "gemini_api_key", "test-key"), patch.object(
+        with patch.object(get_settings(), "gemini_api_key", "test-key"), patch(
+            "app.api.websocket.live_stream_selected", return_value=True  # admin STT = Gemini Live
+        ), patch.object(
             ls, "_connect", lambda key: sock
         ):
             with patch("app.main.app"), TestClient(app) as client:
@@ -282,7 +286,9 @@ class TestWebSocketLiveAnswers:
         ai_cls.return_value.analyze = AsyncMock(return_value=_guidance("DI"))
         ai_cls.return_value.last_warning = None
 
-        with patch.object(get_settings(), "gemini_api_key", "test-key"), patch.object(
+        with patch.object(get_settings(), "gemini_api_key", "test-key"), patch(
+            "app.api.websocket.live_stream_selected", return_value=True  # admin STT = Gemini Live
+        ), patch.object(
             ls, "_connect", lambda key: sock
         ):
             with patch("app.main.app"), TestClient(app) as client:
@@ -303,7 +309,9 @@ class TestWebSocketLiveAnswers:
         from app.core.config import get_settings
         from app.main import app
 
-        with patch.object(get_settings(), "gemini_api_key", "test-key"), patch.object(
+        with patch.object(get_settings(), "gemini_api_key", "test-key"), patch(
+            "app.api.websocket.live_stream_selected", return_value=True  # admin STT = Gemini Live
+        ), patch.object(
             get_settings(), "stt_live_answers", False
         ), patch.object(ls, "_connect", lambda key: FakeLiveSocket()):
             with patch("app.main.app"), TestClient(app) as client:
