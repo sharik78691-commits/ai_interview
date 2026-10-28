@@ -326,6 +326,51 @@ export class AdminBillingComponent implements OnInit {
     this.run(this.api.setCredits(s.id, value, this.actionReason.trim()), `Allowance set to ${value}.`, s.user_id);
   }
 
+  // ------------------------------------------------- refunds & disputes
+  refundReason = '';
+
+  /** Full refund at the gateway (Cashfree) — the customer gets the money back and access ends. */
+  refundPayment(p: PaymentRecord): void {
+    if (this.refundReason.trim().length < 3) return this.warn('Enter a refund reason (it is stored in the audit log).');
+    const amount = this.money(p.amount_minor, p.currency);
+    if (!confirm(`Refund ${amount} to ${p.user_email} through ${p.gateway}? The money goes back to the customer and their access ends now. This cannot be undone.`)) return;
+    this.busy.set(true);
+    this.api.refund(p.id, this.refundReason.trim()).subscribe({
+      next: (r) => {
+        this.busy.set(false);
+        this.refundReason = '';
+        this.info.set(`Payment #${p.id}: ${r.message}`);
+        this.openPayment(p);
+        if (this.view === 'payments') this.loadPayments(this.payFilters.page ?? 1);
+      },
+      error: (e) => {
+        this.busy.set(false);
+        this.fail(e);
+      },
+    });
+  }
+
+  /** Download the evidence pack as a text file to upload at the gateway's dispute page. */
+  downloadEvidence(p: PaymentRecord): void {
+    this.api.evidence(p.id).subscribe({
+      next: (d) => {
+        const url = URL.createObjectURL(new Blob([d.summary_text], { type: 'text/plain;charset=utf-8' }));
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `evidence-${d.payment.order_id}.txt`;
+        a.click();
+        URL.revokeObjectURL(url);
+      },
+      error: (e) => this.fail(e),
+    });
+  }
+
+  /** ok / warn / danger for the chargeback ratio (Cashfree's limit is 1% by value). */
+  disputeLevel(o: BillingOverview): 'ok' | 'warn' | 'danger' {
+    const rate = o.dispute_value_rate_inr ?? o.dispute_rate ?? 0;
+    return rate >= 0.01 ? 'danger' : rate >= 0.005 ? 'warn' : 'ok';
+  }
+
   reconcile(p: PaymentRecord): void {
     this.busy.set(true);
     this.api.reconcile(p.id).subscribe({

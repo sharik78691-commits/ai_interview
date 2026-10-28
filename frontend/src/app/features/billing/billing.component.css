@@ -5,7 +5,8 @@
 .current-main { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
 .validity { text-align: center; }
 .validity strong { display: block; font-size: 2rem; font-weight: 800; line-height: 1; }
-.current a, .foot a { color: var(--accent); }
+.current a, .foot a, .help-link { color: var(--accent); }
+.help-link { font-family: inherit; font-size: .78rem; }
 .trials { display: grid; gap: 8px; }
 .trial-list { display: flex; flex-wrap: wrap; gap: 8px; }
 .history h3 { font-size: 1.05rem; font-weight: 700; margin-bottom: 10px; }

@@ -29,6 +29,7 @@ import json
 import logging
 import time
 from dataclasses import replace
+from datetime import datetime, timezone
 from typing import Mapping
 
 import httpx
@@ -41,6 +42,7 @@ from app.providers.payments.base import (
     GatewayOrder,
     PaymentGateway,
     PaymentGatewayError,
+    RefundResult,
     VerifiedPayment,
     WebhookEvent,
     WebhookSignatureError,
@@ -234,6 +236,31 @@ class CashfreeGateway(PaymentGateway):
                 currency=str(refund.get("refund_currency") or "") or None,
                 reference=cf_refund_id[:100],
             )
+        # Dispute webhooks: type DISPUTE_CREATED / DISPUTE_UPDATED / DISPUTE_CLOSED,
+        # data.dispute {dispute_id, dispute_status, dispute_amount, reason_code,
+        # reason_description, respond_by}, data.order_details {order_id, ...}.
+        dispute = data.get("dispute") or {}
+        if event_type.startswith("DISPUTE") and dispute:
+            details = data.get("order_details") or {}
+            dispute_id = str(dispute.get("dispute_id") or "")
+            gw_status = str(dispute.get("dispute_status") or "").upper()
+            event_id = header(headers, "x-idempotency-key") or (
+                f"dispute:{dispute_id}:{gw_status}" if dispute_id else hashlib.sha256(raw_body).hexdigest()
+            )
+            reason = " ".join(
+                str(dispute.get(k) or "") for k in ("reason_code", "reason_description")
+            ).strip()
+            return WebhookEvent(
+                event_id=event_id[:128], event_type=event_type[:60],
+                outcome=_dispute_outcome(gw_status),
+                order_id=str(details.get("order_id") or ""),
+                amount_minor=to_minor(dispute["dispute_amount"]) if "dispute_amount" in dispute else None,
+                currency=str(details.get("order_currency") or "") or None,
+                failure_reason=reason[:300],
+                reference=dispute_id[:100],
+                dispute_status=gw_status[:40],
+                respond_by=_parse_time(dispute.get("respond_by")),
+            )
         order = data.get("order") or {}
         payment = data.get("payment") or {}
         cf_payment_id = str(payment.get("cf_payment_id") or "")
@@ -261,6 +288,57 @@ class CashfreeGateway(PaymentGateway):
             reason = str(payment.get("payment_message") or "Payment failed.")[:300]
             return replace(base, outcome="failed", failure_reason=reason)
         return base
+
+    # -------------------------------------------------------------- refunds
+    async def create_refund(
+        self, *, order_id: str, amount_minor: int, refund_id: str, note: str,
+    ) -> RefundResult:
+        path = f"/orders/{order_id}/refunds"
+        try:
+            data = await self._request("POST", path, json={
+                "refund_amount": round(amount_minor / 100, 2),
+                "refund_id": refund_id,
+                "refund_note": note[:100],
+            })
+        except PaymentGatewayError:
+            # Same refund_id already created (double click / retry): report that
+            # refund instead of failing. Anything else re-raises the original error.
+            try:
+                data = await self._request("GET", f"{path}/{refund_id}")
+            except PaymentGatewayError:
+                raise PaymentGatewayError("Cashfree rejected the refund. Check the order in the Cashfree dashboard.")
+        assert isinstance(data, dict)
+        if to_minor(data.get("refund_amount", -1)) != amount_minor:
+            raise PaymentGatewayError("Cashfree returned an unexpected refund amount.")
+        status = str(data.get("refund_status") or "").upper()
+        return RefundResult(
+            refund_id=str(data.get("refund_id") or refund_id),
+            status="success" if status == "SUCCESS" else "failed" if status in ("CANCELLED", "FAILED") else "pending",
+            reference=str(data.get("cf_refund_id") or "")[:100],
+        )
+
+
+#: Final dispute results. RETRIEVAL_* (a document request) never ends access;
+#: neither does INSUFFICIENT_EVIDENCE (Cashfree asks for more documents).
+_DISPUTE_KINDS = ("DISPUTE", "CHARGEBACK", "PRE_ARBITRATION", "ARBITRATION")
+
+
+def _dispute_outcome(gw_status: str) -> str:
+    kind, _, result = gw_status.partition("_MERCHANT_")
+    if kind in _DISPUTE_KINDS and result == "WON":
+        return "dispute_won"
+    if kind in _DISPUTE_KINDS and result in ("LOST", "ACCEPTED"):
+        return "dispute_lost"
+    return "disputed"
+
+
+def _parse_time(value: object) -> datetime | None:
+    try:
+        ts = datetime.fromisoformat(str(value))
+    except ValueError:
+        return None
+    # Stored as UTC: Cashfree sends IST offsets, and SQLite drops the offset.
+    return ts.astimezone(timezone.utc) if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
 
 
 __all__ = ["CashfreeGateway"]

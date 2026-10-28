@@ -25,8 +25,8 @@ export const environment = {
    * Drive, or CDN). Empty = button shows "coming soon" instead of a dead link.
    */
   desktopApp: {
-    version: '1.0.0',
-    windowsUrl: 'https://github.com/sharik78691-commits/ai_interview/releases/download/v1.0.0/OyeInterview-Setup-1.0.0.exe',
+    version: '1.0.1',
+    windowsUrl: 'https://github.com/sharik78691-commits/ai_interview/releases/download/v1.0.1/OyeInterview-Setup-1.0.1.exe',
     macUrl: '',
   },
 };

@@ -3,10 +3,12 @@ import { HttpErrorResponse } from '@angular/common/http';
 import { Component, OnInit, inject, signal } from '@angular/core';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { firstValueFrom, forkJoin } from 'rxjs';
+import { BUSINESS } from '../../core/business-info';
 import { BillingService } from '../../core/services/billing.service';
 import {
   GatewayKey,
   MyBilling,
+  PaymentRecord,
   Plan,
   durationLabel,
   formatMoney,
@@ -146,6 +148,25 @@ export class BillingComponent implements OnInit {
   /** Other live plans besides the applicable one (each keeps its own credits). */
   otherLive(d: MyBilling): number {
     return d.subscriptions.filter((s) => s.status === 'active' && s.id !== d.current?.id).length;
+  }
+
+  readonly supportEmail = BUSINESS.email;
+
+  /** Pre-filled support email for one payment (reference + amount), so help is one click away. */
+  helpLink(p: PaymentRecord): string {
+    const ref = p.gateway_payment_id || p.gateway_order_id;
+    const subject = `Payment help: ${ref}`;
+    const body = [
+      'Hi OyeInterview support,',
+      '',
+      `I need help with this payment (${p.plan_name}, ${formatMoney(p.amount_minor, p.currency)}).`,
+      `Order ID: ${p.gateway_order_id}`,
+      `Payment ID: ${p.gateway_payment_id || '-'}`,
+      '',
+      'What happened / what I would like (for example a refund):',
+      '',
+    ].join('\n');
+    return `mailto:${BUSINESS.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   }
 
   paymentStatus(status: string): string {

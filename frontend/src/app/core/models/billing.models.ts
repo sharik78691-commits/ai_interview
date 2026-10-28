@@ -133,6 +133,12 @@ export interface PaymentRecord {
   paid_at: string | null;
   refunded_at: string | null;
   refund_reference: string;
+  /** Set once a chargeback was opened (kept after it is won or lost). */
+  disputed_at?: string | null;
+  /** Gateway's latest dispute status, e.g. CHARGEBACK_CREATED. */
+  dispute_status?: string;
+  /** Deadline to upload evidence at the gateway. */
+  dispute_respond_by?: string | null;
   subscription_id: number | null;
 }
 
@@ -293,6 +299,22 @@ export interface BillingOverview {
   screenshots_analyzed: number;
   screenshot_failures: number;
   payment_success_rate: number | null;
+  /** Payments in the range ever disputed, and their share of captured payments. */
+  disputes_count?: number;
+  dispute_rate?: number | null;
+  /** Same share by INR value (the measure Cashfree uses; above 1% risks the account). */
+  dispute_value_rate_inr?: number | null;
+  open_disputes?: number;
+  next_dispute_deadline?: string | null;
+}
+
+/** Admin: chargeback evidence for one payment (`summary_text` is upload-ready). */
+export interface DisputeEvidence {
+  generated_at: string;
+  payment: { id: number; order_id: string; gateway: string; plan_name: string };
+  customer: { email: string };
+  service: { sign_ins: number; questions_answered: number; interviews_prepared: number };
+  summary_text: string;
 }
 
 /** Editable plan fields (all optional on update). */

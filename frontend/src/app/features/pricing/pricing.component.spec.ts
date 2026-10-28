@@ -108,6 +108,27 @@ describe('PricingComponent (database-driven)', () => {
     expect(nav).toHaveBeenCalledWith(['/register'], { queryParams: { redirect: '/pricing' } });
   });
 
+  it('desktop app: payment continues on the website in the browser, no order is created in-app', async () => {
+    const fixture = render();
+    const cmp = fixture.componentInstance;
+    (cmp as unknown as { isDesktop: boolean }).isDesktop = true;
+    const open = spyOn(window, 'open').and.returnValue(null);
+    cmp.choose(PLAN);
+    fixture.detectChanges();
+    const el: HTMLElement = fixture.nativeElement;
+    expect(el.querySelector('.checkout .btn-primary')?.textContent).toContain('Continue to payment in browser');
+    expect(el.querySelector('.checkout')?.textContent).toContain('completed on our website in your web browser');
+    await cmp.pay();
+    expect(open).toHaveBeenCalledWith('https://www.oyeinterview.com/pricing', '_blank', 'noopener');
+    http.expectNone('/api/payments/checkout');
+    expect(launcher.open).not.toHaveBeenCalled();
+    expect(cmp.message()).toContain('Checkout opened in your web browser');
+  });
+
+  it('web build is unaffected: no browser hand-off', () => {
+    expect(render().componentInstance.isDesktop).toBeFalse();
+  });
+
   it('checkout -> gateway -> server verification -> billing page', async () => {
     const fixture = render();
     const cmp = fixture.componentInstance;

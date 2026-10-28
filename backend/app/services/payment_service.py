@@ -24,6 +24,7 @@ import asyncio
 import logging
 import secrets
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from typing import Mapping
 
 from sqlalchemy import select, update
@@ -41,6 +42,8 @@ from app.models.user import User
 from app.providers.payments.base import (
     CustomerInfo,
     PaymentGateway,
+    PaymentGatewayError,
+    RefundResult,
     VerifiedPayment,
     WebhookEvent,
 )
@@ -284,7 +287,7 @@ def mark_failed(db: Session, payment_id: int, reason: str) -> VerifyResult:
 
 def mark_refunded(
     db: Session, payment_id: int, *, amount_minor: int | None, currency: str | None,
-    reference: str, reason: str = "Refunded at the payment gateway.",
+    reference: str, reason: str = "Refunded at the payment gateway.", actor_user_id: int | None = None,
 ) -> VerifyResult:
     """Refund policy: a FULL refund (or a lost chargeback) ends the access the
     payment bought; a partial refund is recorded and access is kept. Usage
@@ -304,22 +307,124 @@ def mark_refunded(
         return VerifyResult(payment.status, payment.id, None, "Partial refund recorded.")
     payment.status = PaymentStatus.REFUNDED
     payment.refunded_at = payment.refunded_at or subs.utcnow()
-    sub = subs.end_for_payment(db, payment, status=SubscriptionStatus.REFUNDED, reason=reason)
+    sub = subs.end_for_payment(db, payment, status=SubscriptionStatus.REFUNDED, reason=reason,
+                               actor_user_id=actor_user_id)
     db.commit()
     logger.warning("Payment %s refunded -> subscription %s ended", payment.id, sub.id if sub else None)
     return VerifyResult("refunded", payment.id, sub.id if sub else None, "Refund recorded; access ended.")
 
 
-def mark_disputed(db: Session, payment_id: int, *, reference: str, reason: str) -> VerifyResult:
-    """Chargeback opened: flag the payment for review; access is kept until
-    the dispute is lost (then ``mark_refunded``) or an admin revokes it."""
+def _note_dispute(payment: Payment, *, reference: str, gateway_status: str,
+                  respond_by: datetime | None = None) -> None:
+    """Remember that this payment was disputed (kept forever for the
+    chargeback ratio) and the gateway's latest status / deadline."""
+    payment.disputed_at = payment.disputed_at or subs.utcnow()
+    payment.dispute_status = (gateway_status or payment.dispute_status or "open")[:40]
+    if respond_by is not None:
+        payment.dispute_respond_by = respond_by
+    if reference and payment.status != PaymentStatus.REFUNDED:
+        payment.refund_reference = reference[:100]
+
+
+def mark_disputed(
+    db: Session, payment_id: int, *, reference: str, reason: str,
+    gateway_status: str = "", respond_by: datetime | None = None,
+) -> VerifyResult:
+    """Chargeback opened / under review: flag the payment for review; access
+    is kept until the dispute is lost (then ``mark_refunded``) or an admin
+    revokes it. A dispute on an already-refunded payment is still recorded."""
     payment = _lock_payment(db, payment_id)
-    if payment.status == PaymentStatus.PAID:
-        payment.status = PaymentStatus.DISPUTED
-        payment.refund_reference = (reference or "")[:100]
-        payment.failure_reason = f"Dispute opened {reason}".strip()[:300]
+    if payment.status in (PaymentStatus.PAID, PaymentStatus.DISPUTED, PaymentStatus.REFUNDED):
+        if payment.status == PaymentStatus.PAID:
+            payment.status = PaymentStatus.DISPUTED
+            payment.failure_reason = f"Dispute opened {reason}".strip()[:300]
+        _note_dispute(payment, reference=reference, gateway_status=gateway_status, respond_by=respond_by)
+        logger.warning("Payment %s disputed (%s)", payment.id, payment.dispute_status)
     db.commit()
     return VerifyResult(payment.status, payment.id, None, "Dispute recorded.")
+
+
+def mark_dispute_won(db: Session, payment_id: int, *, reference: str, gateway_status: str = "") -> VerifyResult:
+    """Chargeback decided in our favour: the payment counts as paid again.
+    Access was never ended by the dispute, so nothing is re-granted (an admin
+    revocation made meanwhile stays in force)."""
+    payment = _lock_payment(db, payment_id)
+    if payment.status == PaymentStatus.DISPUTED:
+        payment.status = PaymentStatus.PAID
+        payment.failure_reason = ""
+    if payment.disputed_at is not None or payment.status == PaymentStatus.PAID:
+        _note_dispute(payment, reference=reference, gateway_status=gateway_status or "won")
+    db.commit()
+    logger.info("Payment %s dispute won", payment.id)
+    return VerifyResult(payment.status, payment.id, None, "Dispute won.")
+
+
+def mark_dispute_lost(db: Session, payment_id: int, *, reference: str, gateway_status: str = "") -> VerifyResult:
+    """Chargeback lost: the money went back to the customer, so it is handled
+    exactly like a full refund (access ends)."""
+    payment = _lock_payment(db, payment_id)
+    if payment.status in (PaymentStatus.PAID, PaymentStatus.DISPUTED, PaymentStatus.REFUNDED):
+        _note_dispute(payment, reference=reference, gateway_status=gateway_status or "lost")
+    return mark_refunded(db, payment_id, amount_minor=None, currency=None,
+                         reference=reference, reason="Chargeback lost at the payment gateway.")
+
+
+# ------------------------------------------------------------ admin refund
+
+
+#: Gateways refund for at most this long after the payment (Cashfree: 180 days).
+REFUND_WINDOW_DAYS = 180
+
+
+def _refund_target(db: Session, payment_id: int) -> Payment:
+    payment = db.get(Payment, payment_id)
+    if payment is None:
+        raise PaymentError("Payment not found.")
+    if payment.status == PaymentStatus.DISPUTED:
+        raise PaymentError(
+            "This payment is under a chargeback. Respond to the dispute at the gateway instead — "
+            "refunding now would return the money twice."
+        )
+    if payment.status != PaymentStatus.PAID:
+        raise PaymentError(f"Only paid payments can be refunded (this one is {payment.status}).")
+    paid_at = subs.aware(payment.paid_at or payment.created_at)
+    if paid_at and subs.utcnow() - paid_at > timedelta(days=REFUND_WINDOW_DAYS):
+        raise PaymentError(f"The gateway cannot refund payments older than {REFUND_WINDOW_DAYS} days.")
+    return payment
+
+
+def _record_admin_refund(
+    db: Session, payment_id: int, admin_id: int, refund: RefundResult, reason: str,
+) -> VerifyResult:
+    return mark_refunded(db, payment_id, amount_minor=None, currency=None,
+                         reference=refund.reference or refund.refund_id,
+                         reason=f"Refunded by admin: {reason}"[:500], actor_user_id=admin_id)
+
+
+async def admin_refund(db: Session, payment_id: int, *, admin_id: int, reason: str) -> VerifyResult:
+    """Full refund through the gateway API, then end the access it bought.
+
+    The refund id is derived from the payment, so a double click or retry can
+    never refund twice — the gateway returns the refund it already made.
+    Access ends as soon as the gateway ACCEPTS the refund (it may still show
+    "pending" until the bank credits the customer); the later refund webhook
+    is idempotent.
+    """
+    payment = await asyncio.to_thread(_refund_target, db, payment_id)
+    gateway = get_gateway(payment.gateway)
+    refund = await gateway.create_refund(
+        order_id=payment.gateway_order_id,
+        amount_minor=payment.amount_minor,
+        refund_id=f"rf_{payment.receipt}"[:40],
+        note=f"OyeInterview refund {payment.plan_name}",
+    )
+    if refund.status == "failed":
+        raise PaymentGatewayError("The gateway declined the refund. Check the order in its dashboard.")
+    result = await asyncio.to_thread(_record_admin_refund, db, payment_id, admin_id, refund, reason)
+    logger.warning("Admin %s refunded payment %s (%s)", admin_id, payment_id, refund.status)
+    pending = " The customer's bank usually credits it within 5–7 business days."
+    return VerifyResult(result.status, payment_id, result.subscription_id,
+                        "Refund initiated; access ended." + (pending if refund.status == "pending" else ""))
 
 
 def _apply(db: Session, payment_id: int, verified: VerifiedPayment, via: str) -> VerifyResult:
@@ -447,11 +552,14 @@ def _process_event(db: Session, gateway: str, event_row_id: int, event: WebhookE
                           currency=event.currency, reference=event.reference)
             status = "processed"
         elif event.outcome == "disputed":
-            mark_disputed(db, payment.id, reference=event.reference, reason=event.failure_reason)
+            mark_disputed(db, payment.id, reference=event.reference, reason=event.failure_reason,
+                          gateway_status=event.dispute_status, respond_by=event.respond_by)
+            status = "processed"
+        elif event.outcome == "dispute_won":
+            mark_dispute_won(db, payment.id, reference=event.reference, gateway_status=event.dispute_status)
             status = "processed"
         elif event.outcome == "dispute_lost":
-            mark_refunded(db, payment.id, amount_minor=None, currency=None,
-                          reference=event.reference, reason="Chargeback lost at the payment gateway.")
+            mark_dispute_lost(db, payment.id, reference=event.reference, gateway_status=event.dispute_status)
             status = "processed"
     except Exception as exc:  # keep the event row; gateways retry on 5xx
         db.rollback()
@@ -495,7 +603,10 @@ __all__ = [
     "CheckoutResult",
     "DuplicateCheckout",
     "PaymentError",
+    "admin_refund",
     "mark_disputed",
+    "mark_dispute_lost",
+    "mark_dispute_won",
     "mark_refunded",
     "VerifyResult",
     "WebhookResult",

@@ -82,6 +82,32 @@ describe('BillingComponent', () => {
   });
 });
 
+describe('BillingComponent (payment help)', () => {
+  it('offers a pre-filled support email per paid payment and asks to contact us before a bank dispute', () => {
+    TestBed.configureTestingModule({
+      imports: [BillingComponent],
+      providers: [
+        provideRouter([]),
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        { provide: ActivatedRoute, useValue: { snapshot: { queryParamMap: convertToParamMap({}) } } },
+      ],
+    });
+    const http = TestBed.inject(HttpTestingController);
+    const fixture = TestBed.createComponent(BillingComponent);
+    fixture.detectChanges();
+    http.expectOne('/api/billing/me').flush(ME);
+    http.expectOne('/api/plans?currency=INR').flush([]);
+    fixture.detectChanges();
+    const link = fixture.nativeElement.querySelector('a.help-link') as HTMLAnchorElement;
+    const href = decodeURIComponent(link.getAttribute('href')!);
+    expect(href.startsWith('mailto:support@oyeinterview.com?subject=Payment help: pay_1')).toBeTrue();
+    expect(href).toContain('Order ID: order_1');
+    expect(fixture.nativeElement.querySelector('.foot').textContent).toContain('before raising a dispute with your bank');
+    http.verify();
+  });
+});
+
 describe('public page routes', () => {
   it('registers the new informational and legal pages', () => {
     const paths = routes.map((r) => r.path);

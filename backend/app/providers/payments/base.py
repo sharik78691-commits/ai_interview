@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Literal, Mapping
 
 
@@ -67,8 +68,11 @@ class VerifiedPayment:
 
 
 #: refunded = money returned (``amount_minor`` is the REFUND amount);
-#: disputed = chargeback opened; dispute_lost = chargeback decided against us.
-WebhookOutcome = Literal["paid", "failed", "refunded", "disputed", "dispute_lost", "ignored"]
+#: disputed = chargeback opened / still under review; dispute_won /
+#: dispute_lost = chargeback decided for / against us.
+WebhookOutcome = Literal[
+    "paid", "failed", "refunded", "disputed", "dispute_won", "dispute_lost", "ignored",
+]
 
 
 @dataclass(frozen=True)
@@ -86,6 +90,21 @@ class WebhookEvent:
     failure_reason: str = ""
     #: Gateway refund / dispute id for refund and dispute events.
     reference: str = ""
+    #: Dispute events: the gateway's own dispute status and evidence deadline.
+    dispute_status: str = ""
+    respond_by: datetime | None = None
+
+
+RefundStatus = Literal["pending", "success", "failed"]
+
+
+@dataclass(frozen=True)
+class RefundResult:
+    """A refund the gateway accepted (``pending`` = initiated, not yet credited)."""
+
+    refund_id: str
+    status: RefundStatus
+    reference: str = ""  # gateway's own refund id
 
 
 class PaymentGateway(ABC):
@@ -124,6 +143,13 @@ class PaymentGateway(ABC):
 
         Raises :class:`WebhookSignatureError` when verification fails.
         """
+
+    async def create_refund(
+        self, *, order_id: str, amount_minor: int, refund_id: str, note: str,
+    ) -> RefundResult:
+        """Refund ``amount_minor`` of a paid order. ``refund_id`` is OUR id and
+        must be stable per payment, so a retry can never refund twice."""
+        raise PaymentGatewayError(f"{self.display_name} refunds must be made from its own dashboard.")
 
 
 def to_minor(amount: object) -> int:
