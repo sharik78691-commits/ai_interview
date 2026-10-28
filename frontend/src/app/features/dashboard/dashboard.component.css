@@ -18,6 +18,21 @@
 .app-actions button[disabled] { cursor: not-allowed; opacity: .6; }
 .app-actions .dl-note { margin: 0; text-align: center; font-size: .68rem; }
 
+/* Post-install keyboard shortcuts: key caps + what they do. */
+.shortcuts { margin-top: 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--tint); }
+.shortcuts-title { margin: 0 0 8px; font-size: .78rem; font-weight: 700; color: var(--text); }
+.shortcut-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.shortcut-list li { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; }
+.keys { display: inline-flex; align-items: center; gap: 4px; min-width: 9.5rem; }
+.keys kbd {
+  font: 600 .72rem/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  padding: 4px 7px; min-width: 1.6rem; text-align: center;
+  color: var(--text); background: var(--card);
+  border: 1px solid var(--border-strong); border-bottom-width: 2px; border-radius: 6px;
+}
+.keys .plus { color: var(--muted2); font-size: .72rem; }
+.shortcut-desc { color: var(--muted); font-size: .82rem; }
+
 /* Slim one-line note (was a full banner). */
 .mic-note { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 12px; border: 1px solid var(--border); background: var(--bg2); color: var(--muted); font-size: .78rem; line-height: 1.5; }
 .mic-note svg { width: 18px; height: 18px; flex-shrink: 0; color: var(--accent); }
