@@ -28,33 +28,23 @@ svg { display: block; }
 .play svg { width: 12px; height: 12px; fill: var(--on-accent); margin-left: 2px; }
 .assure { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 18px; margin-top: 16px; font-size: 14px; color: var(--muted); }
 .assure li { display: inline-flex; align-items: center; gap: 6px; }
+.for-who { margin-top: 14px; font-size: 13.5px; color: var(--muted); }
+.for-who span { font-weight: 700; color: var(--accent); margin-right: 4px; }
 .hero-art { grid-area: art; }
-.hero-art svg { width: 220px; height: 198px; }
-.paper { filter: drop-shadow(0 6px 10px rgba(11, 61, 36, .18)); }
-.letter-title { font-size: 11px; font-weight: 800; letter-spacing: 1.6px; fill: #137547; font-family: var(--font); }
+.hero-art svg { width: 260px; height: 238px; overflow: visible; }
+.paper { fill: var(--paper); filter: drop-shadow(0 8px 14px rgba(84, 56, 0, .16)); }
+.ln { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+/* Letter ink stays dark: it sits on --paper, which is light in every theme. */
+.hero-art text { font-family: var(--font); font-weight: 800; fill: #1a1a1a; text-anchor: middle; }
+.hero-art .t-title { font-size: 8px; letter-spacing: 1.6px; fill: #a16207; }
+.t-hi { font-size: 12.5px; letter-spacing: -.2px; }
 .conf-blue { fill: #3a86ff; }
 :host-context(:root:not([data-theme="light"])) .conf-blue { fill: #60a5fa; }
 
-@keyframes rise { 0%, 15% { transform: translateY(16px); } 50%, 100% { transform: translateY(0); } }
-@keyframes conf { 0% { transform: translateY(-10px) rotate(0); opacity: 0; } 25% { opacity: 1; } 100% { transform: translateY(30px) rotate(200deg); opacity: 0; } }
-@keyframes draw { 0%, 45% { stroke-dashoffset: 24; } 70%, 100% { stroke-dashoffset: 0; } }
-.rise { animation: rise 3.6s cubic-bezier(.2, .8, .2, 1) infinite alternate; }
-.c1, .c2, .c3, .c4 { transform-box: fill-box; transform-origin: center; }
-.c1 { animation: conf 2.6s ease-in infinite; }
-.c2 { animation: conf 2.6s ease-in .6s infinite; }
-.c3 { animation: conf 2.6s ease-in 1.2s infinite; }
-.c4 { animation: conf 2.6s ease-in 1.8s infinite; }
-.check { stroke-dasharray: 24; animation: draw 3.6s ease-out infinite alternate; }
-@keyframes wave { 0%, 100% { opacity: .15; transform: translateX(0); } 50% { opacity: .9; transform: translateX(-3px); } }
-@keyframes pop { 0%, 8% { transform: scale(.4); opacity: 0; } 18% { transform: scale(1.08); opacity: 1; } 24%, 80% { transform: scale(1); opacity: 1; } 92%, 100% { transform: scale(.4); opacity: 0; } }
-@keyframes ring { 0% { stroke-dasharray: 0 88; } 45%, 100% { stroke-dasharray: 66 88; } }
-@keyframes twinkle { 0%, 100% { transform: scale(.6) rotate(0); opacity: .4; } 50% { transform: scale(1.15) rotate(45deg); opacity: 1; } }
-.wave { transform-box: fill-box; animation: wave 1.6s ease-in-out infinite; }
-.w2 { animation-delay: .4s; }
-.pop { transform-box: fill-box; transform-origin: center; animation: pop 4.4s cubic-bezier(.3, 1.4, .5, 1) infinite; }
-.ring { animation: ring 4.4s ease-out infinite; }
-.spark { transform-box: fill-box; transform-origin: center; animation: twinkle 2.4s ease-in-out infinite; }
-.spark-b { animation-delay: 1.2s; }
+/* The letter slides out once, then just floats. */
+@keyframes letter-out { from { transform: translateY(72px); } to { transform: translateY(0); } }
+@keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+.letter { animation: letter-out 1.3s cubic-bezier(.2, .8, .2, 1) .2s both, float 5s ease-in-out 1.5s infinite; }
 
 /* ---------------- Sections ---------------- */
 .sec { padding: 48px 0; }
@@ -207,12 +197,12 @@ svg { display: block; }
   .hero-grid { grid-template-columns: minmax(0, 1.15fr) minmax(0, .85fr); grid-template-areas: "badge art" "copy art"; justify-items: start; text-align: left; column-gap: 48px; row-gap: 20px; align-items: center; }
   .hero-badge { align-self: end; }
   .hero-copy { align-self: start; }
-  .hero h1 { font-size: 56px; }
+  .hero h1 { font-size: 52px; }
   .sub { margin-left: 0; font-size: 19px; max-width: 560px; }
   .cta { justify-content: flex-start; margin-top: 32px; }
   .assure { justify-content: flex-start; }
   .hero-art { justify-self: center; }
-  .hero-art svg { width: 420px; height: 378px; }
+  .hero-art svg { width: 460px; height: 422px; }
   .sec { padding: 88px 0; }
   .sec h2 { font-size: 36px; }
   .sec-intro { margin-bottom: 40px; }
@@ -227,7 +217,7 @@ svg { display: block; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .rise, .c1, .c2, .c3, .c4, .check, .wave, .pop, .ring, .spark, .rec-dot, .live-dot { animation: none; }
+  .letter, .rec-dot, .live-dot { animation: none; }
   .points li { animation: none; opacity: 1; }
   .card:hover, .final-btn:hover { transform: none; }
 }
