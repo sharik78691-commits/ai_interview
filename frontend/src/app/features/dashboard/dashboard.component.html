@@ -28,6 +28,15 @@
   <app-error-banner [message]="error" (dismiss)="error=''"></app-error-banner>
 
   @if (!isDesktop) {
+    <a class="card tut-card" [href]="tutorial.url" target="_blank" rel="noopener" data-testid="tutorial-link">
+      <span class="tut-thumb"><img [src]="tutorial.thumbnail" alt="" width="128" height="72" loading="lazy" decoding="async"><span class="tut-play" aria-hidden="true">▶</span></span>
+      <span class="tut-text">
+        <strong>New here? Watch the {{ tutorial.duration }} tutorial</strong>
+        <span class="muted small">Resume, target role, live practice, mock interview and the desktop app — step by step.</span>
+      </span>
+      <span class="btn-ghost btn-sm tut-btn">▶ Watch on YouTube</span>
+    </a>
+
     <section class="card mock-card" aria-label="Mock interview">
       <div>
         <h3>🎯 Mock interview</h3>

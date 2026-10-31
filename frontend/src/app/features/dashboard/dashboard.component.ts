@@ -8,6 +8,7 @@ import { ResumeData } from '../../core/models/interview.models';
 import { ResumeService, StoredResume } from '../../core/services/resume.service';
 import { TargetRole, TargetRoleDetail, TargetRoleService } from '../../core/services/target-role.service';
 import { ErrorBannerComponent } from '../../shared/components/error-banner/error-banner.component';
+import { TUTORIAL } from '../../core/tutorial';
 import { environment } from '../../../environments/environment';
 
 @Component({
@@ -30,6 +31,7 @@ export class DashboardComponent implements OnInit {
   readonly desktopApp = environment.desktopApp;
   /** Packaged desktop build: download card becomes an (updater) placeholder. */
   readonly isDesktop = environment.electron;
+  readonly tutorial = TUTORIAL;
 
   resumeText = this.resumeService.resumeText;
   jobDescription = this.resumeService.jobDescription;

@@ -1,6 +1,7 @@
 import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
 import { BillingService } from '../../core/services/billing.service';
+import { TUTORIAL, tutorialEmbedUrl } from '../../core/tutorial';
 import { Plan, durationLabel, formatMoney, hoursLabel, withoutHiddenFeatures, withoutScreenshotCopy } from '../../core/models/billing.models';
 
 @Component({
@@ -13,6 +14,25 @@ import { Plan, durationLabel, formatMoney, hoursLabel, withoutHiddenFeatures, wi
 export class LandingComponent implements OnInit {
   private router = inject(Router);
   private billing = inject(BillingService);
+
+  readonly tutorial = TUTORIAL;
+
+  /**
+   * Click-to-play: the section shows our own thumbnail, and the YouTube player
+   * (privacy-enhanced, fixed URL from core/tutorial.ts) is only created on
+   * Play. Built with the DOM API so the landing bundle needs no iframe
+   * sanitizer — it is part of the initial bundle.
+   */
+  playTutorial(box: HTMLElement, start = 0): void {
+    const frame = document.createElement('iframe');
+    frame.src = tutorialEmbedUrl(start);
+    frame.title = 'OyeInterview full tutorial';
+    frame.allow = 'autoplay; encrypted-media; picture-in-picture; fullscreen';
+    frame.allowFullscreen = true;
+    // inline: component styles don't reach elements created outside the template
+    frame.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;border:0';
+    box.replaceChildren(frame);
+  }
 
   /** Plans come from the backend (same source as /pricing) — never hard-coded. */
   readonly plans = signal<Plan[]>([]);
