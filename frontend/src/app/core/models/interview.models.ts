@@ -81,6 +81,8 @@ export interface AppSettings {
   sttProvider: string;
   responseLength: ResponseLength;
   theme: string;
+  /** Theme-default version the saved `theme` was chosen under. */
+  themeVersion?: number;
   micId: string;
   /** AI Guidance text size in px (user-adjustable, persisted). */
   guidanceFontSize: number;

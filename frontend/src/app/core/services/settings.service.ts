@@ -1,6 +1,5 @@
 import { Injectable } from '@angular/core';
 import { BehaviorSubject } from 'rxjs';
-import { environment } from '../../../environments/environment';
 import { AppSettings, ResponseLength } from '../models/interview.models';
 
 const KEY = 'aia_settings';
@@ -9,7 +8,8 @@ const DEFAULTS: AppSettings = {
   aiModel: 'auto',
   sttProvider: 'browser',
   responseLength: 'default',
-  theme: 'light', // replaced by defaultTheme() in load()
+  theme: 'dark',
+  themeVersion: 2, // 2 = dark became the default; themes saved under an older version move to dark once
   micId: '',
   guidanceFontSize: 15,
   background: 'sunshine', // yellow call-to-action by default; 'default' = original green
@@ -43,12 +43,12 @@ const LENGTH_ALIASES: Record<string, ResponseLength> = {
 
 /** Supported themes. 'darker' was a legacy settings option that never had a
     dedicated stylesheet, so it maps to 'dark'. Anything unset/unknown uses the
-    build's default (light on the web, dark in the desktop app). */
+    default (dark, on the web and in the desktop app). */
 export type ThemeName = 'dark' | 'light';
 
-/** Default theme: the desktop (.exe) app starts dark, the website starts light. */
+/** Default theme: dark everywhere (website and desktop .exe app). */
 function defaultTheme(): ThemeName {
-  return environment.electron ? 'dark' : 'light';
+  return 'dark';
 }
 
 function normalizeTheme(value: unknown): ThemeName {
@@ -105,7 +105,7 @@ export class SettingsService {
   settings$ = new BehaviorSubject<AppSettings>(this.load());
 
   constructor() {
-    // Apply the stored theme on startup (default light on web, dark on desktop; a saved choice is kept).
+    // Apply the stored theme on startup (default dark; a saved choice is kept).
     this.applyToDocument();
   }
 
@@ -130,7 +130,11 @@ export class SettingsService {
           responseLength:
             LENGTH_ALIASES[(parsed.responseLength ?? '').toLowerCase()] ?? DEFAULTS.responseLength,
           guidanceFontSize: clampFontSize(parsed.guidanceFontSize),
-          theme: normalizeTheme(parsed.theme),
+          // Every save() stores the theme, even one the user never picked, so a
+          // theme saved before dark became the default (no/old themeVersion)
+          // moves to dark once; later picks are kept.
+          theme: parsed.themeVersion === DEFAULTS.themeVersion ? normalizeTheme(parsed.theme) : defaultTheme(),
+          themeVersion: DEFAULTS.themeVersion,
           // A background saved before the yellow default (no/old bgVersion)
           // moves to the current default once; later picks are kept.
           background:
