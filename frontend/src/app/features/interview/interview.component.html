@@ -65,6 +65,79 @@
   <div class="workspace">
     <!-- ------------------------------ SIDEBAR ------------------------------- -->
     <aside class="sidebar">
+      <!-- Live preview of the tab / window picked in "Select meeting audio". -->
+      @if (!isDesktop && sharedView; as view) {
+        <section class="card share-card" [class.paused]="audioPaused" data-testid="share-preview" aria-label="Shared meeting preview">
+          <header class="share-head">
+            <span class="share-ico" aria-hidden="true">
+              @switch (view.surface) {
+                @case ('window') {
+                  <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M3 8.5h18"/><circle cx="6.2" cy="6.3" r=".6"/><circle cx="8.4" cy="6.3" r=".6"/></svg>
+                }
+                @case ('monitor') {
+                  <svg viewBox="0 0 24 24"><rect x="2.5" y="4" width="19" height="12.5" rx="2"/><path d="M8.5 20.5h7M12 16.5v4"/></svg>
+                }
+                @default {
+                  <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="15" rx="2.5"/><path d="M3 9.5h18M7.5 5v4.5"/></svg>
+                }
+              }
+            </span>
+            <div class="share-heading">
+              <h3 class="share-title">Shared meeting</h3>
+              <span class="share-meta" data-testid="share-caption">{{ shareCaption }}</span>
+            </div>
+            @if (audioPaused) {
+              <span class="share-badge paused">Paused</span>
+            } @else {
+              <span class="share-badge live"><span class="share-badge-dot"></span>Live</span>
+            }
+          </header>
+
+          @if (!sharePreviewHidden) {
+            <div class="share-stage" #stage [class.no-video]="!view.stream" (dblclick)="view.stream && openShareFullscreen(stage)">
+              @if (view.stream) {
+                <video #meetingVideo class="share-video" autoplay muted playsinline></video>
+                <div class="stage-tools">
+                  @if (pipSupported) {
+                    <button type="button" class="stage-btn" (click)="openSharePip()" title="Pop out (Picture-in-Picture)" aria-label="Pop out preview">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><rect x="12" y="11.5" width="7" height="5.5" rx="1" class="fill"/></svg>
+                    </button>
+                  }
+                  <button type="button" class="stage-btn" (click)="openShareFullscreen(stage)" title="Full screen" aria-label="Show full screen">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+                  </button>
+                </div>
+              } @else {
+                <div class="stage-empty">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10v4M8 7v10M12 4v16M16 8v8M20 11v2"/></svg>
+                  <p>Audio-only share</p>
+                  <span>No picture for this source — the AI is still listening.</span>
+                </div>
+              }
+              @if (audioPaused) {
+                <div class="stage-paused">
+                  <span class="stage-paused-ico" aria-hidden="true">❚❚</span>
+                  Listening paused
+                </div>
+              }
+              <div class="stage-level" #levelMeter title="Meeting audio level">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6.5 9H3v6h3.5L11 19z" class="fill"/><path d="M15.5 9a4 4 0 0 1 0 6"/></svg>
+                <span class="lvl-bars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+              </div>
+            </div>
+          }
+
+          <footer class="share-foot">
+            <span class="share-hint">
+              {{ sharePreviewHidden ? 'Preview hidden — audio is still captured.' : 'Only you can see this preview.' }}
+            </span>
+            <button type="button" class="share-toggle" (click)="toggleSharePreview()" data-testid="share-toggle">
+              {{ sharePreviewHidden ? 'Show preview' : 'Hide' }}
+            </button>
+          </footer>
+        </section>
+      }
+
       <section class="card panel">
         <h3 class="panel-title">Controls</h3>
 

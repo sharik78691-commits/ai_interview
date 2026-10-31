@@ -1,4 +1,4 @@
-import { Component, OnDestroy, OnInit, inject } from '@angular/core';
+import { Component, ElementRef, NgZone, OnDestroy, OnInit, ViewChild, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { Subscription } from 'rxjs';
@@ -15,7 +15,7 @@ import {
 } from '../../core/models/interview.models';
 import { FONT_SIZE_OPTIONS, MAX_FONT_SIZE, MIN_FONT_SIZE } from '../../core/services/settings.service';
 import { DemoService } from '../../core/services/demo.service';
-import { InterviewerAudioService } from '../../core/services/interviewer-audio.service';
+import { InterviewerAudioService, SharedView } from '../../core/services/interviewer-audio.service';
 import { InterviewWsService, LiveAccess } from '../../core/services/interview-ws.service';
 import { QuestionDetectorService } from '../../core/services/question-detector.service';
 import { ResumeService } from '../../core/services/resume.service';
@@ -107,13 +107,23 @@ export const MAX_QUEUED_CLIPS = 4;
 export const CLIP_SLOT_TIMEOUT_MS = 10_000;
 /** One interview session is capped at 1h 15m; interviewer audio stops automatically. */
 export const MAX_SESSION_SECONDS = 75 * 60;
+/** Remembers whether the user collapsed the shared-tab preview. */
+export const SHARE_PREVIEW_HIDDEN_KEY = 'oye.sharePreviewHidden';
+/** Sidebar caption for each kind of shared source. */
+export const SHARE_SURFACE_LABELS: Record<SharedView['surface'], string> = {
+  browser: 'Browser tab',
+  window: 'Application window',
+  monitor: 'Entire screen',
+  unknown: 'Shared source',
+};
 
 @Component({
   selector: 'app-interview',
   standalone: true,
   imports: [FormsModule, RouterLink, ErrorBannerComponent, TimeFormatPipe, RichTextPipe],
   templateUrl: './interview.component.html',
-  styleUrl: './interview.component.css',
+  // The shared-tab preview has its own sheet to keep each under the style budget.
+  styleUrls: ['./interview.component.css', './share-preview.css'],
 })
 export class InterviewComponent implements OnInit, OnDestroy {
   private transcription = inject(TranscriptionService);
@@ -200,6 +210,97 @@ export class InterviewComponent implements OnInit, OnDestroy {
   systemAudioDevices: string[] | null = null;
   /** Info popup shown before "Auto Select Meeting Audio" starts capturing. */
   autoSelectInfoOpen = false;
+
+  // ------------------------------------------------------ shared-tab preview
+  private zone = inject(NgZone);
+  /** The tab / window picked in "Select meeting audio" (null when none). */
+  sharedView: SharedView | null = null;
+  /** User collapsed the preview (audio keeps flowing; persisted per browser). */
+  sharePreviewHidden = readSharePreviewHidden();
+  readonly pipSupported =
+    typeof document !== 'undefined' && !!(document as Document & { pictureInPictureEnabled?: boolean }).pictureInPictureEnabled;
+  private meetingVideoEl: HTMLVideoElement | null = null;
+  private levelMeterEl: HTMLElement | null = null;
+  private levelRaf = 0;
+  private levelValue = 0;
+
+  @ViewChild('meetingVideo') set meetingVideoRef(ref: ElementRef<HTMLVideoElement> | undefined) {
+    this.meetingVideoEl = ref?.nativeElement ?? null;
+    this.attachMeetingVideo();
+  }
+
+  @ViewChild('levelMeter') set levelMeterRef(ref: ElementRef<HTMLElement> | undefined) {
+    this.levelMeterEl = ref?.nativeElement ?? null;
+    this.syncLevelMeter();
+  }
+
+  /** "Browser tab · 1920×1080" caption under the preview title. */
+  get shareCaption(): string {
+    const v = this.sharedView;
+    if (!v) return '';
+    const label = SHARE_SURFACE_LABELS[v.surface];
+    if (!v.stream) return `${label} · audio only`;
+    return v.width && v.height ? `${label} · ${v.width}×${v.height}` : label;
+  }
+
+  toggleSharePreview(): void {
+    this.sharePreviewHidden = !this.sharePreviewHidden;
+    try {
+      localStorage.setItem(SHARE_PREVIEW_HIDDEN_KEY, this.sharePreviewHidden ? '1' : '0');
+    } catch {
+      /* storage blocked: the choice just isn't remembered */
+    }
+  }
+
+  /** Float the meeting in a Picture-in-Picture window. */
+  async openSharePip(): Promise<void> {
+    const el = this.meetingVideoEl as (HTMLVideoElement & { requestPictureInPicture?: () => Promise<unknown> }) | null;
+    if (!el?.requestPictureInPicture) return;
+    try {
+      await el.requestPictureInPicture();
+    } catch {
+      /* the browser refused (no frame yet / policy) — nothing to undo */
+    }
+  }
+
+  /** Show the shared tab full screen (Esc returns). */
+  openShareFullscreen(stage: HTMLElement): void {
+    void stage.requestFullscreen?.().catch(() => undefined);
+  }
+
+  private attachMeetingVideo(): void {
+    const el = this.meetingVideoEl;
+    const stream = this.sharedView?.stream ?? null;
+    if (!el || el.srcObject === stream) return;
+    el.muted = true;
+    el.srcObject = stream;
+    if (stream) void el.play?.()?.catch(() => undefined);
+  }
+
+  /**
+   * Level meter: a rAF loop outside Angular writes one CSS variable, so the
+   * meter moves at frame rate without running change detection.
+   */
+  private syncLevelMeter(): void {
+    const run = !!this.levelMeterEl && !!this.sharedView;
+    if (!run) {
+      if (this.levelRaf) cancelAnimationFrame(this.levelRaf);
+      this.levelRaf = 0;
+      this.levelValue = 0;
+      return;
+    }
+    if (this.levelRaf) return;
+    this.zone.runOutsideAngular(() => {
+      const tick = () => {
+        const target = this.interviewerAudio.getLevel();
+        // Fast attack, slow release — reads like a real VU meter.
+        this.levelValue += (target - this.levelValue) * (target > this.levelValue ? 0.6 : 0.15);
+        this.levelMeterEl?.style.setProperty('--lvl', this.levelValue.toFixed(3));
+        this.levelRaf = requestAnimationFrame(tick);
+      };
+      this.levelRaf = requestAnimationFrame(tick);
+    });
+  }
 
   /** On-demand "If they ask further": loading flag + last error for the current card. */
   followUpsLoading = false;
@@ -373,6 +474,11 @@ export class InterviewComponent implements OnInit, OnDestroy {
         }
       }),
       this.interviewerAudio.paused$.subscribe((p) => (this.audioPaused = p)),
+      this.interviewerAudio.sharedView$.subscribe((v) => {
+        this.sharedView = v;
+        this.attachMeetingVideo();
+        this.syncLevelMeter();
+      }),
       // One clip in flight at a time. Sending every clip immediately used to
       // hit the transcription rate limit during a fast interview.
       this.interviewerAudio.clip$.subscribe((clip) => this.enqueueClip(clip)),
@@ -590,6 +696,8 @@ export class InterviewComponent implements OnInit, OnDestroy {
   ngOnDestroy(): void {
     this.subs.forEach((s) => s.unsubscribe());
     this.liveTyped.stop();
+    if (this.levelRaf) cancelAnimationFrame(this.levelRaf);
+    this.levelRaf = 0;
     if (this.streamHold) clearTimeout(this.streamHold);
     this.stopTimer();
     this.transcription.stop();
@@ -955,4 +1063,13 @@ export class InterviewComponent implements OnInit, OnDestroy {
 /** Whitespace/case-insensitive question match (server echoes the question). */
 function norm(q: string | undefined | null): string {
   return (q ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+/** Collapsed state of the shared-tab preview (storage may be blocked). */
+function readSharePreviewHidden(): boolean {
+  try {
+    return localStorage.getItem(SHARE_PREVIEW_HIDDEN_KEY) === '1';
+  } catch {
+    return false;
+  }
 }

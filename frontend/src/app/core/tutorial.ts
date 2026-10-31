@@ -5,13 +5,17 @@ export const TUTORIAL = {
   duration: '2:47',
   /** Our own thumbnail (public/), so the page loads nothing from YouTube until Play. */
   thumbnail: '/tutorial-thumbnail.jpg',
-  /** Chapter starts (seconds + clock label); keep in sync with the video's chapters. */
+  /**
+   * Chapter starts (seconds + clock label), rounded up from the video's real
+   * chapter starts so a jump never opens on the previous chapter's last frame.
+   * Keep in sync with the YouTube description chapters.
+   */
   chapters: [
-    { label: 'Set up', start: 15, at: '0:15' },
-    { label: 'Live practice', start: 45, at: '0:45' },
-    { label: 'Mock interview', start: 87, at: '1:27' },
-    { label: 'Desktop app', start: 104, at: '1:44' },
-    { label: 'Plans', start: 137, at: '2:17' },
+    { label: 'Set up', start: 16, at: '0:16' },
+    { label: 'Live practice', start: 46, at: '0:46' },
+    { label: 'Mock interview', start: 88, at: '1:28' },
+    { label: 'Desktop app', start: 105, at: '1:45' },
+    { label: 'Plans', start: 138, at: '2:18' },
   ],
 };
 
