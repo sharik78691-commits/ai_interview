@@ -1,6 +1,8 @@
 import { Component } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { BUSINESS } from '../../../core/business-info';
+import { TUTORIAL } from '../../../core/tutorial';
+import { environment } from '../../../../environments/environment';
 
 /** Global footer: product, trust and legal links on every page. */
 @Component({
@@ -26,6 +28,9 @@ import { BUSINESS } from '../../../core/business-info';
           <h2>Product</h2>
           <a routerLink="/features">Features</a>
           <a routerLink="/how-it-works">How it works</a>
+          @if (!isDesktop) {
+            <a [href]="tutorialUrl" target="_blank" rel="noopener" data-testid="footer-tutorial">Video tutorial ↗</a>
+          }
           <a routerLink="/pricing">Pricing</a>
           <a routerLink="/about">About us</a>
           <a routerLink="/contact">Contact</a>
@@ -67,4 +72,7 @@ import { BUSINESS } from '../../../core/business-info';
 export class SiteFooterComponent {
   readonly year = new Date().getFullYear();
   readonly biz = BUSINESS;
+  readonly tutorialUrl = TUTORIAL.url;
+  /** The desktop app keeps its footer unchanged (web-only link). */
+  readonly isDesktop = environment.electron;
 }

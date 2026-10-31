@@ -50,6 +50,30 @@
   </div>
 </section>
 
+<!-- Video tutorial: our thumbnail until Play, then the privacy-enhanced YouTube player -->
+<section class="sec alt" id="tutorial">
+  <div class="wrap split">
+    <div class="split-copy">
+      <p class="eyebrow">Video tutorial · {{ tutorial.duration }}</p>
+      <h2>See everything in under 3 minutes</h2>
+      <p class="muted">Set up your resume and role, run a live practice session, take a mock interview and use the desktop app — step by step.</p>
+      <p class="tut-jump">Jump to</p>
+      <div class="tut-chapters">
+        @for (c of tutorial.chapters; track c.start) {
+          <button type="button" class="tut-chip" (click)="playTutorial(box, c.start)"><b>{{ c.at }}</b>{{ c.label }}</button>
+        }
+      </div>
+      <a class="sec-link" [href]="tutorial.url" target="_blank" rel="noopener">Watch on YouTube ↗</a>
+    </div>
+    <div class="tut-video" #box>
+      <button type="button" class="tut-facade" (click)="playTutorial(box)" aria-label="Play the OyeInterview tutorial video">
+        <img [src]="tutorial.thumbnail" alt="" width="1280" height="720" loading="lazy" decoding="async">
+        <span class="tut-play" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z"/></svg></span>
+      </button>
+    </div>
+  </div>
+</section>
+
 <!-- Practice preview -->
 <section class="sec">
   <div class="wrap split">

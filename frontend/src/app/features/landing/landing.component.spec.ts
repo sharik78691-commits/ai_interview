@@ -70,6 +70,37 @@ describe('LandingComponent', () => {
     expect(el.querySelector('.hero-btn')?.textContent).toContain('Get started');
   });
 
+  it('has a video tutorial section that links to the YouTube tutorial', () => {
+    const section = render([PLAN]).querySelector('#tutorial');
+    expect(section?.textContent).toContain('See everything in under 3 minutes');
+    const link = section?.querySelector('a[href="https://youtu.be/TUZaStbmdag"]');
+    expect(link?.getAttribute('target')).toBe('_blank');
+    expect(link?.getAttribute('rel')).toContain('noopener');
+  });
+
+  it('shows our thumbnail and loads nothing from YouTube until Play', () => {
+    const section = render([PLAN]).querySelector('#tutorial')!;
+    expect(section.querySelector('.tut-facade img')?.getAttribute('src')).toBe('/tutorial-thumbnail.jpg');
+    expect(section.querySelector('iframe')).toBeNull();
+  });
+
+  it('plays the tutorial in the privacy-enhanced player', () => {
+    const section = render([PLAN]).querySelector('#tutorial')!;
+    section.querySelector<HTMLButtonElement>('.tut-facade')!.click();
+    const src = section.querySelector('iframe')?.getAttribute('src') ?? '';
+    expect(src).toContain('https://www.youtube-nocookie.com/embed/TUZaStbmdag');
+    expect(src).toContain('start=0');
+    expect(section.querySelector('.tut-facade')).toBeNull();
+  });
+
+  it('starts the tutorial at the chapter that was picked', () => {
+    const section = render([PLAN]).querySelector('#tutorial')!;
+    const chip = [...section.querySelectorAll<HTMLButtonElement>('.tut-chip')].find((b) => b.textContent?.includes('Desktop app'))!;
+    expect(chip.textContent).toContain('1:44');
+    chip.click();
+    expect(section.querySelector('iframe')?.getAttribute('src')).toContain('start=104');
+  });
+
   it('offers the free trial only when a plan has trial_days > 0', () => {
     const el = render([{ ...PLAN, trial_days: 3 }]);
     expect(el.querySelector('.hero-btn')?.textContent).toContain('Start your free trial');
