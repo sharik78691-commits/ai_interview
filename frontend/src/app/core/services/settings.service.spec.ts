@@ -8,15 +8,38 @@ describe('SettingsService theme default', () => {
     document.documentElement.removeAttribute('data-theme');
   });
 
-  it('defaults to light mode for new visitors', () => {
+  it('defaults to dark mode for new visitors', () => {
+    const svc = new SettingsService();
+    expect(svc.theme).toBe('dark');
+    expect(document.documentElement.dataset['theme']).toBe('dark');
+  });
+
+  it('keeps a light choice made after dark became the default', () => {
+    localStorage.setItem('aia_settings', JSON.stringify({ theme: 'light', themeVersion: 2 }));
     const svc = new SettingsService();
     expect(svc.theme).toBe('light');
     expect(document.documentElement.dataset['theme']).toBe('light');
   });
 
-  it('keeps an explicitly saved dark choice', () => {
-    localStorage.setItem('aia_settings', JSON.stringify({ theme: 'dark' }));
+  it('moves a theme saved before the dark default to dark once', () => {
+    localStorage.setItem('aia_settings', JSON.stringify({ theme: 'light', background: 'sunshine', bgVersion: 2 }));
     const svc = new SettingsService();
+    expect(svc.theme).toBe('dark');
+    expect(document.documentElement.dataset['theme']).toBe('dark');
+    expect(svc.value.background).toBe('sunshine');
+  });
+
+  it('remembers a toggle to light across reloads', () => {
+    new SettingsService().toggleTheme();
+    const svc = new SettingsService();
+    expect(svc.theme).toBe('light');
+    expect(document.documentElement.dataset['theme']).toBe('light');
+  });
+
+  it('reset goes back to dark', () => {
+    localStorage.setItem('aia_settings', JSON.stringify({ theme: 'light', themeVersion: 2 }));
+    const svc = new SettingsService();
+    svc.reset();
     expect(svc.theme).toBe('dark');
     expect(document.documentElement.dataset['theme']).toBe('dark');
   });
@@ -33,13 +56,13 @@ describe('SettingsService theme default', () => {
     });
 
     it('keeps an explicitly saved light choice', () => {
-      localStorage.setItem('aia_settings', JSON.stringify({ theme: 'light' }));
+      localStorage.setItem('aia_settings', JSON.stringify({ theme: 'light', themeVersion: 2 }));
       const svc = new SettingsService();
       expect(svc.theme).toBe('light');
     });
 
     it('reset goes back to dark', () => {
-      localStorage.setItem('aia_settings', JSON.stringify({ theme: 'light' }));
+      localStorage.setItem('aia_settings', JSON.stringify({ theme: 'light', themeVersion: 2 }));
       const svc = new SettingsService();
       svc.reset();
       expect(svc.theme).toBe('dark');
@@ -112,7 +135,7 @@ describe('SettingsService.applyToDocument (prerendering)', () => {
   it('writes the default theme and background onto a given document', () => {
     const serverDoc = document.implementation.createHTMLDocument('prerender');
     new SettingsService().applyToDocument(serverDoc);
-    expect(serverDoc.documentElement.getAttribute('data-theme')).toBe('light');
+    expect(serverDoc.documentElement.getAttribute('data-theme')).toBe('dark');
     expect(serverDoc.documentElement.getAttribute('data-bg')).toBe('sunshine');
   });
 });
