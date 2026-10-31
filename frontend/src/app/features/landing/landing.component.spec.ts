@@ -96,9 +96,9 @@ describe('LandingComponent', () => {
   it('starts the tutorial at the chapter that was picked', () => {
     const section = render([PLAN]).querySelector('#tutorial')!;
     const chip = [...section.querySelectorAll<HTMLButtonElement>('.tut-chip')].find((b) => b.textContent?.includes('Desktop app'))!;
-    expect(chip.textContent).toContain('1:44');
+    expect(chip.textContent).toContain('1:45');
     chip.click();
-    expect(section.querySelector('iframe')?.getAttribute('src')).toContain('start=104');
+    expect(section.querySelector('iframe')?.getAttribute('src')).toContain('start=105');
   });
 
   it('offers the free trial only when a plan has trial_days > 0', () => {

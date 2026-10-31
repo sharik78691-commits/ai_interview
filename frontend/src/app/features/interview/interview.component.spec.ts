@@ -4,6 +4,7 @@ import { AIInterviewResponse } from '../../core/models/interview.models';
 import { DemoService } from '../../core/services/demo.service';
 import { InterviewComponent, MAX_PAST_HISTORY, MAX_SESSION_SECONDS, groupSentences, splitLabelled } from './interview.component';
 import { SmoothText } from './smooth-text';
+import { SharedView } from '../../core/services/interviewer-audio.service';
 import { EMPTY, Subject } from 'rxjs';
 
 describe('DemoService', () => {
@@ -649,5 +650,28 @@ describe('Reconnect during a call', () => {
     const { resume, calls } = make(false);
     resume();
     expect(calls).toEqual([]);
+  });
+});
+
+describe('Shared-tab preview caption', () => {
+  const make = (view: Partial<SharedView> | null): InterviewComponent => {
+    const c = Object.create(InterviewComponent.prototype) as InterviewComponent;
+    c.sharedView = view
+      ? ({ stream: {} as MediaStream, surface: 'browser', width: 0, height: 0, ...view } as SharedView)
+      : null;
+    return c;
+  };
+
+  it('names the source and its size', () => {
+    expect(make({ width: 1920, height: 1080 }).shareCaption).toBe('Browser tab · 1920×1080');
+    expect(make({ surface: 'monitor' }).shareCaption).toBe('Entire screen');
+  });
+
+  it('says when the share has no picture', () => {
+    expect(make({ surface: 'window', stream: null }).shareCaption).toBe('Application window · audio only');
+  });
+
+  it('is empty when nothing is shared', () => {
+    expect(make(null).shareCaption).toBe('');
   });
 });

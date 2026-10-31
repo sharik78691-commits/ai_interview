@@ -109,6 +109,15 @@ export class InterviewerAudioService {
    * currently see, so the UI can show exactly what's missing.
    */
   readonly systemAudioSetup$ = new BehaviorSubject<string[] | null>(null);
+  /**
+   * The tab / window / screen the user picked in "Select meeting audio", for
+   * the live preview in the sidebar. Null when nothing is shared through the
+   * picker (idle, or Auto Select / loopback audio, which has no picture).
+   */
+  readonly sharedView$ = new BehaviorSubject<SharedView | null>(null);
+  /** Video tracks kept for the preview only; never recorded or sent. */
+  private previewStream: MediaStream | null = null;
+  private levelBuf = new Uint8Array(0);
 
   /** Consecutive silent checks (~100ms each) that end a clip. */
   private readonly silenceTicksToCut = 10;
@@ -185,6 +194,7 @@ export class InterviewerAudioService {
     };
 
     let stream: MediaStream | null = null;
+    let preview: MediaStream | null = null;
     try {
       // Attempt 1: audio only (Chrome/Edge usually take the audio-only tab).
       try {
@@ -202,17 +212,19 @@ export class InterviewerAudioService {
       if (!stream || stream.getAudioTracks().length === 0) {
         stream?.getTracks().forEach((t) => t.stop());
         const fallback = await navigator.mediaDevices.getDisplayMedia({
-          video: true,
+          // A low frame rate is plenty for the sidebar preview.
+          video: { frameRate: { ideal: PREVIEW_FPS, max: 30 } },
           audio: audioConstraints,
         });
-        // We only need the audio: release video immediately.
-        fallback.getVideoTracks().forEach((t) => {
-          t.stop();
-          fallback.removeTrack(t);
-        });
+        // The picture only feeds the sidebar preview: move it to its own
+        // stream so the recorder and STT pipeline still see audio alone.
+        const video = fallback.getVideoTracks();
+        video.forEach((t) => fallback.removeTrack(t));
+        preview = video.length ? new MediaStream(video) : null;
         stream = fallback;
       }
     } catch (err) {
+      preview?.getTracks().forEach((t) => t.stop());
       this.state$.next('idle');
       const name = (err as DOMException)?.name ?? '';
       if (name === 'NotAllowedError' || name === 'SecurityError') {
@@ -231,6 +243,7 @@ export class InterviewerAudioService {
     const track = stream.getAudioTracks()[0];
     if (!track) {
       stream.getTracks().forEach((t) => t.stop());
+      preview?.getTracks().forEach((t) => t.stop());
       this.state$.next('idle');
       this.status$.next(
         'No audio track was shared. Pick the meeting tab again and tick "Also share tab audio".',
@@ -240,6 +253,26 @@ export class InterviewerAudioService {
     track.addEventListener('ended', () => void this.stop());
 
     this._beginCapture(stream);
+    this._showSharedView(preview);
+  }
+
+  /**
+   * Current loudness of the shared audio, 0..1, for the preview's level
+   * meter. Reads the analyser on demand (no per-frame emissions); 0 while
+   * paused or idle.
+   */
+  getLevel(): number {
+    if (!this.analyser || !this.listening) return 0;
+    const n = this.analyser.fftSize;
+    if (this.levelBuf.length !== n) this.levelBuf = new Uint8Array(n);
+    this.analyser.getByteTimeDomainData(this.levelBuf);
+    let sum = 0;
+    for (let i = 0; i < n; i++) {
+      const v = (this.levelBuf[i] - 128) / 128;
+      sum += v * v;
+    }
+    const rms = Math.sqrt(sum / n);
+    return Math.min(1, Math.sqrt(Math.max(0, rms - LEVEL_FLOOR) / LEVEL_SPAN));
   }
 
   /**
@@ -431,6 +464,29 @@ export class InterviewerAudioService {
     this._setupCaptureGraph(stream);
     this.state$.next('capturing');
     this.status$.next("Listening for the interviewer's question…");
+  }
+
+  /**
+   * Publish the picked tab / window for the sidebar preview. An audio-only
+   * share (no video track) still gets a card, just without a picture.
+   */
+  private _showSharedView(preview: MediaStream | null): void {
+    this.previewStream = preview;
+    const video = preview?.getVideoTracks()[0] ?? null;
+    const settings = (video?.getSettings?.() ?? {}) as MediaTrackSettings & { displaySurface?: string };
+    const surface = settings.displaySurface;
+    this.sharedView$.next({
+      stream: preview,
+      surface: surface === 'browser' || surface === 'window' || surface === 'monitor' ? surface : 'unknown',
+      width: settings.width ?? 0,
+      height: settings.height ?? 0,
+    });
+    // The picture can end on its own (e.g. the shared window closed) while
+    // the audio keeps going: drop to the audio-only card instead of a frozen frame.
+    video?.addEventListener('ended', () => {
+      const view = this.sharedView$.value;
+      if (view && view.stream === preview) this.sharedView$.next({ ...view, stream: null });
+    });
   }
 
   /**
@@ -836,6 +892,9 @@ export class InterviewerAudioService {
     this.audioCtx = null;
     this.stream?.getTracks().forEach((t) => t.stop());
     this.stream = null;
+    this.previewStream?.getTracks().forEach((t) => t.stop());
+    this.previewStream = null;
+    if (this.sharedView$.value) this.sharedView$.next(null);
     this.recorder = null;
     this.silentTicks = 0;
     this.liveOpen = false;
@@ -847,6 +906,22 @@ export class InterviewerAudioService {
     this._resetClipState();
   }
 }
+
+/** What the user shared through the "Select meeting audio" picker. */
+export interface SharedView {
+  /** Video-only stream of the shared source; null for an audio-only share. */
+  stream: MediaStream | null;
+  surface: 'browser' | 'window' | 'monitor' | 'unknown';
+  /** Capture size in pixels (0 when unknown). */
+  width: number;
+  height: number;
+}
+
+/** Frame rate requested for the shared tab's preview (display only). */
+const PREVIEW_FPS = 15;
+/** Level meter mapping: RMS below the floor reads as 0, floor+span as full. */
+const LEVEL_FLOOR = 0.004;
+const LEVEL_SPAN = 0.2;
 
 /** MediaRecorder chunk size; also our timing unit for fallback clip length. */
 const CHUNK_MS = 250;

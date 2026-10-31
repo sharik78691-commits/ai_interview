@@ -108,6 +108,14 @@
 .sidebar {
   position: sticky;
   top: 138px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  /* With the shared-tab preview on top, keep the controls reachable. */
+  max-height: calc(100vh - 150px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(140, 150, 180, 0.45) transparent;
 }
 
 /* Main column: transcript on top, AI guidance below. */
@@ -818,6 +826,8 @@ button[disabled] {
   }
   .sidebar {
     position: static;
+    max-height: none;
+    overflow: visible;
   }
   .topbar {
     position: static;

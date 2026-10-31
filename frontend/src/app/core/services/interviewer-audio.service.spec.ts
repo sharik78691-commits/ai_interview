@@ -344,3 +344,71 @@ describe('InterviewerAudioService: Auto Select system audio', () => {
     expect((svc as unknown as Record<string, unknown>)['startScreenSystemAudio']).toBeUndefined();
   });
 });
+
+/** "Select meeting audio": the picked tab is kept for the sidebar preview only. */
+describe('InterviewerAudioService: shared-tab preview', () => {
+  let svc: InterviewerAudioService;
+  let md: MediaDevices;
+  let ctx: AudioContext;
+  let audioTrack: MediaStreamTrack;
+  let videoTrack: MediaStreamTrack;
+  let begin: jasmine.Spy;
+
+  beforeEach(() => {
+    svc = TestBed.inject(InterviewerAudioService);
+    md = navigator.mediaDevices;
+    ctx = new AudioContext();
+    audioTrack = ctx.createMediaStreamDestination().stream.getAudioTracks()[0];
+    videoTrack = document.createElement('canvas').captureStream(1).getVideoTracks()[0];
+    begin = spyOn(svc as unknown as { _beginCapture: (s: MediaStream) => void }, '_beginCapture')
+      .and.callFake(() => svc.state$.next('capturing'));
+    // Chrome rejects audio-only sharing, so the picker always comes back via attempt 2.
+    spyOn(md, 'getDisplayMedia').and.callFake(((c?: DisplayMediaStreamOptions) =>
+      c?.video
+        ? Promise.resolve(new MediaStream([audioTrack, videoTrack]))
+        : Promise.reject(new TypeError('video required'))) as typeof md.getDisplayMedia);
+  });
+
+  afterEach(async () => {
+    await svc.stop();
+    await ctx.close();
+  });
+
+  it('publishes the picked tab and keeps its video out of the STT stream', async () => {
+    await svc.start();
+    const recorded = begin.calls.mostRecent().args[0] as MediaStream;
+    expect(recorded.getVideoTracks().length).toBe(0);
+    expect(recorded.getAudioTracks()).toEqual([audioTrack]);
+    const view = svc.sharedView$.value;
+    expect(view?.stream?.getVideoTracks()).toEqual([videoTrack]);
+    expect(videoTrack.readyState).toBe('live');
+  });
+
+  it('stops the preview and clears it when sharing stops', async () => {
+    await svc.start();
+    await svc.stop();
+    expect(svc.sharedView$.value).toBeNull();
+    expect(videoTrack.readyState).toBe('ended');
+  });
+
+  it('falls back to the audio-only card when the picture ends on its own', async () => {
+    await svc.start();
+    videoTrack.stop();
+    videoTrack.dispatchEvent(new Event('ended'));
+    expect(svc.sharedView$.value).not.toBeNull();
+    expect(svc.sharedView$.value?.stream).toBeNull();
+  });
+
+  it('never publishes a preview for Auto Select (loopback audio)', async () => {
+    spyOn(md, 'enumerateDevices').and.resolveTo([
+      { kind: 'audioinput', label: 'Stereo Mix (Realtek(R) Audio)', deviceId: 'mix', groupId: '' } as MediaDeviceInfo,
+    ]);
+    spyOn(md, 'getUserMedia').and.resolveTo(new MediaStream([audioTrack]));
+    expect(await svc.startSystemAudio()).toBe(true);
+    expect(svc.sharedView$.value).toBeNull();
+  });
+
+  it('reports no level while idle', () => {
+    expect(svc.getLevel()).toBe(0);
+  });
+});
