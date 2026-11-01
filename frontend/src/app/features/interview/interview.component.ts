@@ -15,7 +15,11 @@ import {
 } from '../../core/models/interview.models';
 import { FONT_SIZE_OPTIONS, MAX_FONT_SIZE, MIN_FONT_SIZE } from '../../core/services/settings.service';
 import { DemoService } from '../../core/services/demo.service';
-import { InterviewerAudioService, SharedView } from '../../core/services/interviewer-audio.service';
+import {
+  InterviewerAudioService,
+  InterviewerClip,
+  SharedView,
+} from '../../core/services/interviewer-audio.service';
 import { InterviewWsService, LiveAccess } from '../../core/services/interview-ws.service';
 import { QuestionDetectorService } from '../../core/services/question-detector.service';
 import { ResumeService } from '../../core/services/resume.service';
@@ -201,7 +205,7 @@ export class InterviewComponent implements OnInit, OnDestroy {
   noticeScope: 'ai' | 'stt' = 'ai';
   /** One transcription request is in flight; extra clips wait their turn. */
   audioBusy = false;
-  private clipQueue: { data: ArrayBuffer; mimeType: string }[] = [];
+  private clipQueue: InterviewerClip[] = [];
   private clipSlotTimer: ReturnType<typeof setTimeout> | null = null;
   /**
    * Audio-input labels the browser can see, set when "Auto Select" needs the
@@ -493,7 +497,7 @@ export class InterviewComponent implements OnInit, OnDestroy {
       // A short pause lets the backend answer a finished live sentence now.
       this.interviewerAudio.pause$.subscribe(() => this.ws.sendSpeechPause(this.responseLength)),
       // The interviewer is talking again: a just-cut clip is not the whole question.
-      this.interviewerAudio.speechStart$.subscribe(() => this.ws.sendSpeechStart()),
+      this.interviewerAudio.speechStart$.subscribe((clip) => this.ws.sendSpeechStart(clip)),
       this.ws.liveText$.subscribe((t) => this.onLiveText(t)),
       this.ws.handshake$.subscribe(() => this.resumeCaptureOnServer()),
       // When Auto Select needs a system-audio device, surface the setup helper
@@ -547,7 +551,7 @@ export class InterviewComponent implements OnInit, OnDestroy {
    * still in flight ("Can you explain the difference between" vanished and
    * only "a process and a thread" reached the AI).
    */
-  private enqueueClip(clip: { data: ArrayBuffer; mimeType: string }): void {
+  private enqueueClip(clip: InterviewerClip): void {
     this.clipQueue.push(clip);
     if (this.clipQueue.length > MAX_QUEUED_CLIPS) this.clipQueue.shift();
     this.pumpClipQueue();
@@ -564,7 +568,10 @@ export class InterviewComponent implements OnInit, OnDestroy {
     const answering = this.thinking && this.audioStatus === 'Generating answer…';
     if (!answering) this.audioStatus = 'Transcribing shared audio…';
     this.thinking = true;
-    this.ws.sendAudioClip(clip.data, clip.mimeType, this.responseLength);
+    this.ws.sendAudioClip(clip.data, clip.mimeType, this.responseLength, undefined, {
+      clip: clip.clip,
+      cutAt: clip.cutAt,
+    });
     // Safety valve: never stall the queue if the backend stays silent.
     if (this.clipSlotTimer) clearTimeout(this.clipSlotTimer);
     this.clipSlotTimer = setTimeout(() => this.releaseClipSlot(), CLIP_SLOT_TIMEOUT_MS);
@@ -606,7 +613,7 @@ export class InterviewComponent implements OnInit, OnDestroy {
       // that the next, longer snapshot drops again, so the line's end kept
       // flickering and the typewriter had to back up. Provisional text shows
       // no closing punctuation; the final transcript brings it.
-      this.interviewerInterim = t.text.replace(/[\s.,;:!?…]+$/u, '');
+      this.interviewerInterim = t.text.replace(/[\s.,;:!?…।॥]+$/u, '');
       this.interimSeq = t.seq ?? this.interimSeq;
       this.syncLive();
       return;

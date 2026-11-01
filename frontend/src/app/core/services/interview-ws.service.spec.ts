@@ -244,6 +244,28 @@ describe('InterviewWsService keepalive', () => {
     svc.disconnect();
   });
 
+  it('tells the backend which clip a speech_start / flush belongs to and how long it queued', async () => {
+    const svc = TestBed.runInInjectionContext(() => new InterviewWsService());
+    const ws = await connect(svc);
+    ws.onopen!();
+    ws.onmessage!({ data: JSON.stringify({ type: 'status', status: 'listening', message: 'connected', turnSignals: true }) });
+
+    svc.sendSpeechStart(5);
+    const cutAt = Date.now() - 1_300; // waited behind a slow transcription
+    svc.sendAudioClip(new ArrayBuffer(8), 'audio/wav', 'short', undefined, { clip: 4, cutAt });
+    expect(JSON.parse(ws.sent[0])).toEqual({ type: 'speech_start', clip: 5 });
+    expect(ws.sent[1]).toBe('[binary]');
+    const flush = JSON.parse(ws.sent[2]);
+    expect(flush).toEqual(jasmine.objectContaining({ type: 'audio_flush', mimeType: 'audio/wav', clip: 4 }));
+    expect(flush.cutAgoMs).toBeGreaterThanOrEqual(1_300);
+    expect(flush.cutAgoMs).toBeLessThan(5_000);
+
+    // Callers without the metadata keep the old frame (no clip / cutAgoMs keys).
+    svc.sendAudioClip(new ArrayBuffer(8), 'audio/wav');
+    expect(JSON.parse(ws.sent[4])).toEqual({ type: 'audio_flush', mimeType: 'audio/wav', responseLength: 'default' });
+    svc.disconnect();
+  });
+
   it('announces each new connection once its handshake arrives', async () => {
     const svc = TestBed.runInInjectionContext(() => new InterviewWsService());
     let handshakes = 0;

@@ -69,6 +69,27 @@ describe('InterviewerAudioService: noise clips never reach STT', () => {
   it('keeps the gate below a short 3-word question (~0.6s of speech)', () => {
     expect(MIN_VOICED_MS).toBeLessThan(600);
   });
+
+  // Regression 2026-10-31: a cut clip waits in the upload queue while the next
+  // clip's speech_start goes out at once. Matching numbers (and the cut time)
+  // let the backend tell the two apart instead of answering half a question.
+  it('numbers speech_start and its clip alike, increasing per clip, with the cut time', async () => {
+    svc.livePreview = false;
+    const starts: number[] = [];
+    const cut: { clip?: number; cutAt?: number }[] = [];
+    svc.speechStart$.subscribe((n) => starts.push(n));
+    svc.clip$.subscribe((c) => cut.push(c));
+    const before = Date.now();
+    await clipWith(MIN_VOICED_MS + 600);
+    await clipWith(MIN_VOICED_MS + 600);
+    expect(starts.length).toBe(2);
+    expect(cut.map((c) => c.clip)).toEqual(starts);
+    expect(starts[1]).toBeGreaterThan(starts[0]);
+    for (const c of cut) {
+      expect(c.cutAt).toBeGreaterThanOrEqual(before);
+      expect(c.cutAt).toBeLessThanOrEqual(Date.now());
+    }
+  });
 });
 
 /**

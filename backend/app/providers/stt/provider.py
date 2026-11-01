@@ -65,18 +65,67 @@ _HALLUCINATIONS = frozenset(
         "um",
         "hmm",
         "mm hmm",
+        # Whisper's Hindi silence artefacts (auto-detect, 2026-11-01).
+        "धन्यवाद",
+        "शुक्रिया",
+        "बहुत बहुत धन्यवाद",
+        "सब्सक्राइब करें",
+        "चैनल को सब्सक्राइब करें",
     }
 )
 
+#: A word in any script. Devanagari vowel signs and viramas are combining
+#: marks, which \w does not match, so the block is listed explicitly — minus
+#: the danda (। ॥, U+0964/5), which is punctuation.
+_WORD_RE = re.compile(r"[\wऀ-ॣ०-ॿ']+")
+
 
 def is_stt_hallucination(text: str) -> bool:
-    """True when a transcript is just a known Whisper silence artefact."""
-    import re
+    """True when a transcript is just a known Whisper silence artefact.
 
-    norm = re.sub(r"[^a-z' ]+", " ", (text or "").lower()).split()
+    Script-agnostic: it used to keep only a-z, so EVERY Hindi transcript
+    normalised to nothing and was dropped as silence.
+    """
+    norm = [w for w in _WORD_RE.findall((text or "").lower()) if w.strip("'")]
     if not norm:
         return True
     return " ".join(norm) in _HALLUCINATIONS
+
+
+#: Whisper reports the detected language as a code ("hi": DeepInfra) or an
+#: English name ("Hindi": Groq). Names it may report for interview audio.
+_LANGUAGE_CODES = {
+    "english": "en", "hindi": "hi", "urdu": "ur", "marathi": "mr", "nepali": "ne",
+    "sanskrit": "sa", "punjabi": "pa", "sindhi": "sd", "bengali": "bn",
+    "gujarati": "gu", "tamil": "ta", "telugu": "te", "kannada": "kn",
+    "malayalam": "ml", "assamese": "as", "welsh": "cy", "japanese": "ja",
+    "chinese": "zh", "korean": "ko", "russian": "ru", "arabic": "ar",
+    "persian": "fa", "spanish": "es", "french": "fr", "german": "de",
+    "portuguese": "pt", "italian": "it", "indonesian": "id", "malay": "ms",
+    "turkish": "tr", "vietnamese": "vi", "thai": "th", "dutch": "nl",
+    "polish": "pl",
+}
+#: A misdetected language -> the one it is really heard for. Hindi and Urdu
+#: are one spoken language in two scripts (Hinglish came back in Arabic
+#: script, 2026-11-01); Marathi, Nepali, Sanskrit, Punjabi and Sindhi share
+#: Hindi's sounds.
+_LANGUAGE_FALLBACK = {"ur": "hi", "mr": "hi", "ne": "hi", "sa": "hi", "pa": "hi", "sd": "hi"}
+
+
+def language_code(raw: object) -> str:
+    """Detected language as a lower-case code ("" when unknown)."""
+    value = str(raw or "").strip().lower()
+    if not value:
+        return ""
+    return _LANGUAGE_CODES.get(value, value if len(value) <= 3 else "")
+
+
+def retranscribe_language(detected: str, allowed: tuple[str, ...]) -> str | None:
+    """The language to transcribe again in, or None when ``detected`` is fine."""
+    if not detected or not allowed or detected in allowed:
+        return None
+    closest = _LANGUAGE_FALLBACK.get(detected)
+    return closest if closest in allowed else allowed[0]
 
 
 #: Sound annotations Whisper writes for non-speech: "*thud*", "[Music]",
@@ -93,6 +142,30 @@ def strip_sound_tags(text: str) -> str:
     return re.sub(r"\s{2,}", " ", _SOUND_TAG_RE.sub(" ", text)).strip()
 
 
+#: Provider bodies that mean "the account cannot pay", not "slow down" or
+#: "bad key": OpenAI answers 429 insufficient_quota, Gemini 403 "outstanding
+#: balance" (both seen 2026-10-31). Retrying cannot fix them. Specific
+#: phrases only: a plain Groq rate limit ("Rate limit reached … try again in
+#: 2s … Upgrade at console.groq.com/settings/billing") mentions billing too,
+#: and must stay retryable.
+_BILLING_MARKERS = (
+    "insufficient_quota", "credit_balance", "no credits", "outstanding balance",
+    "make a payment", "billing account", "exceeded your current quota",
+)
+_RATE_LIMIT_MARKERS = ("rate limit reached", "try again in", "rate_limit_exceeded")
+STT_BILLING_MESSAGE = (
+    "Speech-to-text provider account is out of credits / has a billing problem. "
+    "Ask the admin to top it up or switch the STT model."
+)
+
+
+def is_billing_error(body: str) -> bool:
+    low = (body or "").lower()
+    if any(marker in low for marker in _RATE_LIMIT_MARKERS):
+        return False
+    return any(marker in low for marker in _BILLING_MARKERS)
+
+
 class STTUnavailableError(RuntimeError):
     """Raised when no speech-to-text backend is configured at all."""
 
@@ -107,7 +180,12 @@ class GroqWhisperSTTProvider(STTProvider):
     name = "whisper"
 
     def __init__(
-        self, api_key: str = "", base_url: str = "", model: str = "", send_prompt: bool = True
+        self,
+        api_key: str = "",
+        base_url: str = "",
+        model: str = "",
+        send_prompt: bool = True,
+        reports_language: bool = True,
     ) -> None:
         settings = get_settings()
         self.api_key = api_key or settings.stt_api_key or settings.llm_api_key
@@ -115,6 +193,9 @@ class GroqWhisperSTTProvider(STTProvider):
         self.model = model or settings.stt_model
         # Some hosts mis-handle the vocabulary prompt (see "whisper-deepinfra").
         self.send_prompt = send_prompt
+        # Whisper hosts return the detected language with verbose_json;
+        # gpt-4o-*-transcribe only accept json/text (no language to check).
+        self.reports_language = reports_language
 
     @property
     def available(self) -> bool:
@@ -133,6 +214,7 @@ class GroqWhisperSTTProvider(STTProvider):
         if not audio_bytes:
             return ""
 
+        settings = get_settings()
         data = {
             "model": self.model,
             "response_format": "json",
@@ -140,9 +222,12 @@ class GroqWhisperSTTProvider(STTProvider):
         }
         if self.send_prompt:
             data["prompt"] = STT_PROMPT
-        language = get_settings().stt_language
-        if language:
-            data["language"] = language
+        forced = "" if settings.stt_language in ("", "auto") else settings.stt_language
+        if forced:
+            data["language"] = forced
+        check_language = not forced and self.reports_language
+        if check_language:
+            data["response_format"] = "verbose_json"  # carries the detected language
         # Name the part after what the bytes actually are. Strict providers use
         # the filename/content-type to pick a decoder, so a mismatched label
         # (e.g. WAV bytes sent as clip.webm) is rejected as an invalid file.
@@ -150,14 +235,32 @@ class GroqWhisperSTTProvider(STTProvider):
         send_name = self.filename_for(mime_type)
         files = {"file": (send_name, audio_bytes, mime_type)}
         logger.info(
-            "STT request: %d bytes, mime=%s, part=%s, model=%s",
+            "STT request: %d bytes, mime=%s, part=%s, model=%s, language=%s",
             len(audio_bytes),
             mime_type,
             send_name,
             self.model,
+            forced or "auto",
         )
 
         t0 = time.perf_counter()
+        payload = await self._post(data, files)
+        text = (payload.get("text") or "").strip()
+        if check_language:
+            detected = language_code(payload.get("language"))
+            again = retranscribe_language(detected, settings.stt_languages)
+            if again:
+                # Wrong script for the speech (Hindi heard as Urdu): one more
+                # request in the language it really is, never a translation.
+                logger.info("STT heard %r (allowed %s): transcribing again as %r",
+                            detected, ",".join(settings.stt_languages), again)
+                retry = dict(data, language=again, response_format="json")
+                text = ((await self._post(retry, files)).get("text") or "").strip()
+        logger.info("STT ok: %d chars in %.2fs", len(text), time.perf_counter() - t0)
+        return text
+
+    async def _post(self, data: dict, files: dict) -> dict:
+        """One /audio/transcriptions call with the retry budget; the JSON body."""
         last_error: str = ""
         attempts = self.max_attempts
         for attempt in range(attempts):
@@ -172,10 +275,7 @@ class GroqWhisperSTTProvider(STTProvider):
                 )
 
             if resp.status_code < 400:
-                payload = resp.json()
-                text = (payload.get("text") or "").strip()
-                logger.info("STT ok: %d chars in %.2fs", len(text), time.perf_counter() - t0)
-                return text
+                return resp.json()
 
             body = resp.text or ""
             logger.warning(
@@ -187,7 +287,8 @@ class GroqWhisperSTTProvider(STTProvider):
             )
 
             # Rate limit / transient server error -> back off and retry.
-            if resp.status_code == 429 or resp.status_code >= 500:
+            # (Out of credits also answers 429, but no retry can fix it.)
+            if (resp.status_code == 429 or resp.status_code >= 500) and not is_billing_error(body):
                 last_error = self._describe(resp.status_code, body)
                 if attempt < attempts - 1:
                     await asyncio.sleep(self._retry_delay(resp, attempt))
@@ -214,6 +315,8 @@ class GroqWhisperSTTProvider(STTProvider):
     def _describe(status: int, body: str) -> str:
         """Turn an HTTP failure into a message the UI can show the user."""
         low = body.lower()
+        if status in (402, 403, 429) and is_billing_error(body):
+            return STT_BILLING_MESSAGE
         if status == 404 and "model" in low:
             return (
                 "Speech-to-text model is not available on this provider. "
@@ -385,6 +488,8 @@ class GeminiTranscribeSTTProvider(STTProvider):
                 body_text[:200],
             )
 
+            if is_billing_error(body_text):
+                raise STTRequestError(STT_BILLING_MESSAGE)
             if resp.status_code == 429 or resp.status_code >= 500:
                 last_error = f"Speech-to-text service error (HTTP {resp.status_code})."
                 if attempt < attempts - 1:
@@ -515,6 +620,8 @@ class GeminiLiveSTTProvider(STTProvider):
                     type(exc).__name__,
                     (reason or str(exc))[:200].replace(self.api_key, "[redacted]"),
                 )
+                if is_billing_error(reason):
+                    raise STTRequestError(STT_BILLING_MESSAGE) from None
                 if code == 1008 or "api key" in reason.lower():
                     raise STTRequestError(
                         "Speech-to-text authentication failed — check GEMINI_API_KEY in backend/.env."
@@ -597,6 +704,7 @@ def get_stt_provider() -> STTProvider:
             base_url=sp["base_url"],
             model=sp["model_id"],
             send_prompt=sp.get("send_prompt", True),
+            reports_language=sp.get("reports_language", True),
         )
     return MockSTTProvider()
 
@@ -650,6 +758,8 @@ def _stt_specs() -> list[dict]:
             "model_id": s.stt_model_2,
             "base_url": "https://api.openai.com/v1",
             "api_key": s.openai_api_key,
+            # json/text only (no verbose_json), so no detected language to check.
+            "reports_language": False,
         },
         {
             "key": "gemini-3.5-transcribe",

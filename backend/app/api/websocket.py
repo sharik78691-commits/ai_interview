@@ -4,9 +4,14 @@ Message types from the browser:
   {type: "transcript", text, responseLength?}      -> microphone/manual question
   {type: "force", text, responseLength?}            -> client says "this is a question"
   <binary frame>                                    -> interviewer audio chunk
-  {type: "audio_flush", mimeType?}                   -> end of one audio clip
+  {type: "audio_flush", mimeType?, clip?, cutAgoMs?} -> end of one audio clip
                                                         (mimeType wins: it is
-                                                        what that clip actually is)
+                                                        what that clip actually is;
+                                                        clip = the browser's clip
+                                                        number, cutAgoMs = how long
+                                                        it sat in the browser queue)
+  {type: "speech_start", clip?}                      -> real speech began in that
+                                                        browser clip
   {type: "audio_preview", mimeType?}                 -> the preceding binary frame
                                                         is a SNAPSHOT of the clip
                                                         still being spoken (live
@@ -95,6 +100,10 @@ DEFAULT_AUDIO_MIME = "audio/wav"
 # the next question waited minutes; now they run in parallel, bounded so a
 # fast-talking interviewer cannot hammer the transcription rate limit.
 MAX_CONCURRENT_TRANSCRIPTIONS = 2
+# A clip's transcript waits at most this long for the clip cut before it
+# (applied in cut order, see _spawn_clip). Past it the earlier clip is stuck
+# in provider retries, and late text beats no text.
+CLIP_ORDER_WAIT_SECONDS = 20.0
 # Live-transcript previews are disposable: a slow one is abandoned (the next
 # snapshot supersedes it) and a failing provider pauses previews for a while so
 # they never compete with the FINAL clip for the rate limit.
@@ -115,8 +124,12 @@ PREVIEW_MAX_INFLIGHT = 2
 # The final clip has the same tail (a 10 s question: 1.8–2.3 s normally, up to
 # 7.6 s measured). Once it runs well past its normal time a second identical
 # request is sent and the first answer wins; the other is cancelled.
-FINAL_HEDGE_BASE_SECONDS = 1.5
-FINAL_HEDGE_PER_AUDIO_SECOND = 0.1
+# Re-measured 2026-11-01 (DeepInfra, 20 runs per size): p50 0.82 s / p90
+# 1.18 s for 2.5 s of audio, p50 0.88 s / p90 1.71 s for 7 s. Hedging at
+# ~p85 (1.1 s / 1.35 s, ~15–25% extra requests) instead of past the worst
+# normal call (1.75 s / 2.2 s) takes ~0.65 s off every spike.
+FINAL_HEDGE_BASE_SECONDS = 1.0
+FINAL_HEDGE_PER_AUDIO_SECOND = 0.05
 # Live answering (LiveTurnTracker). A complete but unpunctuated prompt is
 # answered this long after the pause if no new word arrived meanwhile.
 LIVE_SETTLE_SECONDS = 0.6
@@ -143,6 +156,11 @@ CAP_CUT_SECONDS = 13.5
 # Speech that starts within this long of a cut continues the same question
 # (cut = 0.85 s quiet, so ~2 s of silence in all); later speech is a new one.
 TURN_RESUME_WINDOW_SECONDS = 1.2
+# The browser keeps one clip in flight, so a cut clip can wait in its queue
+# while the previous one transcribes (seen locally 2026-10-31: 1.3 s, DeepInfra
+# tail). Its reported queue wait moves the cut back to when it happened; the
+# cap bounds a bogus value (4 queued clips x 10 s slot timeout at most).
+MAX_CLIP_QUEUE_WAIT_SECONDS = 30.0
 # A voice signal (speech_start, or a live snapshot) arrives ~0.4 s after the
 # speech it reports began (the client needs MIN_VOICED_MS of real speech).
 VOICE_SIGNAL_LAG_SECONDS = 0.4
@@ -240,6 +258,20 @@ async def _transcribe_hedged(provider, clip: bytes, mime: str) -> str:
     finally:
         for task in pending:
             task.cancel()
+
+
+def _client_clip_no(raw: object) -> int | None:
+    """The browser's own clip number (newer clients only), else None."""
+    if isinstance(raw, bool) or not isinstance(raw, int) or raw < 0:
+        return None
+    return raw
+
+
+def _queued_seconds(raw: object) -> float:
+    """How long a clip waited in the browser queue after its cut (0 if unknown)."""
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)) or raw != raw:
+        return 0.0
+    return min(max(float(raw) / 1000.0, 0.0), MAX_CLIP_QUEUE_WAIT_SECONDS)
 
 
 def _substantial(text: str) -> bool:
@@ -504,6 +536,10 @@ async def ws_interview(websocket: WebSocket) -> None:
     #: Estimated speech onsets, one per clip (newest last, a few kept).
     voice_onsets: list[float] = []
     clip_voice_noted = False
+    #: Newest browser clip number a speech_start was seen for (-1 = none).
+    #: The browser queues a cut clip while the previous one transcribes, so
+    #: the NEXT clip's speech_start can arrive before this clip's audio_flush.
+    speech_clip = -1
 
     def _note_voice() -> None:
         nonlocal last_voice_at, clip_voice_noted
@@ -515,6 +551,8 @@ async def ws_interview(websocket: WebSocket) -> None:
             del voice_onsets[:-8]
     #: Clips still being transcribed (a held clip waits for them).
     clips_in_flight = 0
+    #: Done-signal of the newest clip handed to _spawn_clip (cut order).
+    last_clip_done: asyncio.Event | None = None
     if live_preview and live_stream_selected() and settings.gemini_api_key and settings.stt_live_model:
 
         async def _on_live_text(text: str, final: bool) -> None:
@@ -787,6 +825,9 @@ async def ws_interview(websocket: WebSocket) -> None:
         model_raw: object,
         seq: int | None = None,
         flushed_at: float | None = None,
+        *,
+        before: asyncio.Event | None = None,
+        done: asyncio.Event | None = None,
     ) -> None:
         """Transcribe one clip; always end it with exactly one frame for the client.
 
@@ -795,12 +836,18 @@ async def ws_interview(websocket: WebSocket) -> None:
         an STT error) used to send nothing that freed it, so the next clips
         waited ~10 s behind it and newer ones replaced older ones in the
         client's queue — losing half a question. ``clip_done`` closes those.
+
+        ``before`` / ``done`` chain clips in cut order (see _spawn_clip).
         """
         nonlocal clips_in_flight
         outcome = {"final": False}
         try:
-            await _transcribe_clip(clip, clip_mime, length_raw, model_raw, seq, flushed_at, outcome)
+            await _transcribe_clip(
+                clip, clip_mime, length_raw, model_raw, seq, flushed_at, outcome, before
+            )
         finally:
+            if done is not None:
+                done.set()  # the next clip may apply its transcript now
             clips_in_flight -= 1
             if seq is not None:
                 finals_done.add(seq)  # also when it yielded no transcript
@@ -813,10 +860,17 @@ async def ws_interview(websocket: WebSocket) -> None:
     def _spawn_clip(*args) -> None:
         """Transcribe a cut clip in the background. Counted in clips_in_flight
         from the cut itself, so a held question never sees "nothing left to
-        transcribe" while this clip's task has not started yet."""
-        nonlocal clips_in_flight
+        transcribe" while this clip's task has not started yet.
+
+        Clips transcribe in parallel, but each one's transcript is APPLIED
+        (shown, stitched, answered) only after the clip cut before it. A clip
+        stuck in a provider spike let the browser's slot timeout send the
+        next one, which finished first and was stitched onto the held half of
+        the EARLIER question (replay 2026-11-01)."""
+        nonlocal clips_in_flight, last_clip_done
         clips_in_flight += 1
-        _spawn(_transcribe_and_detect(*args))
+        before, last_clip_done = last_clip_done, asyncio.Event()
+        _spawn(_transcribe_and_detect(*args, before=before, done=last_clip_done))
 
     async def _transcribe_clip(
         clip: bytes,
@@ -826,6 +880,7 @@ async def ws_interview(websocket: WebSocket) -> None:
         seq: int | None,
         flushed_at: float | None,
         outcome: dict,
+        before: asyncio.Event | None = None,
     ) -> None:
         """Transcribe one interviewer audio clip, then run question detection.
 
@@ -923,6 +978,18 @@ async def ws_interview(websocket: WebSocket) -> None:
                 len(clip),
                 real_mime,
             )
+
+        # Outside stt_slots on purpose: a clip waiting for the one before it
+        # must not hold the slot that earlier clip may still need (hedge).
+        if before is not None and not before.is_set():
+            try:
+                await asyncio.wait_for(before.wait(), timeout=CLIP_ORDER_WAIT_SECONDS)
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "Clip %s applied before the previous one: still transcribing after %.1fs",
+                    seq,
+                    CLIP_ORDER_WAIT_SECONDS,
+                )
 
         text = strip_sound_tags(text)
         if text and is_stt_hallucination(text):
@@ -1514,6 +1581,7 @@ async def ws_interview(websocket: WebSocket) -> None:
                 audio_buffer = bytearray()
                 live_turns.reset()
                 last_flush_at = time.monotonic()
+                speech_clip = -1
                 # The client may not know the final format yet (it depends on
                 # how MediaRecorder output is decoded). Each clip announces its
                 # own mimeType in audio_flush, which always wins.
@@ -1571,15 +1639,24 @@ async def ws_interview(websocket: WebSocket) -> None:
                 seq = clip_seq
                 clip_seq += 1  # previews of this clip are stale from now on
                 last_flush_at = time.monotonic()
-                interviewer_speaking = False
-                clip_voice_noted = False
+                # A clip that waited in the browser queue was cut earlier than
+                # it arrived, and the next clip's speech_start may already be
+                # here. Turn-taking is judged from the real cut, and "speaking"
+                # stays on when it belongs to that later clip — resetting it
+                # made a still-talking interviewer look quiet, so the first
+                # half of the question was answered alone.
+                cut_at = last_flush_at - _queued_seconds(msg.get("cutAgoMs"))
+                flushed_clip = _client_clip_no(msg.get("clip"))
+                later_speech = flushed_clip is not None and speech_clip > flushed_clip
+                interviewer_speaking = later_speech
+                clip_voice_noted = later_speech
                 _spawn_clip(
                     clip,
                     audio_mime,
                     msg.get("responseLength"),
                     msg.get("model"),
                     seq,
-                    last_flush_at,
+                    cut_at,
                 )
                 if live_answers and interviewer_capturing:
                     # The cut means ~0.85 s of quiet: also a pause for the
@@ -1592,6 +1669,13 @@ async def ws_interview(websocket: WebSocket) -> None:
                 # A new clip holds real speech: the interviewer is talking
                 # again, so a just-cut clip may be only half the question.
                 if interviewer_capturing:
+                    started_clip = _client_clip_no(msg.get("clip"))
+                    if started_clip is not None and started_clip > speech_clip:
+                        # A later clip than the one still queued in the
+                        # browser: record its own onset, even before that
+                        # earlier clip's audio_flush arrives.
+                        speech_clip = started_clip
+                        clip_voice_noted = False
                     interviewer_speaking = True
                     _note_voice()
 

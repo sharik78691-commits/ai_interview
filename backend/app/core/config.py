@@ -120,9 +120,22 @@ class Settings:
         )
         self.stt_api_key: str = os.getenv("STT_API_KEY", "")
         self.stt_model: str = os.getenv("STT_MODEL", "whisper-large-v3-turbo")
-        # Forcing the language skips Whisper's auto-detect (faster, and stops
-        # accented English being misread as another language). Empty = auto.
-        self.stt_language: str = os.getenv("STT_LANGUAGE", "en").strip()
+        # "auto" (default; empty also means auto) = transcribe in the language
+        # the interviewer SPOKE, guarded by STT_LANGUAGES. A code ("en") forces
+        # that language. Forcing "en" used to be the default and made Whisper
+        # TRANSLATE Hindi questions ("आपने Kafka और RabbitMQ में से Kafka क्यों
+        # चुना?" -> "You have to ask Kafka and Rabbit MQ from Kafka.", measured
+        # 2026-11-01), while Indian-accented English was still detected as
+        # English in auto mode.
+        self.stt_language: str = os.getenv("STT_LANGUAGE", "auto").strip().lower()
+        # Languages auto-detect may return (comma-separated codes). Anything
+        # else is a misdetection — Whisper hears Hindi as Urdu (Arabic script)
+        # — and that clip is transcribed again in the closest allowed one.
+        self.stt_languages: tuple[str, ...] = tuple(
+            code.strip().lower()
+            for code in os.getenv("STT_LANGUAGES", "en,hi").split(",")
+            if code.strip()
+        ) or ("en", "hi")
         # Second STT model (OpenAI's gpt-4o-mini-transcribe).
         self.stt_model_2: str = os.getenv("STT_MODEL_2", "gpt-4o-mini-transcribe")
         # Third STT model (Google's Gemini 3.5 Transcribe).

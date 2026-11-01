@@ -62,6 +62,10 @@ DANGLING_TAIL_WORDS = frozenset({
     "is", "are", "was", "were", "be", "been", "being",
     "do", "does", "did", "can", "could", "would", "should", "will",
     "shall", "may", "might",
+    # Hindi (Devanagari): joiners and postpositions a clause cannot end on —
+    # "…बता सकते हैं कि", "…प्रोजेक्ट के बारे में".
+    "कि", "और", "या", "लेकिन", "क्योंकि", "अगर", "के", "की", "का", "में",
+    "को", "से", "पर",
 })
 
 #: Leading filler the interviewer says before getting to the point.
@@ -124,6 +128,8 @@ HINDI_QUESTION_WORDS = (
     "क्या", "कैसे", "कैसा", "कैसी", "कौन", "कौनसा", "कौनसी",
     "कब", "क्यों", "किस", "किसका", "किसकी", "कितना", "कितने",
     "कितनी", "कहाँ",
+    # Spellings Whisper emits too (no chandrabindu, colloquial forms).
+    "कहां", "क्यूं", "क्यूँ", "कौनसे", "किसे", "किसको", "किसने", "किसमें",
 )
 _HINDI_Q_RE = re.compile(
     r"(?:^|[\s,।?])(" + "|".join(re.escape(w) for w in HINDI_QUESTION_WORDS) + r")(?:[\s,।?]|$)",
@@ -150,6 +156,14 @@ HINDI_PROMPT_PATTERNS = (
     r"kya\s+hoti\s+hai", r"kya\s+hai", r"kya\s+hota\s+hai",
     r"kaise\s+kaam\s+karta", r"kaise\s+hot hai", r"kaise\s+handle",
     r"baare\s+mein",                                        # "about …"
+    # Devanagari — what auto-detect STT writes for Hindi speech.
+    r"बताइए", r"बताइये", r"बताओ", r"बताएं", r"बताएँ", r"बताए", r"बताईए",
+    r"बता\s*दो", r"बता\s*दीजिए", r"बता\s*सकते",                # tell
+    r"समझाइए", r"समझाइये", r"समझाओ", r"समझाएं", r"समझाएँ", r"समझाए",
+    r"समझा\s*दो", r"समझा\s*दीजिए", r"समझा\s*सकते",            # explain
+    r"दिखाइए", r"दिखाओ", r"बोलिए", r"बोलो",                  # show / speak
+    r"लिखिए", r"लिखो", r"लिख\s*कर",                          # write (code)
+    r"के\s+बारे\s+में", r"में\s+क्या\s+अंतर", r"में\s+अंतर", r"में\s+फ़?र्क",
 )
 _HINDI_PROMPT_RE = re.compile(
     "(?:" + "|".join(HINDI_PROMPT_PATTERNS) + ")", re.IGNORECASE
@@ -171,6 +185,8 @@ HOUSEKEEPING_OPENERS = (
     "to chalo", "acha to", "accha to", "theek hai chalo", "haan chalo",
     "ab hum", "to hum", "next question", "last question", "final question",
     "ek second", "ruko", "wait wait",
+    # Devanagari
+    "एक सेकंड", "एक मिनट", "रुकिए", "रुको", "चलिए शुरू", "चलो शुरू",
 )
 
 #: Gratitude / acknowledgement. A candidate is owed an answer to their
@@ -188,6 +204,9 @@ ACKNOWLEDGEMENT_PATTERNS = (
     "sahi hai", "bilkul", "haan ji", "hanji", "acha", "accha",
     "bahut badhiya", "badhiya", "chalo theek", "samajh gaya",
     "samajh gayi", "got it bhai", "nice nice",
+    # Devanagari
+    "ठीक है", "सही है", "अच्छा है", "बहुत अच्छा", "बहुत बढ़िया", "बढ़िया",
+    "समझ गया", "समझ गई", "समझ गयी", "धन्यवाद", "शुक्रिया",
 )
 
 #: Small talk / backchannels — the interviewer is reacting or talking to the
@@ -207,6 +226,9 @@ BACKCHANNELS = frozenset({
     "shi hai", "sahi hai", "bilkul", "ji", "shukriya", "dhanyawad",
     "bahut badhiya", "badhiya", "chalo", "ab", "phir", "to", "ye", "wo",
     "haina", "hai na", "samajh gaya", "samajh gayi", "batao na",
+    # Devanagari (single words: utterances are matched word by word)
+    "हाँ", "हां", "हा", "जी", "अच्छा", "ठीक", "है", "ओके", "बिल्कुल",
+    "बढ़िया", "धन्यवाद", "शुक्रिया", "सही", "चलिए", "चलो", "हम्म", "हूँ",
 })
 
 #: Session housekeeping said OUT LOUD. These really are questions — some even
@@ -228,6 +250,10 @@ TECHNICAL_CHECK_PATTERNS = (
     "sab theek hai na", "sab thik hai na", "start karein", "shuru karein",
     "ready hai aap", "ready ho aap", "record ho raha", "recording ho raha",
     "echo aa raha", "distortion", "clear sunai", "clear awaaz",
+    # Devanagari
+    "आवाज़ आ रही", "आवाज आ रही", "आवाज़ आ रहा", "आवाज आ रहा",
+    "सुनाई दे रहा", "सुनाई दे रही", "सुनाई दे रहे", "स्क्रीन दिख", "वीडियो दिख",
+    "म्यूट पर", "mute पर", "रिकॉर्ड हो रहा", "recording हो रही",
 )
 
 
@@ -251,7 +277,7 @@ def is_question(text: str) -> bool:
 
 
 def _clean(word: str) -> str:
-    return word.lower().strip("'\",.;:!?…")
+    return word.lower().strip("'\",.;:!?…।॥")
 
 
 def _sentence_terminated(text: str) -> bool:
@@ -264,7 +290,7 @@ def _sentence_terminated(text: str) -> bool:
     t = text.rstrip()
     if t.endswith(("...", "…", ",", ";", ":")):
         return False
-    return t.endswith((".", "?", "!"))
+    return t.endswith((".", "?", "!", "।", "॥"))  # । = Hindi full stop
 
 
 def _ends_dangling(text: str, words: list[str]) -> bool:
@@ -302,6 +328,27 @@ def _starts_new_question(text: str) -> bool:
     if _clean(t.split()[0]) in QUESTION_WORDS:
         return True
     return _sentence_terminated(t) and bool(_PROMPT_RE.match(t))
+
+
+def _continues_held(held: str, incoming: str) -> bool:
+    """Is ``incoming`` the rest of the held half-question, not a new one?
+
+    ``_starts_new_question`` alone misreads a wh-CLAUSE as a fresh question:
+    "Walk me through what happens," + "when you type a URL into the browser"
+    dropped the first half (replay 2026-11-01). Two signals win over it:
+      * the clip opens lower-case — batch STT capitalises a sentence it hears
+        as new, so lower-case is its own "mid-sentence" reading;
+      * the held text ends on "," ";" ":" "…" — the speaker left the clause
+        open — and the clip is not a "?" question of its own.
+    """
+    t = (incoming or "").strip()
+    if not t:
+        return False
+    if t[0].isalpha() and t[0].islower():
+        return True
+    if held.rstrip().endswith((",", ";", ":", "...", "…")) and not t.endswith("?"):
+        return True
+    return not _starts_new_question(t)
 
 
 #: Openers that announce the NEXT question ("Also, how does GC work?"), so it
@@ -425,6 +472,36 @@ def classify(text: str) -> str:
     return ANSWER if len(words) >= 6 else NOISE
 
 
+#: Reaction words that carry no content beyond BACKCHANNELS ("okay, that
+#: makes sense", "mm-hmm"), for ``is_backchannel``.
+_REACTION_FILLERS = frozenset({
+    "so", "well", "that", "that's", "very", "really", "much", "a", "lot",
+    "and", "it", "is", "oh", "mm", "mhm", "mm-hmm", "uh-huh", "hmm-hmm",
+})
+
+
+def is_backchannel(text: str) -> bool:
+    """True for a pure reaction ("okay", "thank you", "can you hear me?").
+
+    Narrower than ``classify(...) == NOISE`` on purpose: ``classify`` judges a
+    STANDALONE utterance, so the second half of a question ("and its
+    hierarchy.", "with an example.") reads as noise there. While the rest of a
+    question is awaited, only a reaction may be skipped — anything with
+    content is part of the question.
+    """
+    t = (text or "").strip()
+    if not t:
+        return True
+    low = " ".join(_clean(w) for w in t.split())
+    if any(pat in low for pat in TECHNICAL_CHECK_PATTERNS):
+        return True
+    if _has_question_signal(t):
+        return False
+    for pat in sorted(ACKNOWLEDGEMENT_PATTERNS, key=len, reverse=True):
+        low = re.sub(rf"\b{re.escape(pat)}\b", " ", low)
+    return not [w for w in low.split() if w not in BACKCHANNELS and w not in _REACTION_FILLERS]
+
+
 #: Verbs that still need their object. An UNTERMINATED utterance ending on one
 #: ("can you explain", "tell me") is a question a pause away from its subject:
 #: the classifier already sees a prompt in it, but answering now answers a stub.
@@ -474,7 +551,10 @@ def is_context_statement(text: str) -> bool:
     return classify(t) == ANSWER
 
 
-_TOKEN_RE =re.compile(r"[^\W_]+(?:'[^\W_]+)?")
+#: Devanagari vowel signs / viramas are combining marks that \w skips, so
+#: "क्या" used to split into "क" + "य" — and two different Hindi questions
+#: looked alike through their shared single letters.
+_TOKEN_RE = re.compile(r"(?:[^\W_]|[ऀ-ॣ०-ॿ])+(?:'[^\W_]+)?")  # । is punctuation
 #: Words too common to tell two utterances apart ("what is java" vs "what is
 #: python" share 2 of 3 words but are different questions).
 _COMMON_WORDS = (
@@ -485,7 +565,10 @@ _COMMON_WORDS = (
         "that", "these", "those", "there", "here", "what's", "how's", "let's",
         "please", "okay", "ok", "um", "uh", "like", "just", "not", "no", "yes",
         "kya", "hai", "ka", "ki", "ke", "ko", "mein", "aap", "hota", "hoti",
+        "है", "हैं", "आप", "आपने", "मैं", "मुझे", "यह", "ये", "वह", "वो", "एक",
+        "होता", "होती", "होते", "भी", "तो", "जी", "इसे", "इस", "उस",
     })
+    | frozenset(HINDI_QUESTION_WORDS)
 )
 
 
@@ -677,10 +760,13 @@ class QuestionBuffer:
         #    NOT be glued onto it.)
         #    A continuing hold is the same turn by definition (the speaker never
         #    went quiet in between), so it is stitched whatever this clip opens
-        #    with — and a backchannel ("okay") never releases it.
-        if continuing and incoming and classify(incoming) == NOISE:
+        #    with — and a backchannel ("okay") never releases it. Only a pure
+        #    reaction is skipped: "and its hierarchy." is NOISE to classify()
+        #    yet is exactly the rest of the question (it used to be dropped,
+        #    and the half-question answered alone).
+        if continuing and incoming and is_backchannel(incoming):
             return None
-        if held and incoming and not expired and (continuing or not _starts_new_question(incoming)):
+        if held and incoming and not expired and (continuing or _continues_held(held, incoming)):
             self._clear_held()
             stitched = f"{held} {incoming}".strip()
             # Once stitching was needed the clip boundary is proven unreliable,

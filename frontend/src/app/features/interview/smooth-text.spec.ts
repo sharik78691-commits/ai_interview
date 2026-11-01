@@ -1,4 +1,4 @@
-import { SmoothText } from './smooth-text';
+import { clusterEnd, SmoothText } from './smooth-text';
 
 describe('SmoothText (live transcript typewriter)', () => {
   beforeEach(() => jasmine.clock().install());
@@ -85,5 +85,31 @@ describe('SmoothText (live transcript typewriter)', () => {
     expect(t.shown).toBe('');
     jasmine.clock().tick(1_000);
     expect(t.shown).toBe('');
+  });
+
+  // Hindi transcripts (auto-detect STT, 2026-11-01): slicing by code unit drew
+  // "क्या" as क -> क् -> क्य while typing. Every frame must end on a whole letter.
+  it('never shows half a Devanagari letter while typing', () => {
+    const t = new SmoothText();
+    const text = 'आपने Kafka और RabbitMQ में से Kafka क्यों चुना?';
+    t.set(text);
+    const frames: string[] = [];
+    for (let i = 0; i < 40 && t.shown.length < text.length; i++) {
+      jasmine.clock().tick(30);
+      frames.push(t.shown);
+    }
+    expect(t.shown).toBe(text);
+    expect(frames.length).toBeGreaterThan(1);
+    for (const f of frames) {
+      expect(f.endsWith('्')).withContext(f).toBeFalse();
+      expect(/^\p{M}/u.test(text.slice(f.length))).withContext(f).toBeFalse();
+    }
+  });
+
+  it('clusterEnd keeps ASCII cuts and moves Devanagari cuts to a letter end', () => {
+    expect(clusterEnd('hello world', 3)).toBe(3);
+    expect(clusterEnd('क्या', 1)).toBe(4); // क + ् + य + ा is one letter
+    expect(clusterEnd('है ना', 1)).toBe(2); // ह + ै
+    expect(clusterEnd('ab', 0)).toBe(0);
   });
 });
