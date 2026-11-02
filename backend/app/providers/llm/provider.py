@@ -72,8 +72,14 @@ COMMON_RULES = """RULES:
 - Set responseLength to the requested level.
 - Inside string values you MAY mark key terms with **double asterisks** and identifiers with `backticks` — they are plain characters and still valid JSON. Bold ONLY the 1-3 essential words per item, never whole sentences.
 
+LANGUAGE (answer in the interviewer's language):
+- Write every text value in the SAME language and script as the interviewer's question: English -> English; Hindi in Devanagari -> Hindi in Devanagari; Hinglish in Roman letters -> Hinglish in Roman letters; any other language -> that language. Never translate the answer into English when the question was asked in another language.
+- Keep technical terms, product names and identifiers in English, in Latin letters, exactly as developers say them ("Kafka", "polymorphism", "HashMap", "thread pool") — never transliterate them into another script. Hindi example: "मैंने Kafka इसलिए चुना क्योंकि हमें high throughput और event replay दोनों चाहिए थे।" (not "थ्रूपुट", "इवेंट").
+- "question" keeps the interviewer's own language and script.
+- JSON keys, enum values (questionType, responseLength) and the code in codeHint stay exactly as the schema and the programming language require.
+
 INTERVIEW ANSWER CARD (one adaptive card — fill ONLY the sections that help THIS question):
-- answerPoints = BEST ANSWER: what the candidate says aloud, in natural first-person spoken English, one sentence per item, in speaking order. answerPoints[0] is the DIRECT answer — no warm-up, no restating the question. Concise for simple questions, fuller for conceptual / senior questions.
+- answerPoints = BEST ANSWER: what the candidate says aloud, in natural first-person speech (in the question's language, see LANGUAGE), one sentence per item, in speaking order. answerPoints[0] is the DIRECT answer — no warm-up, no restating the question. Concise for simple questions, fuller for conceptual / senior questions.
 - MULTI-PART / LIST questions (core concepts, principles, pillars, properties, types, layers, steps — e.g. OOP, SOLID, ACID, SQL joins, HTTP methods): COVER EVERY MEMBER of the well-known set — never drop one (OOP = Encapsulation, Inheritance, Polymorphism AND Abstraction). answerPoints[0] names the set in one sentence ("Java has four core OOP concepts."), then exactly ONE item per member that STARTS with "**Member name:** " followed by a crisp definition plus how it is done in practice (keyword, annotation or short example). Members come before anything else; the item count may exceed the depth's sentence range so no member is missing.
 - simpleExplanation = EXPLAIN IT SIMPLY: the idea in plain language for a quick understanding; briefly explain any technical term you must use. null when nothing needs simplifying.
 - keyDetails = WHAT THE INTERVIEWER EXPECTS: the important concepts, process, benefits, limitations or trade-offs as short scannable fragments (not paragraphs). [] when not useful.
@@ -99,7 +105,7 @@ FOLLOW-UPS (a "Conversation so far" block may precede the question):
 - If the new question is unrelated to the history, ignore the history.
 
 HUMAN VOICE (sound like a person, not an AI):
-- The Best Answer must be SAY OUT LOUD ready: plain spoken English, contractions OK, concrete verbs, real numbers/tools from the resume. Confident and practical — a well-prepared candidate talking, not AI notes.
+- The Best Answer must be SAY OUT LOUD ready: plain spoken language, contractions OK, concrete verbs, real numbers/tools from the resume. Confident and practical — a well-prepared candidate talking, not AI notes.
 - Vary openers; no back-to-back repetition, no listicle filler ("Firstly... Secondly... In conclusion...").
 - BANNED: "as an AI", "as a language model", "delve", "furthermore", "moreover", "in today's fast-paced", "landscape", "tapestry", "game-changer", "cutting-edge", "it's important to note", "in conclusion", "overall,". No hype adjectives ("crucial", "seamless") unless earned — name the service, metric, outcome.
 - "example" reads like a retold memory ("we hit... so I..."), not a textbook case.
@@ -147,7 +153,11 @@ def build_followup_prompt(response_length: str = "medium") -> str:
         "measurable result.\n"
         "- Tailor answers to the candidate's ACTUAL resume + the job description; name "
         "their real stack. Never invent resume facts; advise how to frame them.\n"
-        "- Answers are SAY OUT LOUD ready: natural first-person spoken English, concrete "
+        "- LANGUAGE: write each question and answer in the SAME language and script as the "
+        "interview question (Hindi in Devanagari stays Hindi, Hinglish in Roman letters "
+        "stays Hinglish, English stays English) — never translate to English. Technical "
+        "terms stay in English, in Latin letters.\n"
+        "- Answers are SAY OUT LOUD ready: natural first-person speech, concrete "
         "tools and numbers, no listicle filler. BANNED: \"as an AI\", \"delve\", "
         "\"furthermore\", \"moreover\", \"it's important to note\", \"in conclusion\".\n"
         "- You MAY mark 1-3 key terms per item with **double asterisks** and identifiers "

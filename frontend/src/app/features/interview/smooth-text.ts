@@ -13,6 +13,28 @@
  * ("differencebetween" -> "difference between"), the already-shown span is
  * swapped in place and only genuinely new text types in.
  */
+/** Code units that belong to the character before them: combining marks
+ * (Devanagari vowel signs, viramas), zero-width joiners, low surrogates. */
+const JOINS_PREVIOUS = /[\p{M}‌‍\uDC00-\uDFFF]/u;
+/** Devanagari virama: the consonant after it is part of the same conjunct. */
+const VIRAMA = '्';
+
+/**
+ * Move a cut forward to the end of the character it lands in. Slicing
+ * "क्या" by code units showed "क", then "क्", then "क्य" while typing — each a
+ * different, wrong letter shape. ASCII is unaffected.
+ */
+export function clusterEnd(text: string, end: number): number {
+  while (
+    end > 0 &&
+    end < text.length &&
+    (JOINS_PREVIOUS.test(text[end]) || text[end - 1] === VIRAMA || text[end - 1] === '‍')
+  ) {
+    end++;
+  }
+  return end;
+}
+
 export class SmoothText {
   /** What the view should render right now. */
   shown = '';
@@ -50,7 +72,7 @@ export class SmoothText {
     const grew = target.length > this.target.length;
     this.target = target;
     if (!target.startsWith(this.shown)) {
-      this.shown = target.slice(0, Math.min(this.shown.length, target.length));
+      this.shown = target.slice(0, clusterEnd(target, Math.min(this.shown.length, target.length)));
     }
     if (grew) this.learnGap();
     this.plan();
@@ -116,7 +138,7 @@ export class SmoothText {
   private tick(): void {
     this.timer = null;
     if (this.shown.length >= this.target.length) return this.done();
-    this.shown = this.target.slice(0, this.shown.length + this.step);
+    this.shown = this.target.slice(0, clusterEnd(this.target, this.shown.length + this.step));
     if (this.shown.length < this.target.length) this.schedule();
     else this.done();
   }

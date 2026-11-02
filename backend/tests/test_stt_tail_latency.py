@@ -128,6 +128,34 @@ async def test_slow_final_is_hedged_and_the_loser_cancelled() -> None:
     assert stt.cancelled == 1
 
 
+def _wav(seconds: float) -> bytes:
+    """A 16 kHz mono PCM16 WAV header + silence, so _wav_seconds reads its length."""
+    import struct
+
+    data = b"\x00\x00" * int(16_000 * seconds)
+    return (b"RIFF" + struct.pack("<I", 36 + len(data)) + b"WAVEfmt "
+            + struct.pack("<IHHIIHH", 16, 1, 1, 16_000, 32_000, 2, 16)
+            + b"data" + struct.pack("<I", len(data)) + data)
+
+
+async def test_real_hedge_point_beats_a_provider_spike() -> None:
+    """Unpatched constants (2026-11-01): a 2.5 s clip whose first call spikes
+    is answered by the hedge at ~1.1 s (it used to wait until 1.75 s)."""
+    stt = _ScriptedSTT([(6.0, "slow"), (0.05, "What is a closure?")])
+    t0 = time.monotonic()
+    text = await ws_mod._transcribe_hedged(stt, _wav(2.5), "audio/wav")
+    elapsed = time.monotonic() - t0
+    assert text == "What is a closure?"
+    assert 1.0 <= elapsed < 1.45, elapsed
+
+
+async def test_normal_latency_is_not_hedged() -> None:
+    """A call at the measured p50 (0.8 s for 2.5 s of audio) sends one request."""
+    stt = _ScriptedSTT([(0.8, "What is a closure?")])
+    assert await ws_mod._transcribe_hedged(stt, _wav(2.5), "audio/wav") == "What is a closure?"
+    assert stt.calls == 1
+
+
 async def test_fast_final_sends_one_request_only() -> None:
     stt = _ScriptedSTT([(0.01, "Explain the Java collection framework.")])
     assert await ws_mod._transcribe_hedged(stt, b"x", "audio/wav") == "Explain the Java collection framework."

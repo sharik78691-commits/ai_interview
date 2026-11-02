@@ -413,12 +413,26 @@ export class InterviewWsService {
     }
   }
 
-  /** Stream one interviewer audio clip as a binary frame. */
-  sendAudioClip(data: ArrayBuffer, mimeType: string, responseLength = 'default', model?: string): void {
+  /**
+   * Stream one interviewer audio clip as a binary frame. `clip` / `cutAt`
+   * (from the capture service) let the backend judge turn-taking from the
+   * real cut time: the clip may have waited in the upload queue while the
+   * interviewer kept talking.
+   */
+  sendAudioClip(
+    data: ArrayBuffer,
+    mimeType: string,
+    responseLength = 'default',
+    model?: string,
+    meta?: { clip?: number; cutAt?: number },
+  ): void {
     if (this.ws?.readyState !== WebSocket.OPEN) return;
+    const cutAgoMs = meta?.cutAt !== undefined ? Math.max(0, Date.now() - meta.cutAt) : undefined;
     this.ws.send(data);
     // Following control frame tells the backend "clip complete, transcribe now".
-    this.ws.send(JSON.stringify({ type: 'audio_flush', mimeType, responseLength, model }));
+    this.ws.send(
+      JSON.stringify({ type: 'audio_flush', mimeType, responseLength, model, clip: meta?.clip, cutAgoMs }),
+    );
     this.status$.next('processing');
   }
 
@@ -449,9 +463,9 @@ export class InterviewWsService {
    * The backend then holds the clip it just transcribed for the rest of the
    * question. Older backends reject unknown types, so it is gated.
    */
-  sendSpeechStart(): void {
+  sendSpeechStart(clip?: number): void {
     if (this.ws?.readyState !== WebSocket.OPEN || !this.turnSignals$.value) return;
-    this.ws.send(JSON.stringify({ type: 'speech_start' }));
+    this.ws.send(JSON.stringify({ type: 'speech_start', clip }));
   }
 
   sendSpeechPause(responseLength = 'default'): void {

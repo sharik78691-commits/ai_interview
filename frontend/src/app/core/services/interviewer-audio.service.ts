@@ -56,8 +56,15 @@ export class InterviewerAudioService {
   private cutting = false;
   private recordedMime = 'audio/webm';
 
-  /** Emitted audio clips: raw bytes + mime type, ready for the WebSocket. */
-  readonly clip$ = new Subject<{ data: ArrayBuffer; mimeType: string }>();
+  /**
+   * Emitted audio clips: raw bytes + mime type, ready for the WebSocket.
+   * `clip` numbers the clip window (matches speechStart$) and `cutAt` is when
+   * it was cut, so the backend can order turn-taking signals correctly even
+   * when the clip waits in the upload queue.
+   */
+  readonly clip$ = new Subject<InterviewerClip>();
+  /** Number of the clip window being accumulated; only ever grows. */
+  private clipNo = 0;
   /**
    * Live transcript: WAV snapshots of the clip STILL being spoken, every
    * PREVIEW_INTERVAL_MS of audio while the interviewer talks. Display only —
@@ -92,9 +99,11 @@ export class InterviewerAudioService {
    * the same bar that keeps the clip, so every signal is followed by a clip.
    * Tells the backend the interviewer is talking again, so the clip it just
    * transcribed ("Explain the Java collection framework" + pause) is held
-   * for the rest of the question instead of answered half-asked.
+   * for the rest of the question instead of answered half-asked. Carries the
+   * clip number: this signal is sent at once, but the clip before it may
+   * still be waiting in the upload queue.
    */
-  readonly speechStart$ = new Subject<void>();
+  readonly speechStart$ = new Subject<number>();
   private speechAnnounced = false;
   /**
    * Paused: capture stays open, but every sample is dropped before it reaches
@@ -597,7 +606,7 @@ export class InterviewerAudioService {
     await this._cutClip();
   }
 
-  private async _emitBlob(blob: Blob): Promise<void> {
+  private async _emitBlob(blob: Blob, clip: number, cutAt: number): Promise<void> {
     const raw = await blob.arrayBuffer();
     const wav = await toWav(raw);
     if (!wav) {
@@ -610,11 +619,14 @@ export class InterviewerAudioService {
       }, 5000);
     }
     this.clip$.next(
-      wav ? { data: wav, mimeType: 'audio/wav' } : { data: raw, mimeType: this.recordedMime },
+      wav
+        ? { data: wav, mimeType: 'audio/wav', clip, cutAt }
+        : { data: raw, mimeType: this.recordedMime, clip, cutAt },
     );
   }
 
   private _resetClipState(): void {
+    this.clipNo += 1;
     this.pendingChunks = [];
     this.pendingCount = 0;
     this.pcmChunks = [];
@@ -631,7 +643,7 @@ export class InterviewerAudioService {
   private _announceSpeech(): void {
     if (this.speechAnnounced || this.voicedMs < MIN_VOICED_MS) return;
     this.speechAnnounced = true;
-    this.speechStart$.next();
+    this.speechStart$.next(this.clipNo);
   }
 
   /**
@@ -846,6 +858,8 @@ export class InterviewerAudioService {
       const pcmCount = this.pcmCount;
       const pcmRate = this.pcmRate;
       const recorderChunks = this.pendingChunks;
+      const clip = this.clipNo;
+      const cutAt = Date.now();
       // Reset immediately: capture continues while we encode + upload.
       this._resetClipState();
 
@@ -856,14 +870,14 @@ export class InterviewerAudioService {
       if (pcmCount > 0 && pcmRate > 0) {
         const wav = pcmToWav(pcmChunks, pcmRate, undefined, this.silenceThreshold);
         if (wav.byteLength > 44) {
-          this.clip$.next({ data: wav, mimeType: 'audio/wav' });
+          this.clip$.next({ data: wav, mimeType: 'audio/wav', clip, cutAt });
           return;
         }
       }
 
       // Fallback: decode whatever MediaRecorder produced.
       if (recorderChunks.length) {
-        await this._emitBlob(new Blob(recorderChunks, { type: this.recordedMime }));
+        await this._emitBlob(new Blob(recorderChunks, { type: this.recordedMime }), clip, cutAt);
       }
     } finally {
       this.cutting = false;
@@ -905,6 +919,16 @@ export class InterviewerAudioService {
     this.noiseFloor = DEFAULT_SILENCE_THRESHOLD / NOISE_MARGIN;
     this._resetClipState();
   }
+}
+
+/** One cut interviewer clip, ready for the WebSocket. */
+export interface InterviewerClip {
+  data: ArrayBuffer;
+  mimeType: string;
+  /** Clip window number (same numbering as speechStart$). */
+  clip?: number;
+  /** Date.now() when the clip was cut. */
+  cutAt?: number;
 }
 
 /** What the user shared through the "Select meeting audio" picker. */
