@@ -326,6 +326,9 @@ label.lbl { display: block; font-size: .6769rem; font-weight: 700; color: var(--
 .container.info h3 { font-size: 1rem; font-weight: 700; margin-bottom: 6px; }
 .container.info p { line-height: 1.7; }
 .info a { color: var(--accent); }
+/* Buttons inside info pages keep their own colors (yellow-on-yellow otherwise). */
+.info a.btn-primary { color: var(--on-accent); }
+.info a.btn-ghost { color: var(--text); }
 .info-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
 .info-grid .card p { font-size: .92rem; }
 .steps { list-style: none; display: grid; gap: 14px; counter-reset: step; padding: 0; }

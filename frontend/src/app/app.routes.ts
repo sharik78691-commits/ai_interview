@@ -5,6 +5,7 @@ import { desktopOnlyGuard } from './core/screenshot/desktop-only.guard';
 import { LandingComponent } from './features/landing/landing.component';
 import { LoginComponent } from './features/auth/login/login.component';
 import { RegisterComponent } from './features/auth/register/register.component';
+import { SEO_PAGES } from './features/seo-landing/seo-pages';
 
 /**
  * Route map.
@@ -24,7 +25,7 @@ export const routes: Routes = [
     // Public marketing page — the primary SEO target.
     data: {
       seo: {
-        title: 'OyeInterview — AI Interview Assistant for Practice & Preparation',
+        title: 'AI Interview Assistant for Practice & Preparation | OyeInterview',
         description:
           'AI interview assistant for practice and preparation: resume-aware answers, STAR stories and code hints for technical, behavioral and coding interviews.',
         path: '/',
@@ -354,5 +355,13 @@ export const routes: Routes = [
       },
     },
   },
+  // Keyword landing pages ("AI interview assistant", "AI mock interview", ...)
+  // — prerendered and listed in sitemap.xml.
+  ...SEO_PAGES.map((p) => ({
+    path: p.slug,
+    loadComponent: () =>
+      import('./features/seo-landing/seo-landing.component').then((m) => m.SeoLandingComponent),
+    data: { page: p.slug, seo: { title: p.title, description: p.description, path: `/${p.slug}` } },
+  })),
   { path: '**', redirectTo: '' },
 ];

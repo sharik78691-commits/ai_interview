@@ -40,3 +40,36 @@ describe('home page SEO', () => {
     expect(seo.description.length).toBeLessThanOrEqual(160);
   });
 });
+
+describe('keyword landing pages SEO', () => {
+  const slugs = routes
+    .filter((r) => r.data?.['page'])
+    .map((r) => r.path as string);
+
+  it('registers, prerenders and indexes every keyword page', () => {
+    expect(slugs.length).toBeGreaterThanOrEqual(6);
+    const prerendered = new Set(serverRoutes.map((r) => r.path));
+    for (const slug of slugs) {
+      expect(prerendered.has(slug)).withContext(slug).toBeTrue();
+      const route = routes.find((r) => r.path === slug)!;
+      const seo = route.data!['seo'] as SeoConfig;
+      expect(seo.path).withContext(slug).toBe(`/${slug}`);
+      expect(seo.noindex).withContext(slug).toBeFalsy();
+      expect(seo.title.length).withContext(slug).toBeLessThanOrEqual(70);
+      expect(seo.description.length).withContext(slug).toBeLessThanOrEqual(160);
+    }
+  });
+
+  it('gives every keyword page a unique title and description', () => {
+    const seos = slugs.map((s) => routes.find((r) => r.path === s)!.data!['seo'] as SeoConfig);
+    expect(new Set(seos.map((s) => s.title)).size).toBe(seos.length);
+    expect(new Set(seos.map((s) => s.description)).size).toBe(seos.length);
+  });
+
+  it('has a pillar page targeting the head keyword "AI interview"', () => {
+    const seo = routes.find((r) => r.path === 'ai-interview')?.data?.['seo'] as SeoConfig;
+    expect(seo).toBeDefined();
+    expect(seo.title.startsWith('AI Interview')).toBeTrue();
+    expect(seo.description.toLowerCase()).toContain('ai interview');
+  });
+});

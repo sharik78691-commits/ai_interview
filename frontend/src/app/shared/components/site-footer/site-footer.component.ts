@@ -3,6 +3,7 @@ import { RouterLink } from '@angular/router';
 import { BUSINESS } from '../../../core/business-info';
 import { TUTORIAL } from '../../../core/tutorial';
 import { environment } from '../../../../environments/environment';
+import { SEO_PAGES } from '../../../features/seo-landing/seo-pages';
 
 /** Global footer: product, trust and legal links on every page. */
 @Component({
@@ -11,7 +12,7 @@ import { environment } from '../../../../environments/environment';
   imports: [RouterLink],
   template: `
     <footer class="site-foot">
-      <div class="container foot-grid">
+      <div class="container foot-grid" [class.with-guides]="!isDesktop">
         <div class="brand">
           <strong>OyeInterview</strong>
           <p class="muted small">
@@ -35,6 +36,14 @@ import { environment } from '../../../../environments/environment';
           <a routerLink="/about">About us</a>
           <a routerLink="/contact">Contact</a>
         </nav>
+        @if (!isDesktop) {
+          <nav aria-label="Guides" data-testid="footer-guides">
+            <h2>Guides</h2>
+            @for (g of guides; track g.slug) {
+              <a [routerLink]="'/' + g.slug">{{ g.label }}</a>
+            }
+          </nav>
+        }
         <nav aria-label="Trust">
           <h2>Trust</h2>
           <a routerLink="/trust">Trust &amp; data practices</a>
@@ -58,6 +67,7 @@ import { environment } from '../../../../environments/environment';
     `
       .site-foot { border-top: 1px solid var(--border); margin-top: 48px; padding: 36px 0 24px; }
       .foot-grid { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 28px; }
+      .foot-grid.with-guides { grid-template-columns: 2fr 1.2fr 1fr 1fr 1fr; }
       .brand strong { font-size: 1.05rem; }
       .brand p { margin-top: 8px; max-width: 340px; line-height: 1.6; }
       nav { display: grid; gap: 8px; align-content: start; }
@@ -65,7 +75,7 @@ import { environment } from '../../../../environments/environment';
       nav a { color: var(--text); font-size: .88rem; opacity: .85; }
       nav a:hover { opacity: 1; color: var(--accent); }
       .foot-base { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--border); }
-      @media (max-width: 760px) { .foot-grid { grid-template-columns: 1fr 1fr; } .brand { grid-column: 1 / -1; } }
+      @media (max-width: 760px) { .foot-grid, .foot-grid.with-guides { grid-template-columns: 1fr 1fr; } .brand { grid-column: 1 / -1; } }
     `,
   ],
 })
@@ -75,4 +85,6 @@ export class SiteFooterComponent {
   readonly tutorialUrl = TUTORIAL.url;
   /** The desktop app keeps its footer unchanged (web-only link). */
   readonly isDesktop = environment.electron;
+  /** Keyword landing pages, linked for crawlers and visitors (web only). */
+  readonly guides = SEO_PAGES;
 }

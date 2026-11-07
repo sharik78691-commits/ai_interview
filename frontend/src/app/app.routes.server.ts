@@ -1,4 +1,5 @@
 import { RenderMode, ServerRoute } from '@angular/ssr';
+import { SEO_PAGE_SLUGS } from './features/seo-landing/seo-pages';
 
 /**
  * Public, indexable pages rendered to static HTML at build time, so each one
@@ -25,6 +26,8 @@ export const PRERENDERED_PATHS = [
 
 export const serverRoutes: ServerRoute[] = [
   ...PRERENDERED_PATHS.map((path) => ({ path, renderMode: RenderMode.Prerender as const })),
+  // Keyword landing pages (features/seo-landing/seo-pages.ts).
+  ...SEO_PAGE_SLUGS.map((path) => ({ path, renderMode: RenderMode.Prerender as const })),
   // Signed-in app pages (dashboard, interview, settings, ...) stay client-rendered
   // from index.csr.html, exactly as before.
   { path: '**', renderMode: RenderMode.Client },
