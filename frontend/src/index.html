@@ -34,6 +34,22 @@
   <meta name="twitter:image" content="https://www.oyeinterview.com/og-image.png">
   <meta name="twitter:image:alt" content="OyeInterview — real-time AI interview assistant">
 
+  <!-- Google tag (gtag.js) — Google Ads / Analytics G-S3KW1HMT9Q.
+       Loads only on the live oyeinterview.com site, so the desktop app
+       (file://), localhost and preview builds never send analytics. -->
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    if (/(^|\.)oyeinterview\.com$/.test(location.hostname)) {
+      var gt = document.createElement('script');
+      gt.async = true;
+      gt.src = 'https://www.googletagmanager.com/gtag/js?id=G-S3KW1HMT9Q';
+      document.head.appendChild(gt);
+      gtag('js', new Date());
+      gtag('config', 'G-S3KW1HMT9Q');
+    }
+  </script>
+
   <link rel="icon" type="image/svg+xml" href="/logo.svg">
   <link rel="icon" type="image/x-icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
   <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
