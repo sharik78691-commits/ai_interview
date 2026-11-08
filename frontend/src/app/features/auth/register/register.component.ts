@@ -2,6 +2,7 @@ import { Component, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { AuthService } from '../../../core/auth/auth.service';
+import { trackEvent } from '../../../core/services/analytics';
 
 @Component({
   selector: 'app-register',
@@ -50,6 +51,8 @@ export class RegisterComponent {
       .subscribe({
         next: () => {
           this.loading = false;
+          // Google Ads / Analytics conversion (no-op off the live site).
+          trackEvent('sign_up', { method: 'email' });
           // Internal paths only (e.g. back to /pricing) — never another origin.
           const redirect = this.route.snapshot.queryParamMap.get('redirect') ?? '';
           const safe = redirect.startsWith('/') && !redirect.startsWith('//') ? redirect : '/dashboard';
