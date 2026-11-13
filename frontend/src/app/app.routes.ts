@@ -6,6 +6,7 @@ import { LandingComponent } from './features/landing/landing.component';
 import { LoginComponent } from './features/auth/login/login.component';
 import { RegisterComponent } from './features/auth/register/register.component';
 import { SEO_PAGES } from './features/seo-landing/seo-pages';
+import { environment } from '../environments/environment';
 
 /**
  * Route map.
@@ -43,6 +44,8 @@ export const routes: Routes = [
         description:
           'Sign in to OyeInterview for resume-aware AI guidance to prepare for your next technical, behavioral or coding interview.',
         path: '/login',
+        // Thin form page — keep it out of search results.
+        noindex: true,
       },
     },
   },
@@ -56,6 +59,8 @@ export const routes: Routes = [
         description:
           'Create a free OyeInterview account and start practising interviews with an AI assistant that adapts to your resume and target role.',
         path: '/register',
+        // Thin form page — keep it out of search results.
+        noindex: true,
       },
     },
   },
@@ -363,5 +368,22 @@ export const routes: Routes = [
       import('./features/seo-landing/seo-landing.component').then((m) => m.SeoLandingComponent),
     data: { page: p.slug, seo: { title: p.title, description: p.description, path: `/${p.slug}` } },
   })),
-  { path: '**', redirectTo: '' },
+  // Unknown URLs. Web: a noindex "Page not found" view, so made-up URLs are
+  // not indexed as copies of the home page (soft 404). Desktop keeps the
+  // original redirect to the home screen.
+  environment.electron
+    ? { path: '**', redirectTo: '' }
+    : {
+        path: '**',
+        loadComponent: () =>
+          import('./features/info/not-found/not-found.component').then((m) => m.NotFoundComponent),
+        data: {
+          seo: {
+            title: 'Page not found — OyeInterview',
+            description: 'This page does not exist. Visit the OyeInterview home page or pricing.',
+            path: '/',
+            noindex: true,
+          },
+        },
+      },
 ];
