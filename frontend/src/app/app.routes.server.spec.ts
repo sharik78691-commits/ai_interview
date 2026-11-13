@@ -7,14 +7,27 @@ import { SeoConfig } from './core/services/seo.service';
 describe('serverRoutes (prerendering)', () => {
   const byPath = new Map(routes.map((r) => [r.path, r]));
 
-  it('prerenders only real, indexable, public pages', () => {
+  // Prerendered for a fast first paint, but thin form pages kept out of the index.
+  const NOINDEX_PRERENDERED = new Set(['login', 'register']);
+
+  it('prerenders only real, public pages — indexable except the auth forms', () => {
     for (const path of PRERENDERED_PATHS) {
       const route = byPath.get(path);
       expect(route).withContext(path).toBeDefined();
       expect(route?.redirectTo).withContext(path).toBeUndefined();
-      expect((route?.data?.['seo'] as SeoConfig | undefined)?.noindex).withContext(path).toBeFalsy();
+      const noindex = (route?.data?.['seo'] as SeoConfig | undefined)?.noindex;
+      if (NOINDEX_PRERENDERED.has(path)) expect(noindex).withContext(path).toBeTrue();
+      else expect(noindex).withContext(path).toBeFalsy();
       expect(route?.canActivate ?? []).withContext(path).not.toContain(authGuard);
     }
+  });
+
+  it('serves unknown URLs a noindex "not found" page on the web (no soft-404 home copies)', () => {
+    const wildcard = routes[routes.length - 1];
+    expect(wildcard.path).toBe('**');
+    expect(wildcard.redirectTo).toBeUndefined();
+    expect(wildcard.loadComponent).toBeDefined();
+    expect((wildcard.data?.['seo'] as SeoConfig).noindex).toBeTrue();
   });
 
   it('keeps every signed-in page client-rendered', () => {
